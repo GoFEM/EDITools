@@ -17,61 +17,62 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "TipperPlot.h"
+#include "include/PhasePlot.h"
 
-TipperPlot::TipperPlot(QCustomPlot *plot):
+PhasePlot::PhasePlot(QCustomPlot *plot):
   MTDataPlot(plot)
 {
   set_layout();
 }
 
-void TipperPlot::set_observed_data(MTStationData &data, bool rescaleAxes)
+void PhasePlot::set_observed_data(MTStationData &data, bool rescaleAxes)
 {
   m_data = &data;
-  std::vector<dvector> tipper, tipper_err;
-  m_data->get_tipper(tipper, tipper_err);
-  const auto mask = m_data->tipper_mask();
 
-  set_graph_data(mask, tipper, tipper_err, data.frequencies());
+  std::vector<dvector> phase, phase_err;
+  m_data->get_phase(phase, phase_err);
+  const auto mask = m_data->impedance_mask();
+
+  set_graph_data(mask, phase, phase_err, data.frequencies());
 
   if(rescaleAxes)
   {
-    m_plot->rescaleAxes();
+    m_plot->xAxis->rescale();
     QCPRange xrange = m_plot->xAxis->range();
     m_plot->xAxis->setRange(xrange.lower / 2., xrange.upper * 2.);
-  }
 
+    m_plot->yAxis->setRange(-180, 180);
+  }
   m_plot->replot();
 }
 
-void TipperPlot::set_predicted_data(const MTStationData &data, bool rescaleAxes)
+void PhasePlot::set_predicted_data(const MTStationData &data, bool rescaleAxes)
 {
-  std::vector<dvector> tipper, tipper_err;
-  data.get_tipper(tipper, tipper_err);
+  std::vector<dvector> phase, phase_err;
+  data.get_phase(phase, phase_err);
 
-  set_graph_responses(tipper, data.frequencies());
+  set_graph_responses(phase, data.frequencies());
 
   if(rescaleAxes)
   {
-    m_plot->rescaleAxes();
+    m_plot->xAxis->rescale();
     QCPRange xrange = m_plot->xAxis->range();
     m_plot->xAxis->setRange(xrange.lower / 2., xrange.upper * 2.);
+    m_plot->yAxis->setRange(-180, 180);
   }
-
   m_plot->replot();
 }
 
-void TipperPlot::set_layout()
+void PhasePlot::set_layout()
 {
   QSharedPointer<QCPAxisTickerLog> logTicker(new QCPAxisTickerLog);
   m_plot->xAxis->setTicker(logTicker);
-  m_plot->xAxis->setScaleType(QCPAxis::stLogarithmic);
   m_plot->xAxis->setLabel("T [s]");
-  m_plot->yAxis->setLabel("Tipper");
+  m_plot->yAxis->setLabel(QString::fromWCharArray(L"Phase [\u00b0]"));
+  m_plot->xAxis->setScaleType(QCPAxis::stLogarithmic);
 
-  set_layout_generic({"Re Tzx", "Re Tzy", "Im Tzx", "Im Tzy"},
-                     {"Re Tzx", "Re Tzy", "Im Tzx", "Im Tzy"});
+  set_layout_generic({"XX", "XY", "YX", "YY"},
+                     {"XX", "XY", "YX", "YY"});
 
-  m_name2type = {{"Re Tzx", RealTzx}, {"Re Tzy", RealTzy},
-                 {"Im Tzx", ImagTzx}, {"Im Tzy", ImagTzy}};
+  m_name2type = {{"XX", PhsZxx}, {"XY", PhsZxy}, {"YX", PhsZyx}, {"YY", PhsZyy}};
 }

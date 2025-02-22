@@ -17,7 +17,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "MapPlot.h"
+#include "include/MapPlot.h"
 
 MapPlot::MapPlot(QCustomPlot *plot, QWidget* parent):
   m_plot(plot), m_parent(parent)

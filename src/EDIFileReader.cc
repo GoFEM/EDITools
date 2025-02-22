@@ -17,7 +17,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "EDIFileReader.h"
+#include "include/EDIFileReader.h"
 
 #include <fstream>
 #include <sstream>

@@ -17,7 +17,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "PhaseTensorPlot.h"
+#include "include/PhaseTensorPlot.h"
 
 PhaseTensorPlot::PhaseTensorPlot(QCustomPlot *plot):
   MTDataPlot(plot)

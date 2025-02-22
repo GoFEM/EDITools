@@ -17,9 +17,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "MTStationData.h"
+#include "include/MTStationData.h"
 
-#include "datum.h"
+#include "include/datum.h"
 
 #include <iomanip>
 #include <fstream>

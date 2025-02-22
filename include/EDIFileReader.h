@@ -27,11 +27,11 @@
 
 #include <Eigen/Dense>
 
-#include "MTStationData.h"
+#include "include/MTStationData.h"
 
-typedef std::map<std::string, std::string> StringMap;
-typedef Eigen::Matrix<std::complex<double>, 2, 2, Eigen::RowMajor> Matrix2cd;
-typedef Eigen::Matrix<double, 2, 2, Eigen::RowMajor> Matrix2d;
+using StringMap = std::map<std::string, std::string>;
+using Matrix2cd = Eigen::Matrix<std::complex<double>, 2, 2, Eigen::RowMajor>;
+using Matrix2d = Eigen::Matrix<double, 2, 2, Eigen::RowMajor>;
 
 struct DEFINEMEAS_DATA
 {
