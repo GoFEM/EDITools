@@ -17,7 +17,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "MTDataPlot.h"
+#include "include/MTDataPlot.h"
 
 MTDataPlot::MTDataPlot(QCustomPlot *plot):
   m_plot(plot), m_associated_plot(nullptr)
@@ -31,6 +31,9 @@ MTDataPlot::MTDataPlot(QCustomPlot *plot):
 
   connect(m_plot, SIGNAL(mouseMove(QMouseEvent*)), this, SLOT(showPointToolTip(QMouseEvent*)));
 }
+
+MTDataPlot::~MTDataPlot()
+{}
 
 void MTDataPlot::set_associated_plot(MTDataPlot &plot)
 {

@@ -49,10 +49,10 @@
 #include <boost/serialization/array.hpp>
 #include <boost/serialization/complex.hpp>
 
-#include "ApparentResistivityPlot.h"
-#include "PhasePlot.h"
-#include "PhaseTensorPlot.h"
-#include "TipperPlot.h"
+#include "include/ApparentResistivityPlot.h"
+#include "include/PhasePlot.h"
+#include "include/PhaseTensorPlot.h"
+#include "include/TipperPlot.h"
 #include "ExportGOFEMDialog.h"
 
 MainWindow::MainWindow(QWidget *parent) :

@@ -17,9 +17,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "MTSurveyData.h"
+#include "include/MTSurveyData.h"
 
-#include "datum.h"
+#include "include/datum.h"
 
 #include <fstream>
 

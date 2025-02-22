@@ -11,7 +11,7 @@
 #include <boost/archive/binary_oarchive.hpp>
 #include <boost/archive/binary_iarchive.hpp>
 
-#include "datum.h"
+#include "include/datum.h"
 
 using dvector = std::vector<double>;
 using cvector = std::vector<std::complex<double>>;

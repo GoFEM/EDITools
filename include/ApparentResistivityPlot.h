@@ -20,7 +20,7 @@
 #ifndef APPARENT_RESISTIVITY_PLOT_H
 #define APPARENT_RESISTIVITY_PLOT_H
 
-#include "MTDataPlot.h"
+#include "include/MTDataPlot.h"
 
 class ApparentResistivityPlot: public MTDataPlot
 {

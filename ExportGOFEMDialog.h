@@ -22,7 +22,7 @@
 
 #include <QDialog>
 
-#include "datum.h"
+#include "include/datum.h"
 
 #include <set>
 

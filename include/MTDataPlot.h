@@ -22,7 +22,7 @@
 
 #include "qcustomplot.h"
 
-#include "MTStationData.h"
+#include "include/MTStationData.h"
 
 class MyCustomPlot: public QCustomPlot
 {
@@ -58,6 +58,7 @@ class MTDataPlot: public QObject
 
 public:
   MTDataPlot(QCustomPlot* plot);
+  virtual ~MTDataPlot();
 
   virtual void set_observed_data(MTStationData &data, bool rescaleAxes = true) = 0;
   virtual void set_predicted_data(const MTStationData &data, bool rescaleAxes = false) = 0;
