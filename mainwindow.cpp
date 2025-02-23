@@ -93,7 +93,7 @@ MainWindow::MainWindow(QWidget *parent) :
 
   setupListContextMenu();
 
-  lastDirectory = "";
+  lastDirectory = QString();
 
   this->showMaximized();
 }
