@@ -93,7 +93,7 @@ MainWindow::MainWindow(QWidget *parent) :
 
   setupListContextMenu();
 
-  lastDirectory = "";
+  lastDirectory = "/home/ag/USArray_edi";
 
   this->showMaximized();
 }

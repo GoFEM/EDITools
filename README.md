@@ -2,6 +2,8 @@
 
 A simple GUI tool to work with large collections of [Magnetitelluric](https://en.wikipedia.org/wiki/Magnetotellurics) data in the Electrical Data Interchange (EDI) format, which is [SEG standard for MT and EMAP data](https://pubs.usgs.gov/of/2003/of03-056/Data/Edistd.doc).
 
+![](EDITools_demo.gif)
+
 ## Features
 
 - Visualize all transfer functions 
@@ -33,7 +35,7 @@ The code was tested for linux using GNU Toolchain. Provided dependencies above a
 
 ## Usage
 
-Check the animation below illustrating main features. 
+The animation above illustrating main features. 
 
 The following hotkeys are also useful when you click on a transfer function plot:
 
