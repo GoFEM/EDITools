@@ -21,6 +21,7 @@
 
 #include <fstream>
 #include <sstream>
+#include <iostream>
 
 #include <boost/lexical_cast.hpp>
 #include <boost/tokenizer.hpp>
@@ -252,9 +253,11 @@ void EDIFileReader::read_spectrasect_section(std::istringstream &ss)
 
                 }
 
-                unsigned n_data = boost::lexical_cast<unsigned>(str_tokens.back());
-                if(n_data != n_chanells*n_chanells)
-                    throw std::ios_base::failure("Error reading spectral data. Number of channels does not match number of data");
+                std::cout << str_tokens.back() << std::endl;
+
+                //unsigned n_data = boost::lexical_cast<unsigned>(str_tokens.back());
+                //if(n_data != n_chanells*n_chanells)
+                //    throw std::ios_base::failure("Error reading spectral data. Number of channels does not match number of data");
 
                 spectra.data.resize(n_chanells, n_chanells);
 
@@ -479,9 +482,9 @@ void EDIFileReader::calculate_data_from_spectra()
 
     station_data.set_size(spectrasect.spectra_data.size());
 
-    //  station_data.station_name = get_option_value<std::string>(head_options, "DATAID");
-    boost::filesystem::path p(m_edi_file_name);
-    station_data.station_name = p.stem().string();
+    station_data.station_name = get_option_value<std::string>(head_options, "DATAID");
+    //boost::filesystem::path p(m_edi_file_name);
+    //station_data.station_name = p.stem().string();
 
     station_data.file_name = m_edi_file_name;
 
