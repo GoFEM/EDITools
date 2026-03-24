@@ -57,6 +57,8 @@ void EDIFileReader::read_edi()
     if(!ifs.is_open())
         throw std::ios_base::failure("Cannot open file " + m_edi_file_name);
 
+    station_data.file_name = m_edi_file_name;
+
     std::string clean_content;
 
     std::string line;
@@ -145,6 +147,11 @@ void EDIFileReader::read_head_block(std::istringstream &ss)
     }
 
     empty_value = get_option_value<double>(head_options, "EMPTY");
+    
+    station_data.station_name = get_option_value<std::string>(head_options, "DATAID");
+    std::cout << "Station name: " << station_data.station_name << std::endl;
+    //boost::filesystem::path p(m_edi_file_name);
+    //station_data.station_name = p.stem().string();
 }
 
 void EDIFileReader::read_info_block(std::istringstream &ss)
@@ -482,12 +489,6 @@ void EDIFileReader::calculate_data_from_spectra()
 
     station_data.set_size(spectrasect.spectra_data.size());
 
-    station_data.station_name = get_option_value<std::string>(head_options, "DATAID");
-    //boost::filesystem::path p(m_edi_file_name);
-    //station_data.station_name = p.stem().string();
-
-    station_data.file_name = m_edi_file_name;
-
     for(unsigned fidx = 0; fidx < spectrasect.spectra_data.size(); ++fidx)
     {
         auto &spectra = spectrasect.spectra_data[fidx];
@@ -549,11 +550,6 @@ void EDIFileReader::calculate_data_from_mtsect()
 
     station_data.set_size(mtsect.frequencies.size());
     station_data.file_name = m_edi_file_name;
-
-    //  station_data.station_name = get_option_value<std::string>(head_options, "DATAID");
-
-    boost::filesystem::path p(m_edi_file_name);
-    station_data.station_name = p.stem().string();
 
     station_data.freqs = mtsect.frequencies;
 
