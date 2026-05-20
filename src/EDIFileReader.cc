@@ -148,10 +148,10 @@ void EDIFileReader::read_head_block(std::istringstream &ss)
 
     empty_value = get_option_value<double>(head_options, "EMPTY");
     
-    station_data.station_name = get_option_value<std::string>(head_options, "DATAID");
-    std::cout << "Station name: " << station_data.station_name << std::endl;
-    //boost::filesystem::path p(m_edi_file_name);
-    //station_data.station_name = p.stem().string();
+    //station_data.station_name = get_option_value<std::string>(head_options, "DATAID");
+    //std::cout << "Station name: " << station_data.station_name << std::endl;
+    boost::filesystem::path p(m_edi_file_name);
+    station_data.station_name = p.stem().string();
 }
 
 void EDIFileReader::read_info_block(std::istringstream &ss)
@@ -189,8 +189,20 @@ void EDIFileReader::read_definemeas_section(std::istringstream &ss)
             {
                 StringMap meas_options;
 
+                // Some writers emit "KEY= VALUE" with spaces after '='.
+                // Collapse them so the space tokenizer keeps key/value together.
+                std::string normalized = line;
+                for(size_t p = 0; (p = normalized.find('=', p)) != std::string::npos; ++p)
+                {
+                    size_t q = p + 1;
+                    while(q < normalized.size() && normalized[q] == ' ')
+                        ++q;
+                    if(q > p + 1)
+                        normalized.erase(p + 1, q - p - 1);
+                }
+
                 boost::char_separator<char> sep(" ");
-                boost::tokenizer<boost::char_separator<char>> tokens(line, sep);
+                boost::tokenizer<boost::char_separator<char>> tokens(normalized, sep);
 
                 for(auto &token: tokens)
                 {
@@ -242,8 +254,20 @@ void EDIFileReader::read_spectrasect_section(std::istringstream &ss)
             {
                 SPECTRA_DATA spectra;
 
+                // Some writers emit "KEY= VALUE" with spaces after '='.
+                // Collapse them so the space tokenizer keeps key/value together.
+                std::string normalized = line;
+                for(size_t p = 0; (p = normalized.find('=', p)) != std::string::npos; ++p)
+                {
+                    size_t q = p + 1;
+                    while(q < normalized.size() && normalized[q] == ' ')
+                        ++q;
+                    if(q > p + 1)
+                        normalized.erase(p + 1, q - p - 1);
+                }
+
                 boost::char_separator<char> sep(" ");
-                boost::tokenizer<boost::char_separator<char>> tokens(line, sep);
+                boost::tokenizer<boost::char_separator<char>> tokens(normalized, sep);
 
                 std::vector<std::string> str_tokens;
                 for(auto &token: tokens)

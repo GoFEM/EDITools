@@ -41,6 +41,9 @@
  */
 
 #include <QMessageBox>
+#include <QSettings>
+#include <QFileInfo>
+#include <QDir>
 
 #include <boost/archive/binary_iarchive.hpp>
 #include <boost/archive/binary_oarchive.hpp>
@@ -93,9 +96,23 @@ MainWindow::MainWindow(QWidget *parent) :
 
   setupListContextMenu();
 
-  lastDirectory = "/home/ag/USArray_edi";
+  lastDirectory = QSettings().value("lastDirectory", QDir::homePath()).toString();
 
   this->showMaximized();
+}
+
+void MainWindow::rememberDirectory(const QString &path)
+{
+  if(path.isEmpty())
+    return;
+
+  const QFileInfo info(path);
+  const QString dir = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
+  if(dir.isEmpty())
+    return;
+
+  lastDirectory = dir;
+  QSettings().setValue("lastDirectory", lastDirectory);
 }
 
 MainWindow::~MainWindow()
@@ -123,6 +140,8 @@ void MainWindow::on_actionLoad_EDI_triggered()
 
   if(files.size() > 0)
   {
+    rememberDirectory(files.first());
+
     std::vector<std::string> file_list;
     for(auto &file: files)
       file_list.push_back(file.toStdString());
@@ -284,8 +303,13 @@ void MainWindow::on_actionSave_project_triggered()
           lastDirectory,
           "Project file (*.mtd)");
 
+    if (projectFile.isEmpty())
+      return;
+
     if (!projectFile.endsWith(".mtd"))
       projectFile += ".mtd";
+
+    rememberDirectory(projectFile);
   }
 
   std::ofstream ofs(projectFile.toStdString());
@@ -310,6 +334,8 @@ void MainWindow::on_actionLoad_project_triggered()
 
   if(projectFile.length() == 0)
     return;
+
+  rememberDirectory(projectFile);
 
   std::ifstream ifs(projectFile.toStdString());
 
@@ -389,6 +415,8 @@ void MainWindow::on_actionExport_in_GoFEM_triggered()
 
   if(exportFile.length() == 0)
     return;
+
+  rememberDirectory(exportFile);
 
   std::vector<double> periods = mtSurvey->get_unique_periods();
 
@@ -489,11 +517,13 @@ void MainWindow::on_actionSave_as_PDF_triggered()
   QString exportFile = QFileDialog::getSaveFileName(
         this,
         "Save image",
-        "./" + sname + ".png",
+        lastDirectory + "/" + sname + ".png",
         "Image file (*.png)");
 
   if(exportFile.length() == 0)
     return;
+
+  rememberDirectory(exportFile);
 
   ui->splitter_4->grab().save(exportFile, "PNG", 100);
 }
@@ -508,6 +538,8 @@ void MainWindow::on_actionLoad_GoFEM_responses_triggered()
 
   if(responseFile.length() == 0)
     return;
+
+  rememberDirectory(responseFile);
 
   QString fileName = QFileInfo(responseFile).fileName();
 

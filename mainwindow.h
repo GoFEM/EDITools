@@ -77,6 +77,7 @@ private slots:
 
   private:
   void setupListContextMenu();
+  void rememberDirectory(const QString &path);
 
 private:
   Ui::MainWindow *ui;
