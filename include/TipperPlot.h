@@ -29,9 +29,28 @@ public:
 
   void set_observed_data(MTStationData &data, bool rescaleAxes = true);
   void set_predicted_data(const MTStationData &data, bool rescaleAxes = false);
+  void set_arrow_mode(bool on);
+  bool arrow_mode() const;
 
 private:
+  std::vector<RealDataType> get_graph_data_types(const QCPGraph *graph) const override;
   void set_layout();
+  void clear_arrow_items();
+  void clear_graph_data();
+  void update_legend();
+  void update_axis_style();
+  void set_arrow_selection_data(const std::vector<std::vector<bool>> &mask,
+                                const dvector &frequencies);
+  void draw_arrow(double period, double xComponent, double yComponent, const QPen &pen);
+  void draw_reference_arrow();
+  void draw_tipper_arrows(const std::vector<dvector> &tipper,
+                          const std::vector<std::vector<bool>> *mask,
+                          const dvector &frequencies,
+                          bool predicted);
+
+  bool m_arrowMode;
+  std::vector<QCPItemLine*> m_arrowItems;
+  std::vector<QCPAbstractItem*> m_referenceItems;
 };
 
 #endif // PHASE_PLOT_H

@@ -24,6 +24,16 @@
 
 #include "include/MTStationData.h"
 
+namespace PlotColors
+{
+  const std::vector<QColor> &componentColors();
+  const std::vector<QColor> &tipperScalarColors();
+  QColor masked();
+  QColor tipperReal();
+  QColor tipperImaginary();
+  QColor tipperMasked();
+}
+
 class MyCustomPlot: public QCustomPlot
 {
 public:
@@ -84,6 +94,8 @@ public slots:
   void showPointToolTip(QMouseEvent* event);
 
 protected:
+  virtual std::vector<RealDataType> get_graph_data_types(const QCPGraph *graph) const;
+
   void set_graph_data(const std::vector<std::vector<bool>> &mask,
                       const std::vector<std::vector<double>> &data,
                       const std::vector<std::vector<double>> &data_err,

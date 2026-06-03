@@ -76,7 +76,7 @@ namespace
 // version so the loader can distinguish both layouts and keep old .mtd files
 // readable.
 const std::uint32_t projectFileMagic = 0x45444954; // "EDIT"
-const std::uint32_t projectFileVersion = 2;
+const std::uint32_t projectFileVersion = 4;
 }
 
 MainWindow::MainWindow(QWidget *parent) :
@@ -85,6 +85,7 @@ MainWindow::MainWindow(QWidget *parent) :
 {
   ui->setupUi(this);
   ui->actionShow_error_bars->setChecked(true);
+  ui->actionPhase_wrap->setChecked(true);
 
   QLabel* stationInfoLabel = new QLabel(ui->splitter_4);
   stationInfoLabel->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
@@ -114,6 +115,7 @@ MainWindow::MainWindow(QWidget *parent) :
   plotHandlers[1]->set_associated_plot(*plotHandlers[0]);
 
   mapHandler.reset(new MapPlot(ui->mapPlot, this));
+  ui->actionShow_station_names->setChecked(true);
 
   setupListContextMenu();
 
@@ -156,6 +158,12 @@ MainWindow::PlotOptions MainWindow::currentPlotOptions() const
     if(auto *phasePlot = dynamic_cast<PhasePlot*>(plotHandlers[1].get()))
       options.phaseWrap = phasePlot->phase_wrap();
   }
+  options.showStationNames = ui->actionShow_station_names->isChecked();
+  if(plotHandlers.size() > 2)
+  {
+    if(auto *tipperPlot = dynamic_cast<TipperPlot*>(plotHandlers[2].get()))
+      options.tipperArrows = tipperPlot->arrow_mode();
+  }
 
   return options;
 }
@@ -170,11 +178,19 @@ void MainWindow::applyPlotOptions(const PlotOptions &options)
   }
 
   ui->actionPhase_wrap->setChecked(options.phaseWrap);
+  ui->actionShow_station_names->setChecked(options.showStationNames);
+  ui->actionTipper_arrows->setChecked(options.tipperArrows);
   if(plotHandlers.size() > 1)
   {
     if(auto *phasePlot = dynamic_cast<PhasePlot*>(plotHandlers[1].get()))
       phasePlot->set_phase_wrap(options.phaseWrap);
   }
+  if(plotHandlers.size() > 2)
+  {
+    if(auto *tipperPlot = dynamic_cast<TipperPlot*>(plotHandlers[2].get()))
+      tipperPlot->set_arrow_mode(options.tipperArrows);
+  }
+  mapHandler->set_station_names_visible(options.showStationNames);
 }
 
 MainWindow::~MainWindow()
@@ -259,7 +275,8 @@ void MainWindow::createStationsList()
 
 void MainWindow::updateMap()
 {
-  mapHandler->set_data(mtSurvey->get_stations_locations());
+  mapHandler->set_data(mtSurvey->get_stations_locations(),
+                       mtSurvey->get_stations_names());
 }
 
 void MainWindow::updatePlots()
@@ -422,8 +439,25 @@ void MainWindow::on_actionLoad_project_triggered()
       ia >> mtResponses;
 
       PlotOptions plotOptions;
-      if(version >= 2)
+      if(version == 2)
+      {
+        PlotOptionsV2 legacyPlotOptions;
+        ia >> legacyPlotOptions;
+        plotOptions.phaseWrap = legacyPlotOptions.phaseWrap;
+        plotOptions.axes = legacyPlotOptions.axes;
+      }
+      else if(version == 3)
+      {
+        PlotOptionsV3 legacyPlotOptions;
+        ia >> legacyPlotOptions;
+        plotOptions.phaseWrap = legacyPlotOptions.phaseWrap;
+        plotOptions.showStationNames = legacyPlotOptions.showStationNames;
+        plotOptions.axes = legacyPlotOptions.axes;
+      }
+      else if(version >= 4)
+      {
         ia >> plotOptions;
+      }
       applyPlotOptions(plotOptions);
       loaded = true;
     }
@@ -576,6 +610,22 @@ void MainWindow::on_actionPhase_wrap_toggled(bool on)
   {
     if(auto *phasePlot = dynamic_cast<PhasePlot*>(plotHandlers[1].get()))
       phasePlot->set_phase_wrap(on);
+  }
+
+  updatePlots();
+}
+
+void MainWindow::on_actionShow_station_names_toggled(bool on)
+{
+  mapHandler->set_station_names_visible(on);
+}
+
+void MainWindow::on_actionTipper_arrows_toggled(bool on)
+{
+  if(plotHandlers.size() > 2)
+  {
+    if(auto *tipperPlot = dynamic_cast<TipperPlot*>(plotHandlers[2].get()))
+      tipperPlot->set_arrow_mode(on);
   }
 
   updatePlots();

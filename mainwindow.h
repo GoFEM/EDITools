@@ -64,6 +64,8 @@ private slots:
 
   void on_actionActivate_masking_mode_toggled(bool on);
   void on_actionPhase_wrap_toggled(bool on);
+  void on_actionShow_station_names_toggled(bool on);
+  void on_actionTipper_arrows_toggled(bool on);
   void on_actionSave_as_PDF_triggered();
   void on_actionPlot_axis_ranges_triggered();
 
@@ -96,13 +98,45 @@ private slots:
 
   struct PlotOptions
   {
-    bool phaseWrap = false;
+    bool phaseWrap = true;
+    bool showStationNames = true;
+    bool tipperArrows = false;
     std::vector<PlotAxisOptions> axes;
 
     template<class Archive>
     void serialize(Archive & ar, const unsigned int version)
     {
       ar & phaseWrap;
+      ar & showStationNames;
+      ar & tipperArrows;
+      ar & axes;
+    }
+  };
+
+  struct PlotOptionsV2
+  {
+    bool phaseWrap = true;
+    std::vector<PlotAxisOptions> axes;
+
+    template<class Archive>
+    void serialize(Archive & ar, const unsigned int version)
+    {
+      ar & phaseWrap;
+      ar & axes;
+    }
+  };
+
+  struct PlotOptionsV3
+  {
+    bool phaseWrap = true;
+    bool showStationNames = true;
+    std::vector<PlotAxisOptions> axes;
+
+    template<class Archive>
+    void serialize(Archive & ar, const unsigned int version)
+    {
+      ar & phaseWrap;
+      ar & showStationNames;
       ar & axes;
     }
   };
