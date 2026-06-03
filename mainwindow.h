@@ -26,6 +26,7 @@
 #include <QAction>
 
 #include <memory>
+#include <vector>
 
 #include "include/MTSurveyData.h"
 #include "include/MapPlot.h"
@@ -62,7 +63,9 @@ private slots:
   void on_actionShow_error_bars_toggled(bool on);
 
   void on_actionActivate_masking_mode_toggled(bool on);
+  void on_actionPhase_wrap_toggled(bool on);
   void on_actionSave_as_PDF_triggered();
+  void on_actionPlot_axis_ranges_triggered();
 
   void on_stationList_currentRowChanged(int currentRow);
   void on_stationList_itemChanged(QListWidgetItem *item);
@@ -76,8 +79,38 @@ private slots:
   void on_actionAbout_EDI_Tools_triggered();
 
   private:
+  struct PlotAxisOptions
+  {
+    bool autoscale = true;
+    double lower = 0;
+    double upper = 0;
+
+    template<class Archive>
+    void serialize(Archive & ar, const unsigned int version)
+    {
+      ar & autoscale;
+      ar & lower;
+      ar & upper;
+    }
+  };
+
+  struct PlotOptions
+  {
+    bool phaseWrap = false;
+    std::vector<PlotAxisOptions> axes;
+
+    template<class Archive>
+    void serialize(Archive & ar, const unsigned int version)
+    {
+      ar & phaseWrap;
+      ar & axes;
+    }
+  };
+
   void setupListContextMenu();
   void rememberDirectory(const QString &path);
+  PlotOptions currentPlotOptions() const;
+  void applyPlotOptions(const PlotOptions &options);
 
 private:
   Ui::MainWindow *ui;

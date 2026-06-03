@@ -67,6 +67,11 @@ public:
 
   void set_error_bars_visible(bool on);
   void set_masking_mode(bool on);
+  void set_y_axis_autoscale(bool on);
+  bool y_axis_autoscale() const;
+  void set_y_axis_range(double lower, double upper);
+  QCPRange y_axis_range() const;
+  QCPRange fixed_y_axis_range() const;
 
   std::string get_graph_data_type_name(const QCPGraph *graph) const;
 
@@ -90,6 +95,9 @@ protected:
   void set_layout_generic(const std::vector<QString> &data_graph_names,
                           const std::vector<QString> &masked_graph_names);
 
+  void apply_axis_ranges(bool rescaleAxes, bool useDefaultYRange = false,
+                         const QCPRange &defaultYRange = QCPRange());
+
   void mask_selected_data(bool on);
 
 protected:
@@ -102,6 +110,9 @@ protected:
   std::vector<QCPErrorBars*> m_errorBars;
 
   std::map<std::string, RealDataType> m_name2type;
+
+  bool m_yAxisAutoscale;
+  QCPRange m_fixedYRange;
 };
 
 #endif

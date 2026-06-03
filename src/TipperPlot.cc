@@ -34,12 +34,7 @@ void TipperPlot::set_observed_data(MTStationData &data, bool rescaleAxes)
 
   set_graph_data(mask, tipper, tipper_err, data.frequencies());
 
-  if(rescaleAxes)
-  {
-    m_plot->rescaleAxes();
-    QCPRange xrange = m_plot->xAxis->range();
-    m_plot->xAxis->setRange(xrange.lower / 2., xrange.upper * 2.);
-  }
+  apply_axis_ranges(rescaleAxes);
 
   m_plot->replot();
 }
@@ -51,12 +46,7 @@ void TipperPlot::set_predicted_data(const MTStationData &data, bool rescaleAxes)
 
   set_graph_responses(tipper, data.frequencies());
 
-  if(rescaleAxes)
-  {
-    m_plot->rescaleAxes();
-    QCPRange xrange = m_plot->xAxis->range();
-    m_plot->xAxis->setRange(xrange.lower / 2., xrange.upper * 2.);
-  }
+  apply_axis_ranges(rescaleAxes);
 
   m_plot->replot();
 }

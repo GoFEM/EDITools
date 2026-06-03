@@ -21,7 +21,6 @@
 
 #include <fstream>
 #include <sstream>
-#include <iostream>
 
 #include <boost/lexical_cast.hpp>
 #include <boost/tokenizer.hpp>
@@ -284,11 +283,9 @@ void EDIFileReader::read_spectrasect_section(std::istringstream &ss)
 
                 }
 
-                std::cout << str_tokens.back() << std::endl;
-
-                //unsigned n_data = boost::lexical_cast<unsigned>(str_tokens.back());
-                //if(n_data != n_chanells*n_chanells)
-                //    throw std::ios_base::failure("Error reading spectral data. Number of channels does not match number of data");
+                unsigned n_data = boost::lexical_cast<unsigned>(str_tokens.back());
+                if(n_data != n_chanells*n_chanells)
+                    throw std::ios_base::failure("Error reading spectral data. Number of channels does not match number of data");
 
                 spectra.data.resize(n_chanells, n_chanells);
 
@@ -484,7 +481,7 @@ void EDIFileReader::read_mtsect_section(std::istringstream &ss)
     }
 }
 
-std::string EDIFileReader::trim(const std::string& str, const std::string& whitespace)
+std::string EDIFileReader::trim(const std::string& str, const std::string& whitespace) const
 {
     const auto strBegin = str.find_first_not_of(whitespace);
     if (strBegin == std::string::npos)
@@ -627,9 +624,14 @@ void EDIFileReader::calculate_data_from_mtsect()
 void EDIFileReader::fill_stations_location()
 {
     auto lat_str = get_option_value<std::string>(head_options, "LAT");
+    if(lat_str.empty())
+        lat_str = get_option_value<std::string>(definemeas.options, "REFLAT");
+
     auto long_str = get_option_value<std::string>(head_options, "LONG");
     if(long_str.empty())
         long_str = get_option_value<std::string>(head_options, "LON");
+    if(long_str.empty())
+        long_str = get_option_value<std::string>(definemeas.options, "REFLONG");
 
     std::vector<double> lat_dms, long_dms;
 
@@ -671,6 +673,8 @@ void EDIFileReader::fill_stations_location()
     }
 
     station_data.location[2] = get_option_value<double>(head_options, "ELEV");
+    if(station_data.location[2] == 0.)
+        station_data.location[2] = get_option_value<double>(definemeas.options, "REFELEV");
 }
 
 template<typename T>
@@ -683,9 +687,9 @@ T EDIFileReader::get_option_value(const StringMap &options,
 
     try
     {
-        return boost::lexical_cast<T>(it->second);
+        return boost::lexical_cast<T>(trim(it->second, " \t\r\n\""));
     }
-    catch(const boost::bad_lexical_cast &)
+    catch(const std::exception &)
     {
         return T();
     }

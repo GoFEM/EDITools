@@ -35,12 +35,7 @@ void ApparentResistivityPlot::set_observed_data(MTStationData &data, bool rescal
 
   set_graph_data(mask, appRes, appRes_err, data.frequencies());
 
-  if(rescaleAxes)
-  {
-    m_plot->rescaleAxes();
-    QCPRange xrange = m_plot->xAxis->range();
-    m_plot->xAxis->setRange(xrange.lower / 2., xrange.upper * 2.);
-  }
+  apply_axis_ranges(rescaleAxes);
 
   m_plot->replot();
 }
@@ -52,12 +47,7 @@ void ApparentResistivityPlot::set_predicted_data(const MTStationData &data, bool
 
   set_graph_responses(appRes, data.frequencies());
 
-  if(rescaleAxes)
-  {
-    m_plot->rescaleAxes();
-    QCPRange xrange = m_plot->xAxis->range();
-    m_plot->xAxis->setRange(xrange.lower / 2., xrange.upper * 2.);
-  }
+  apply_axis_ranges(rescaleAxes);
 
   m_plot->replot();
 }
