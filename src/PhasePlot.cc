@@ -113,7 +113,7 @@ void PhasePlot::set_phase_graph_data(const std::vector<std::vector<bool>> &mask,
     QVector<double> x, y, yerr;
     for(unsigned j = 0; j < frequencies.size(); ++j)
     {
-      if(mask[i][j] || appRes[i][j] <= minPhaseApparentResistivity)
+      if(!mask[i][j] || appRes[i][j] <= minPhaseApparentResistivity)
         continue;
 
       x.push_back(1.0 / frequencies[j]);
@@ -130,7 +130,7 @@ void PhasePlot::set_phase_graph_data(const std::vector<std::vector<bool>> &mask,
     QVector<double> x, y, yerr;
     for(unsigned j = 0; j < frequencies.size(); ++j)
     {
-      if(!mask[i][j] || appRes[i][j] <= minPhaseApparentResistivity)
+      if(mask[i][j] || appRes[i][j] <= minPhaseApparentResistivity)
         continue;
 
       x.push_back(1.0 / frequencies[j]);
