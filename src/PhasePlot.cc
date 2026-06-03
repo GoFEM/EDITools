@@ -25,7 +25,7 @@ const double minPhaseApparentResistivity = 1e-9;
 }
 
 PhasePlot::PhasePlot(QCustomPlot *plot):
-  MTDataPlot(plot), m_phaseWrap(false)
+  MTDataPlot(plot), m_phaseWrap(true)
 {
   set_layout();
 }
@@ -43,7 +43,7 @@ void PhasePlot::set_observed_data(MTStationData &data, bool rescaleAxes)
 
   set_phase_graph_data(mask, phase, phase_err, appRes, data.frequencies());
 
-  apply_axis_ranges(rescaleAxes, true, QCPRange(-180, 180));
+  apply_axis_ranges(rescaleAxes, true, QCPRange(0, 90));
   m_plot->replot();
 }
 
@@ -57,7 +57,7 @@ void PhasePlot::set_predicted_data(const MTStationData &data, bool rescaleAxes)
 
   set_phase_graph_responses(phase, appRes, data.frequencies());
 
-  apply_axis_ranges(rescaleAxes, true, QCPRange(-180, 180));
+  apply_axis_ranges(rescaleAxes, true, QCPRange(0, 90));
   m_plot->replot();
 }
 

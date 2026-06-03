@@ -20,12 +20,18 @@
 #include "include/MapPlot.h"
 
 MapPlot::MapPlot(QCustomPlot *plot, QWidget* parent):
-  m_plot(plot), m_parent(parent)
+  m_plot(plot), m_parent(parent), m_stationNamesVisible(false)
 {
   set_layout();
 }
 
 void MapPlot::set_data(const std::vector<std::array<double, 3>> &locations)
+{
+  set_data(locations, {});
+}
+
+void MapPlot::set_data(const std::vector<std::array<double, 3>> &locations,
+                       const std::vector<std::string> &names)
 {
   QVector<double> x(locations.size()),
                   y(locations.size());
@@ -37,6 +43,9 @@ void MapPlot::set_data(const std::vector<std::array<double, 3>> &locations)
   }
 
   m_plot->graph(0)->setData(x, y);
+  m_locations = locations;
+  m_names = names;
+  update_station_labels();
   m_plot->rescaleAxes();
   m_plot->replot();
 }
@@ -54,6 +63,13 @@ void MapPlot::set_selected_points(const std::vector<std::array<double, 3>> &loca
 
   m_plot->graph(1)->setData(x, y);
   m_plot->rescaleAxes();
+  m_plot->replot();
+}
+
+void MapPlot::set_station_names_visible(bool on)
+{
+  m_stationNamesVisible = on;
+  update_station_labels();
   m_plot->replot();
 }
 
@@ -88,4 +104,35 @@ void MapPlot::set_layout()
   m_plot->legend->setVisible(true);
   m_plot->legend->setBrush(QBrush(QColor(255,255,255,100)));
   m_plot->axisRect()->insetLayout()->setInsetAlignment(0, Qt::AlignLeft|Qt::AlignTop);
+}
+
+void MapPlot::update_station_labels()
+{
+  for(auto *label: m_stationLabels)
+    m_plot->removeItem(label);
+  m_stationLabels.clear();
+
+  if(!m_stationNamesVisible || m_names.size() != m_locations.size())
+    return;
+
+  QFont labelFont = m_plot->font();
+  labelFont.setPointSize(8);
+  labelFont.setWeight(QFont::Light);
+
+  for(unsigned i = 0; i < m_locations.size(); ++i)
+  {
+    QCPItemText *label = new QCPItemText(m_plot);
+    label->setSelectable(false);
+    label->setClipToAxisRect(true);
+    label->setClipAxisRect(m_plot->axisRect());
+    label->setLayer("grid");
+    label->setPositionAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    label->position->setType(QCPItemPosition::ptPlotCoords);
+    label->position->setCoords(m_locations[i][1], m_locations[i][0]);
+    label->setPadding(QMargins(6, 0, 0, 0));
+    label->setText(QString::fromStdString(m_names[i]));
+    label->setFont(labelFont);
+    label->setColor(QColor(40, 40, 40));
+    m_stationLabels.push_back(label);
+  }
 }

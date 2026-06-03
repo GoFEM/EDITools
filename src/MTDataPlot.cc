@@ -19,6 +19,94 @@
 
 #include "include/MTDataPlot.h"
 
+namespace PlotColors
+{
+namespace
+{
+const QColor &componentXX()
+{
+  static const QColor color("#2563EB");
+  return color;
+}
+
+const QColor &componentXY()
+{
+  static const QColor color("#E24A33");
+  return color;
+}
+
+const QColor &componentYX()
+{
+  static const QColor color("#059669");
+  return color;
+}
+
+const QColor &componentYY()
+{
+  static const QColor color("#D97706");
+  return color;
+}
+
+const QColor &tipperTzxImaginary()
+{
+  static const QColor color("#60A5FA");
+  return color;
+}
+
+const QColor &tipperTzyImaginary()
+{
+  static const QColor color("#FBBF24");
+  return color;
+}
+}
+
+const std::vector<QColor> &componentColors()
+{
+  static const std::vector<QColor> colors = {
+    componentXX(),
+    componentXY(),
+    componentYX(),
+    componentYY()
+  };
+  return colors;
+}
+
+const std::vector<QColor> &tipperScalarColors()
+{
+  static const std::vector<QColor> colors = {
+    componentXX(),
+    componentYY(),
+    tipperTzxImaginary(),
+    tipperTzyImaginary()
+  };
+  return colors;
+}
+
+QColor masked()
+{
+  static const QColor color("#9CA3AF");
+  return color;
+}
+
+QColor tipperReal()
+{
+  static const QColor color("#111827");
+  return color;
+}
+
+QColor tipperImaginary()
+{
+  static const QColor color("#6B7280");
+  return color;
+}
+
+QColor tipperMasked()
+{
+  static const QColor color("#BFC4CC");
+  return color;
+}
+}
+
 MTDataPlot::MTDataPlot(QCustomPlot *plot):
   m_plot(plot), m_associated_plot(nullptr),
   m_yAxisAutoscale(true), m_fixedYRange(plot->yAxis->range())
@@ -104,6 +192,15 @@ void MTDataPlot::showPointToolTip(QMouseEvent *event)
   m_plot->setToolTip(QString("X: %1\nY: %2").arg(x).arg(y));
 }
 
+std::vector<RealDataType> MTDataPlot::get_graph_data_types(const QCPGraph *graph) const
+{
+  auto itype = m_name2type.find(graph->name().toStdString());
+  if(itype == m_name2type.end())
+    return {};
+
+  return {itype->second};
+}
+
 void MTDataPlot::set_graph_data(const std::vector<std::vector<bool> > &mask,
                                 const std::vector<std::vector<double> > &data,
                                 const std::vector<std::vector<double> > &data_err,
@@ -169,7 +266,8 @@ void MTDataPlot::set_graph_responses(const std::vector<std::vector<double> > &da
 void MTDataPlot::set_layout_generic(const std::vector<QString> &data_graph_names,
                                     const std::vector<QString> &masked_graph_names)
 {
-  std::vector<QColor> colors = {Qt::cyan, Qt::red, Qt::blue, Qt::green};
+  const auto &colors = PlotColors::componentColors();
+  const QColor maskedColor = PlotColors::masked();
 
   for(unsigned i = 0; i < data_graph_names.size(); ++i)
   {
@@ -199,9 +297,9 @@ void MTDataPlot::set_layout_generic(const std::vector<QString> &data_graph_names
     QCPGraph* graph = m_plot->addGraph();
     graph->setName(masked_graph_names[i]);
     graph->setLineStyle(QCPGraph::lsNone);
-    graph->setScatterStyle(QCPScatterStyle(QCPScatterStyle::ssCircle, Qt::gray, 5));
+    graph->setScatterStyle(QCPScatterStyle(QCPScatterStyle::ssCircle, maskedColor, 5));
     graph->setSelectable(QCP::stMultipleDataRanges);
-    graph->selectionDecorator()->setScatterStyle(QCPScatterStyle(QCPScatterStyle::ssCircle, Qt::gray, 8));
+    graph->selectionDecorator()->setScatterStyle(QCPScatterStyle(QCPScatterStyle::ssCircle, maskedColor, 8));
     graph->removeFromLegend();
 
     QCPScatterStyle style = graph->selectionDecorator()->scatterStyle();
@@ -213,7 +311,7 @@ void MTDataPlot::set_layout_generic(const std::vector<QString> &data_graph_names
 
     m_errorBars.push_back(new QCPErrorBars(m_plot->xAxis, m_plot->yAxis));
     m_errorBars.back()->removeFromLegend();
-    m_errorBars.back()->setPen(QPen(Qt::gray));
+    m_errorBars.back()->setPen(QPen(maskedColor));
     m_errorBars.back()->setSelectable(QCP::stNone);
     m_errorBars.back()->setDataPlottable(graph);
   }
@@ -268,9 +366,9 @@ void MTDataPlot::mask_selected_data(bool on)
   for(auto &graph: selectedGraphs)
   {
     QCPDataSelection selection = graph->selection();
-
-    auto itype = m_name2type.find(graph->name().toStdString());
-    const RealDataType type = itype->second;
+    const std::vector<RealDataType> types = get_graph_data_types(graph);
+    if(types.empty())
+      continue;
 
     for (QCPDataRange dataRange: selection.dataRanges())
     {
@@ -278,7 +376,8 @@ void MTDataPlot::mask_selected_data(bool on)
       auto end = graph->data()->at(dataRange.end());
       for (auto it = begin; it != end; ++it)
       {
-        m_data->set_data_mask(type, 1. / it->key, on);
+        for(const auto type: types)
+          m_data->set_data_mask(type, 1. / it->key, on);
       }
     }
   }
@@ -301,9 +400,9 @@ void MTDataPlot::invMaskSelectedData()
   for(auto &graph: selectedGraphs)
   {
     QCPDataSelection selection = graph->selection();
-
-    auto itype = m_name2type.find(graph->name().toStdString());
-    const RealDataType type = itype->second;
+    const std::vector<RealDataType> types = get_graph_data_types(graph);
+    if(types.empty())
+      continue;
 
     dvector selected_freqs;
 
@@ -325,7 +424,8 @@ void MTDataPlot::invMaskSelectedData()
           break;
         }
 
-      m_data->set_data_mask(type, frequencies[i], found);
+      for(const auto type: types)
+        m_data->set_data_mask(type, frequencies[i], found);
     }
   }
 

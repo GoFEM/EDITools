@@ -58,7 +58,7 @@ void ApparentResistivityPlot::set_layout()
   m_plot->yAxis->setTicker(logTicker);
   m_plot->xAxis->setTicker(logTicker);
   m_plot->xAxis->setLabel("T [s]");
-  m_plot->yAxis->setLabel(QString::fromWCharArray(L"\u03c1 apparent [Ohm-m]"));
+  m_plot->yAxis->setLabel(QString::fromWCharArray(L"Apparent resistivity [\u03a9m]"));
   m_plot->xAxis->setScaleType(QCPAxis::stLogarithmic);
   m_plot->yAxis->setScaleType(QCPAxis::stLogarithmic);
 

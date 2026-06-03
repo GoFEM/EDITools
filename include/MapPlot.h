@@ -24,21 +24,31 @@
 
 #include "MTSurveyData.h"
 
+#include <string>
+
 class MapPlot
 {
 public:
   MapPlot(QCustomPlot* plot, QWidget *parent);
 
   void set_data(const std::vector<std::array<double, 3>> &locations);
+  void set_data(const std::vector<std::array<double, 3>> &locations,
+                const std::vector<std::string> &names);
   void set_selected_points(const std::vector<std::array<double, 3>> &locations);
+  void set_station_names_visible(bool on);
   void get_point_value(const unsigned idx, double &key, double &value) const;
 
 private:
   void set_layout();
+  void update_station_labels();
 
 private:
   QCustomPlot *m_plot;
   QWidget *m_parent;
+  std::vector<std::array<double, 3>> m_locations;
+  std::vector<std::string> m_names;
+  std::vector<QCPItemText*> m_stationLabels;
+  bool m_stationNamesVisible;
 };
 
 #endif // MAP_PLOT_H
