@@ -93,7 +93,7 @@ private:
   void read_spectrasect_section(std::istringstream &ss);
   void read_mtsect_section(std::istringstream &ss);
 
-  std::string trim(const std::string& str, const std::string& whitespace);
+  std::string trim(const std::string& str, const std::string& whitespace) const;
 
   template<typename T>
   T get_option_value(const StringMap &options,

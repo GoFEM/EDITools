@@ -20,7 +20,8 @@
 #include "include/MTDataPlot.h"
 
 MTDataPlot::MTDataPlot(QCustomPlot *plot):
-  m_plot(plot), m_associated_plot(nullptr)
+  m_plot(plot), m_associated_plot(nullptr),
+  m_yAxisAutoscale(true), m_fixedYRange(plot->yAxis->range())
 {
   m_contextMenu = new QMenu;
   m_contextMenu->addAction(tr("Mask"), this, &MTDataPlot::maskSelectedData);
@@ -52,6 +53,31 @@ void MTDataPlot::set_masking_mode(bool on)
     m_plot->setSelectionRectMode(QCP::srmSelect);
   else
     m_plot->setSelectionRectMode(QCP::srmNone);
+}
+
+void MTDataPlot::set_y_axis_autoscale(bool on)
+{
+  m_yAxisAutoscale = on;
+}
+
+bool MTDataPlot::y_axis_autoscale() const
+{
+  return m_yAxisAutoscale;
+}
+
+void MTDataPlot::set_y_axis_range(double lower, double upper)
+{
+  m_fixedYRange = QCPRange(lower, upper);
+}
+
+QCPRange MTDataPlot::y_axis_range() const
+{
+  return m_yAxisAutoscale ? m_plot->yAxis->range() : m_fixedYRange;
+}
+
+QCPRange MTDataPlot::fixed_y_axis_range() const
+{
+  return m_fixedYRange;
 }
 
 void MTDataPlot::dataSelected(bool selected)
@@ -212,6 +238,28 @@ void MTDataPlot::set_layout_generic(const std::vector<QString> &data_graph_names
 
   m_plot->setContextMenuPolicy(Qt::CustomContextMenu);
   connect(m_plot, SIGNAL(customContextMenuRequested(QPoint)), this, SLOT(plotContextRequest(QPoint)));
+}
+
+void MTDataPlot::apply_axis_ranges(bool rescaleAxes, bool useDefaultYRange,
+                                   const QCPRange &defaultYRange)
+{
+  if(rescaleAxes)
+  {
+    m_plot->xAxis->rescale();
+    QCPRange xrange = m_plot->xAxis->range();
+    m_plot->xAxis->setRange(xrange.lower / 2., xrange.upper * 2.);
+
+    if(m_yAxisAutoscale)
+    {
+      if(useDefaultYRange)
+        m_plot->yAxis->setRange(defaultYRange);
+      else
+        m_plot->yAxis->rescale();
+    }
+  }
+
+  if(!m_yAxisAutoscale)
+    m_plot->yAxis->setRange(m_fixedYRange);
 }
 
 void MTDataPlot::mask_selected_data(bool on)

@@ -149,7 +149,9 @@
      <string>Plot</string>
     </property>
     <addaction name="actionShow_error_bars"/>
+    <addaction name="actionPhase_wrap"/>
     <addaction name="actionActivate_masking_mode"/>
+    <addaction name="actionPlot_axis_ranges"/>
     <addaction name="actionSave_as_PDF"/>
    </widget>
    <widget class="QMenu" name="menuAbout">
@@ -236,9 +238,22 @@
     <string>Ctrl+D</string>
    </property>
   </action>
+  <action name="actionPhase_wrap">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Phase wrap</string>
+   </property>
+  </action>
   <action name="actionSave_as_PDF">
    <property name="text">
     <string>Save as PDF</string>
+   </property>
+  </action>
+  <action name="actionPlot_axis_ranges">
+   <property name="text">
+    <string>Axis ranges</string>
    </property>
   </action>
   <action name="actionLoad_GoFEM_responses">

@@ -20,7 +20,10 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
 
+#include <algorithm>
+#include <cstdint>
 #include <fstream>
+#include <stdexcept>
 /*
  * The EDI Tools application.
  *
@@ -44,9 +47,17 @@
 #include <QSettings>
 #include <QFileInfo>
 #include <QDir>
+#include <QCheckBox>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QDoubleValidator>
+#include <QGridLayout>
+#include <QLineEdit>
+#include <QVBoxLayout>
 
 #include <boost/archive/binary_iarchive.hpp>
 #include <boost/archive/binary_oarchive.hpp>
+#include <boost/archive/archive_exception.hpp>
 #include <boost/serialization/shared_ptr.hpp>
 #include <boost/serialization/vector.hpp>
 #include <boost/serialization/array.hpp>
@@ -57,6 +68,16 @@
 #include "include/PhaseTensorPlot.h"
 #include "include/TipperPlot.h"
 #include "ExportGOFEMDialog.h"
+
+namespace
+{
+// Project files created before plot options were added start directly with the
+// serialized survey object. New files start with this marker and a format
+// version so the loader can distinguish both layouts and keep old .mtd files
+// readable.
+const std::uint32_t projectFileMagic = 0x45444954; // "EDIT"
+const std::uint32_t projectFileVersion = 2;
+}
 
 MainWindow::MainWindow(QWidget *parent) :
   QMainWindow(parent),
@@ -113,6 +134,47 @@ void MainWindow::rememberDirectory(const QString &path)
 
   lastDirectory = dir;
   QSettings().setValue("lastDirectory", lastDirectory);
+}
+
+MainWindow::PlotOptions MainWindow::currentPlotOptions() const
+{
+  PlotOptions options;
+  options.axes.reserve(plotHandlers.size());
+
+  for(const auto &plot: plotHandlers)
+  {
+    const QCPRange range = plot->fixed_y_axis_range();
+    PlotAxisOptions axisOptions;
+    axisOptions.autoscale = plot->y_axis_autoscale();
+    axisOptions.lower = range.lower;
+    axisOptions.upper = range.upper;
+    options.axes.push_back(axisOptions);
+  }
+
+  if(plotHandlers.size() > 1)
+  {
+    if(auto *phasePlot = dynamic_cast<PhasePlot*>(plotHandlers[1].get()))
+      options.phaseWrap = phasePlot->phase_wrap();
+  }
+
+  return options;
+}
+
+void MainWindow::applyPlotOptions(const PlotOptions &options)
+{
+  const size_t nAxes = std::min(options.axes.size(), plotHandlers.size());
+  for(size_t i = 0; i < nAxes; ++i)
+  {
+    plotHandlers[i]->set_y_axis_range(options.axes[i].lower, options.axes[i].upper);
+    plotHandlers[i]->set_y_axis_autoscale(options.axes[i].autoscale);
+  }
+
+  ui->actionPhase_wrap->setChecked(options.phaseWrap);
+  if(plotHandlers.size() > 1)
+  {
+    if(auto *phasePlot = dynamic_cast<PhasePlot*>(plotHandlers[1].get()))
+      phasePlot->set_phase_wrap(options.phaseWrap);
+  }
 }
 
 MainWindow::~MainWindow()
@@ -312,13 +374,16 @@ void MainWindow::on_actionSave_project_triggered()
     rememberDirectory(projectFile);
   }
 
-  std::ofstream ofs(projectFile.toStdString());
+  std::ofstream ofs(projectFile.toStdString(), std::ios::binary);
 
   if(ofs.is_open())
   {
     boost::archive::binary_oarchive oa(ofs);
+    oa << projectFileMagic;
+    oa << projectFileVersion;
     oa << mtSurvey;
     oa << mtResponses;
+    oa << currentPlotOptions();
   }
 
   ofs.close();
@@ -337,16 +402,71 @@ void MainWindow::on_actionLoad_project_triggered()
 
   rememberDirectory(projectFile);
 
-  std::ifstream ifs(projectFile.toStdString());
+  bool loaded = false;
 
-  if(ifs.is_open())
+  try
   {
-    boost::archive::binary_iarchive ia(ifs);
-    ia >> mtSurvey;
-    ia >> mtResponses;
+    std::ifstream ifs(projectFile.toStdString(), std::ios::binary);
+    if(ifs.is_open())
+    {
+      boost::archive::binary_iarchive ia(ifs);
+      std::uint32_t magic = 0;
+      std::uint32_t version = 0;
+      ia >> magic;
+      ia >> version;
+
+      if(magic != projectFileMagic)
+        throw std::runtime_error("Legacy project format");
+
+      ia >> mtSurvey;
+      ia >> mtResponses;
+
+      PlotOptions plotOptions;
+      if(version >= 2)
+        ia >> plotOptions;
+      applyPlotOptions(plotOptions);
+      loaded = true;
+    }
+  }
+  catch(const std::exception&)
+  {
+    // No valid marker/version was found, so retry as the original project
+    // layout: mtSurvey followed by mtResponses, with no plot options.
+    try
+    {
+      std::ifstream ifs(projectFile.toStdString(), std::ios::binary);
+      if(ifs.is_open())
+      {
+        boost::archive::binary_iarchive ia(ifs);
+        ia >> mtSurvey;
+        ia >> mtResponses;
+
+        PlotOptions defaultPlotOptions;
+        for(const auto &plot: plotHandlers)
+        {
+          const QCPRange range = plot->y_axis_range();
+          PlotAxisOptions axisOptions;
+          axisOptions.autoscale = true;
+          axisOptions.lower = range.lower;
+          axisOptions.upper = range.upper;
+          defaultPlotOptions.axes.push_back(axisOptions);
+        }
+        applyPlotOptions(defaultPlotOptions);
+        loaded = true;
+      }
+    }
+    catch(const std::exception&)
+    {
+      loaded = false;
+    }
   }
 
-  ifs.close();
+  if(!loaded)
+  {
+    QMessageBox::critical(this, tr("Load project"),
+                          tr("Failed to load project file."));
+    return;
+  }
 
   createStationsList();
   updateMap();
@@ -450,6 +570,17 @@ void MainWindow::on_actionShow_error_bars_toggled(bool on)
   updatePlots();
 }
 
+void MainWindow::on_actionPhase_wrap_toggled(bool on)
+{
+  if(plotHandlers.size() > 1)
+  {
+    if(auto *phasePlot = dynamic_cast<PhasePlot*>(plotHandlers[1].get()))
+      phasePlot->set_phase_wrap(on);
+  }
+
+  updatePlots();
+}
+
 void MainWindow::on_stationList_customContextMenuRequested(const QPoint &pos)
 {
   pointedItem = ui->stationList->itemAt(pos);
@@ -528,6 +659,106 @@ void MainWindow::on_actionSave_as_PDF_triggered()
   ui->splitter_4->grab().save(exportFile, "PNG", 100);
 }
 
+void MainWindow::on_actionPlot_axis_ranges_triggered()
+{
+  QDialog dialog(this);
+  dialog.setWindowTitle(tr("Axis ranges"));
+
+  QVBoxLayout* layout = new QVBoxLayout(&dialog);
+  QCheckBox* autoscaleCheck = new QCheckBox(tr("Autoscale Y ranges when changing station"), &dialog);
+  autoscaleCheck->setChecked(plotHandlers.empty() ? true : plotHandlers.front()->y_axis_autoscale());
+  layout->addWidget(autoscaleCheck);
+
+  QGridLayout* grid = new QGridLayout;
+  grid->addWidget(new QLabel(tr("Plot"), &dialog), 0, 0);
+  grid->addWidget(new QLabel(tr("Y min"), &dialog), 0, 1);
+  grid->addWidget(new QLabel(tr("Y max"), &dialog), 0, 2);
+
+  const QStringList plotNames = {
+    tr("Apparent resistivity"),
+    tr("Phase"),
+    tr("Tipper"),
+    tr("Phase tensor")
+  };
+
+  QVector<QLineEdit*> lowerEdits;
+  QVector<QLineEdit*> upperEdits;
+  QDoubleValidator* rangeValidator = new QDoubleValidator(&dialog);
+  rangeValidator->setNotation(QDoubleValidator::ScientificNotation);
+
+  for(int i = 0; i < plotNames.size(); ++i)
+  {
+    const QCPRange range = plotHandlers[i]->y_axis_range();
+    QLineEdit* lower = new QLineEdit(QString::number(range.lower, 'g', 12), &dialog);
+    QLineEdit* upper = new QLineEdit(QString::number(range.upper, 'g', 12), &dialog);
+    lower->setValidator(rangeValidator);
+    upper->setValidator(rangeValidator);
+
+    grid->addWidget(new QLabel(plotNames[i], &dialog), i + 1, 0);
+    grid->addWidget(lower, i + 1, 1);
+    grid->addWidget(upper, i + 1, 2);
+
+    lowerEdits.push_back(lower);
+    upperEdits.push_back(upper);
+  }
+
+  layout->addLayout(grid);
+
+  auto setRangesEnabled = [&](bool autoscale)
+  {
+    for(auto *edit: lowerEdits)
+      edit->setEnabled(!autoscale);
+    for(auto *edit: upperEdits)
+      edit->setEnabled(!autoscale);
+  };
+  connect(autoscaleCheck, &QCheckBox::toggled, &dialog, setRangesEnabled);
+  setRangesEnabled(autoscaleCheck->isChecked());
+
+  QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
+                                                   Qt::Horizontal, &dialog);
+  layout->addWidget(buttons);
+  connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+  connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+  if(dialog.exec() != QDialog::Accepted)
+    return;
+
+  const bool autoscaleY = autoscaleCheck->isChecked();
+  for(int i = 0; i < plotHandlers.size(); ++i)
+  {
+    bool lowerOk = false;
+    bool upperOk = false;
+    const double lower = lowerEdits[i]->text().toDouble(&lowerOk);
+    const double upper = upperEdits[i]->text().toDouble(&upperOk);
+
+    if(!lowerOk || !upperOk)
+    {
+      QMessageBox::warning(this, tr("Invalid axis range"),
+                           tr("Y min and Y max must be valid numbers. Scientific notation such as 1e-6 is accepted."));
+      return;
+    }
+
+    if(lower >= upper)
+    {
+      QMessageBox::warning(this, tr("Invalid axis range"),
+                           tr("Y min must be smaller than Y max."));
+      return;
+    }
+
+    if(i == 0 && (lower <= 0 || upper <= 0))
+    {
+      QMessageBox::warning(this, tr("Invalid axis range"),
+                           tr("Apparent resistivity uses a logarithmic axis, so its Y range must be positive."));
+      return;
+    }
+
+    plotHandlers[i]->set_y_axis_autoscale(autoscaleY);
+    plotHandlers[i]->set_y_axis_range(lower, upper);
+  }
+
+  updatePlots();
+}
+
 void MainWindow::on_actionLoad_GoFEM_responses_triggered()
 {
   QString responseFile = QFileDialog::getOpenFileName(
@@ -578,4 +809,3 @@ void MainWindow::on_actionAbout_EDI_Tools_triggered()
         "<p><b>License:</b> GNU GPL 3.0</p>"
         );
 }
-
