@@ -7,6 +7,7 @@
 #include <complex>
 #include <map>
 #include <set>
+#include <limits>
 
 #include <boost/archive/binary_oarchive.hpp>
 #include <boost/archive/binary_iarchive.hpp>
@@ -47,13 +48,16 @@ class MTStationData
 {
   friend class boost::serialization::access;
   friend class EDIFileReader;
+  friend struct NativeMTStationAccess;
 
 private:
   std::string station_name;
   std::string file_name;
 
   std::vector<double> freqs;
-  std::array<double, 3> location;
+  std::array<double, 3> location{{std::numeric_limits<double>::quiet_NaN(),
+                                std::numeric_limits<double>::quiet_NaN(),
+                                std::numeric_limits<double>::quiet_NaN()}};
 
   std::vector<cvector> Z;
   std::vector<dvector> Z_err, Z_err_floor;
@@ -80,6 +84,7 @@ public:
 
   std::string file_path() const;
   const std::array<double, 3> &position() const;
+  void set_position(const std::array<double, 3> &position) { location = position; }
 
   bool active() const;
   void set_active(bool flag);
@@ -126,7 +131,8 @@ public:
 
   void write(std::ofstream &ofs,
              const std::vector<RealDataType> &types,
-             const std::vector<double> &selected_periods) const;
+             const std::vector<double> &selected_periods,
+             std::set<double> *written_frequencies = nullptr) const;
 
   // Calculates RMS with other stations
   double rms(const MTStationData &other) const;

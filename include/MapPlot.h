@@ -36,7 +36,9 @@ public:
                 const std::vector<std::string> &names);
   void set_selected_points(const std::vector<std::array<double, 3>> &locations);
   void set_station_names_visible(bool on);
+  void set_coordinate_labels(bool utm, bool centered);
   void get_point_value(const unsigned idx, double &key, double &value) const;
+  std::string station_name(unsigned idx) const;
 
 private:
   void set_layout();

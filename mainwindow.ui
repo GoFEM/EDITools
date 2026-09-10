@@ -135,6 +135,7 @@
     <addaction name="actionSave_project"/>
     <addaction name="actionLoad_project"/>
     <addaction name="actionExport_in_GoFEM"/>
+    <addaction name="actionExport_native_MT"/>
     <addaction name="actionLoad_GoFEM_responses"/>
    </widget>
    <widget class="QMenu" name="menuData">
@@ -156,6 +157,11 @@
     <addaction name="actionPlot_axis_ranges"/>
     <addaction name="actionSave_as_PDF"/>
    </widget>
+   <widget class="QMenu" name="menuCoordinates">
+    <property name="title"><string>Coordinates</string></property>
+    <addaction name="actionConvert_UTM"/>
+    <addaction name="actionGeographic_coordinates"/>
+   </widget>
    <widget class="QMenu" name="menuAbout">
     <property name="title">
      <string>About</string>
@@ -164,6 +170,7 @@
    </widget>
    <addaction name="menuFile"/>
    <addaction name="menuData"/>
+   <addaction name="menuCoordinates"/>
    <addaction name="menuPlot"/>
    <addaction name="menuAbout"/>
   </widget>
@@ -209,6 +216,17 @@
    <property name="text">
     <string>Export in GoFEM</string>
    </property>
+  </action>
+  <action name="actionExport_native_MT">
+   <property name="text">
+    <string>Export to MT Inversion…</string>
+   </property>
+  </action>
+  <action name="actionConvert_UTM">
+   <property name="text"><string>Convert latitude/longitude to UTM…</string></property>
+  </action>
+  <action name="actionGeographic_coordinates">
+   <property name="text"><string>Show latitude/longitude on map</string></property>
   </action>
   <action name="actionSet_error_floor">
    <property name="text">

@@ -23,6 +23,7 @@ set(TARGET main)
 project(${TARGET} CXX Fortran)
 
 find_package(Qt5Widgets)
+find_package(PROJ REQUIRED CONFIG)
 
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
@@ -33,6 +34,8 @@ set( Srcs ${QCUSTOMPLOT_PATH}/qcustomplot.cpp
           src/mtcomp.f
           src/mtcomp_interface.f90
           src/MTStationData.cc
+          src/NativeMT.cc
+          src/SurveyCoordinates.cc
           src/MTSurveyData.cc
           src/EDIFileReader.cc
           src/MTDataPlot.cc
@@ -42,6 +45,8 @@ set( Srcs ${QCUSTOMPLOT_PATH}/qcustomplot.cpp
           src/PhaseTensorPlot.cc
           src/MapPlot.cc
           ExportGOFEMDialog.cpp
+          ExportNativeMTDialog.cpp
+          SurveyCoordinatesDialog.cpp
           mainwindow.cpp
           ${TARGET}.cpp)
 
@@ -86,3 +91,24 @@ add_executable(${TARGET} ${Srcs} ${Hdrs} ${UI_Srcs} ${MOC_Hdrs} ${QRC_Srcs}
     README.md)
 qt5_use_modules(${TARGET} Core Gui Widgets PrintSupport)
 target_link_libraries(${TARGET} ${Boost_LIBRARIES})
+target_link_libraries(${TARGET} PROJ::proj)
+
+include(CTest)
+if(BUILD_TESTING)
+  add_executable(native_mt_test tests/native_mt_test.cc src/NativeMT.cc src/MTStationData.cc)
+  set_target_properties(native_mt_test PROPERTIES AUTOMOC OFF AUTOUIC OFF)
+  target_include_directories(native_mt_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  target_link_libraries(native_mt_test ${Boost_LIBRARIES})
+  target_compile_definitions(native_mt_test PRIVATE NATIVE_MT_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/tests/data")
+  add_test(NAME native_mt_format COMMAND native_mt_test)
+  add_executable(native_mt_dialog_test tests/native_mt_dialog_test.cc ExportNativeMTDialog.cpp
+    SurveyCoordinatesDialog.cpp src/SurveyCoordinates.cc
+    src/NativeMT.cc src/MTStationData.cc src/MTSurveyData.cc src/EDIFileReader.cc
+    src/mtcomp.f src/mtcomp_interface.f90)
+  set_target_properties(native_mt_dialog_test PROPERTIES AUTOMOC OFF AUTOUIC OFF
+    Fortran_MODULE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native_mt_dialog_modules")
+  target_include_directories(native_mt_dialog_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  target_link_libraries(native_mt_dialog_test Qt5::Widgets ${Boost_LIBRARIES} PROJ::proj)
+  add_test(NAME native_mt_dialog COMMAND native_mt_dialog_test)
+  set_tests_properties(native_mt_dialog PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 20)
+endif()
