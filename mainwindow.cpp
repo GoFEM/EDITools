@@ -54,6 +54,7 @@
 #include <QGridLayout>
 #include <QLineEdit>
 #include <QVBoxLayout>
+#include <QSignalBlocker>
 
 #include <boost/archive/binary_iarchive.hpp>
 #include <boost/archive/binary_oarchive.hpp>
@@ -68,6 +69,8 @@
 #include "include/PhaseTensorPlot.h"
 #include "include/TipperPlot.h"
 #include "ExportGOFEMDialog.h"
+#include "ExportNativeMTDialog.h"
+#include "SurveyCoordinatesDialog.h"
 
 namespace
 {
@@ -115,6 +118,34 @@ MainWindow::MainWindow(QWidget *parent) :
   plotHandlers[1]->set_associated_plot(*plotHandlers[0]);
 
   mapHandler.reset(new MapPlot(ui->mapPlot, this));
+  auto *mapControls = new QWidget(ui->splitter_3);
+  auto *mapControlsLayout = new QVBoxLayout(mapControls);
+  mapControlsLayout->setContentsMargins(4, 0, 4, 0);
+  mapCoordinateSwitch = new QComboBox(mapControls);
+  mapCoordinateSwitch->setObjectName("mapCoordinateSwitch");
+  mapCoordinateSwitch->addItems({tr("Lat/Lon"), tr("UTM")});
+  mapCoordinateSwitch->setToolTip(tr("Map coordinates only; export coordinates and the UTM origin are preserved."));
+  auto *mapSwitchLayout = new QHBoxLayout;
+  mapSwitchLayout->addWidget(new QLabel(tr("Map coordinates:"), mapControls));
+  mapSwitchLayout->addWidget(mapCoordinateSwitch);
+  mapControlsLayout->addLayout(mapSwitchLayout);
+  coordinateInfoLabel = new QLabel(tr("Latitude / longitude (degrees)"), mapControls);
+  coordinateInfoLabel->setWordWrap(true);
+  coordinateInfoLabel->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
+  coordinateInfoLabel->setMaximumHeight(85);
+  mapControlsLayout->addWidget(coordinateInfoLabel);
+  mapControls->setMaximumHeight(125);
+  ui->splitter_3->addWidget(mapControls);
+  ui->splitter_3->setCollapsible(ui->splitter_3->indexOf(mapControls), false);
+  connect(mapCoordinateSwitch, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this] {
+    try {
+      updateMap();
+    } catch(const std::exception &e) {
+      const QSignalBlocker blocker(mapCoordinateSwitch);
+      mapCoordinateSwitch->setCurrentIndex(mapCoordinates.utm ? 1 : 0);
+      QMessageBox::warning(this, tr("Map coordinates"), QString::fromUtf8(e.what()));
+    }
+  });
   ui->actionShow_station_names->setChecked(true);
 
   setupListContextMenu();
@@ -275,8 +306,24 @@ void MainWindow::createStationsList()
 
 void MainWindow::updateMap()
 {
-  mapHandler->set_data(mtSurvey->get_stations_locations(),
+  if(!mtSurvey) return;
+  SurveyCoordinates view;
+  if(mapCoordinateSwitch->currentIndex() == 1)
+    view = mtSurvey->coordinates().utm ? mtSurvey->coordinates() :
+      SurveyCoordinates::suggested(mtSurvey->geographic_locations());
+  const auto locations = view.transform(mtSurvey->geographic_locations());
+  mapCoordinates = view;
+  const auto &coordinates = view.utm ? view : mtSurvey->coordinates();
+  mapHandler->set_coordinate_labels(view.utm, view.centered);
+  coordinateInfoLabel->setText(coordinates.utm ?
+    tr("WGS84 / UTM %1%2\nE₀: %3 m\nN₀: %4 m")
+      .arg(coordinates.zone).arg(coordinates.north ? "N" : "S")
+      .arg(coordinates.origin_easting, 0, 'g', 17).arg(coordinates.origin_northing, 0, 'g', 17) :
+    tr("Latitude / longitude (degrees)"));
+  coordinateInfoLabel->setToolTip(QString::fromStdString(coordinates.description()));
+  mapHandler->set_data(locations,
                        mtSurvey->get_stations_names());
+  on_stationList_itemSelectionChanged();
 }
 
 void MainWindow::updatePlots()
@@ -321,10 +368,7 @@ void MainWindow::stationSelected(const QCPDataSelection &selection)
 
     if(range.length() > 0)
     {
-      double lon, lat;
-      mapHandler->get_point_value(range.begin(), lon, lat);
-
-      QString name(mtSurvey->closest_station_name(lat, lon).c_str());
+      const QString name = QString::fromStdString(mapHandler->station_name(range.begin()));
 
       auto items = ui->stationList->findItems(name, Qt::MatchExactly);
       if(items.size() > 0)
@@ -547,13 +591,14 @@ void MainWindow::on_actionDecimate_triggered()
 
 void MainWindow::on_stationList_itemSelectionChanged()
 {
-  std::vector<std::string> names;
+  if(!mtSurvey) return;
+  std::vector<std::array<double, 3>> geographic;
 
   auto selection = ui->stationList->selectedItems();
   for(auto sitem: selection)
-    names.push_back(sitem->text().toStdString());
+    geographic.push_back(mtSurvey->get_station_data(sitem->text().toStdString()).position());
 
-  mapHandler->set_selected_points(mtSurvey->get_stations_locations(names));
+  mapHandler->set_selected_points(mapCoordinates.transform(geographic));
 }
 
 void MainWindow::on_actionExport_in_GoFEM_triggered()
@@ -580,8 +625,41 @@ void MainWindow::on_actionExport_in_GoFEM_triggered()
   {
     auto selected_data_types = dlg->getSelectedDataTypes();
     auto selected_periods = dlg->getSelectedPeriods();
-    mtSurvey->write_gofem(exportFile.toStdString(), selected_data_types, selected_periods);
+    try {
+      mtSurvey->write_gofem(exportFile.toStdString(), selected_data_types, selected_periods);
+    } catch(const std::exception &e) {
+      QMessageBox::warning(this, tr("Export data"), QString::fromUtf8(e.what()));
+    }
   }
+}
+
+void MainWindow::on_actionExport_native_MT_triggered()
+{
+  if(mtSurvey == nullptr) return;
+  ExportNativeMTDialog dialog(*mtSurvey, lastDirectory, this);
+  if(dialog.exec() == QDialog::Accepted) rememberDirectory(dialog.exportedFile());
+  updateMap();
+}
+
+void MainWindow::on_actionConvert_UTM_triggered()
+{
+  if(mtSurvey == nullptr) return;
+  try {
+    SurveyCoordinatesDialog dialog(*mtSurvey, this);
+    if(dialog.exec() == QDialog::Accepted) {
+      const QSignalBlocker blocker(mapCoordinateSwitch);
+      mapCoordinateSwitch->setCurrentIndex(1);
+      updateMap();
+    }
+  } catch(const std::exception &e) {
+    QMessageBox::warning(this, tr("Coordinate conversion"), QString::fromUtf8(e.what()));
+  }
+}
+
+void MainWindow::on_actionGeographic_coordinates_triggered()
+{
+  if(mtSurvey == nullptr) return;
+  mapCoordinateSwitch->setCurrentIndex(0);
 }
 
 void MainWindow::on_actionSet_error_floor_triggered()

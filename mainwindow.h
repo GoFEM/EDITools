@@ -24,6 +24,7 @@
 #include <QListWidgetItem>
 #include <QMenu>
 #include <QAction>
+#include <QComboBox>
 
 #include <memory>
 #include <vector>
@@ -59,6 +60,9 @@ private slots:
   void on_actionLoad_project_triggered();
   void on_actionDecimate_triggered();
   void on_actionExport_in_GoFEM_triggered();
+  void on_actionExport_native_MT_triggered();
+  void on_actionConvert_UTM_triggered();
+  void on_actionGeographic_coordinates_triggered();
   void on_actionSet_error_floor_triggered();
   void on_actionShow_error_bars_toggled(bool on);
 
@@ -167,6 +171,9 @@ private:
   QString projectFile, lastDirectory;
 
   QLabel *stationInfoLabel;
+  QLabel *coordinateInfoLabel;
+  QComboBox *mapCoordinateSwitch;
+  SurveyCoordinates mapCoordinates;
 };
 
 #endif // MAINWINDOW_H

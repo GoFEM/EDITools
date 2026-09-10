@@ -1,0 +1,25 @@
+# frequency receiver observable component value error
+1.0 S01 impedance_xx real  0.001  0.0001
+1.0 S01 impedance_xx imag  0.001  0.0001
+1.0 S01 impedance_xy real  0.002  0.0001
+1.0 S01 impedance_xy imag  0.002  0.0001
+1.0 S01 impedance_yx real -0.002  0.0001
+1.0 S01 impedance_yx imag -0.002  0.0001
+1.0 S01 impedance_yy real  0.001  0.0001
+1.0 S01 impedance_yy imag  0.001  0.0001
+1.0 S01 induction_x real  0.0    0.01
+1.0 S01 induction_x imag  0.0    0.01
+1.0 S01 induction_y real  0.0    0.01
+1.0 S01 induction_y imag  0.0    0.01
+1.0 S01 phase_tensor_xx value 1.0 0.02
+1.0 S01 phase_tensor_xy value 0.0 0.02
+1.0 S01 phase_tensor_yx value 0.0 0.02
+1.0 S01 phase_tensor_yy value 1.0 0.02
+1.0 S01 apparent_resistivity_xx value 0.25330295910584444 0.02
+1.0 S01 apparent_resistivity_xy value 1.0132118364233778 0.05
+1.0 S01 apparent_resistivity_yx value 1.0132118364233778 0.05
+1.0 S01 apparent_resistivity_yy value 0.25330295910584444 0.02
+1.0 S01 phase_xx value   45.0 2.0
+1.0 S01 phase_xy value   45.0 2.0
+1.0 S01 phase_yx value -135.0 2.0
+1.0 S01 phase_yy value   45.0 2.0

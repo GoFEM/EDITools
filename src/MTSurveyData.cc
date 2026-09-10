@@ -22,6 +22,8 @@
 #include "include/datum.h"
 
 #include <fstream>
+#include <iomanip>
+#include <locale>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/lexical_cast.hpp>
@@ -193,6 +195,11 @@ MTStationData &MTSurveyData::get_station_data(const std::string &name)
 
 std::vector<std::array<double, 3>> MTSurveyData::get_stations_locations() const
 {
+  return m_coordinates.transform(geographic_locations());
+}
+
+std::vector<std::array<double, 3>> MTSurveyData::geographic_locations() const
+{
   std::vector<std::array<double, 3>> locations;
 
   for(auto &station: m_stations_data)
@@ -202,6 +209,17 @@ std::vector<std::array<double, 3>> MTSurveyData::get_stations_locations() const
   }
 
   return locations;
+}
+
+void MTSurveyData::set_coordinates(const SurveyCoordinates &coordinates)
+{
+  coordinates.transform(geographic_locations()); // Validate before changing the survey.
+  m_coordinates = coordinates;
+}
+
+void MTSurveyData::ensure_utm_coordinates()
+{
+  if(!m_coordinates.utm) set_coordinates(SurveyCoordinates::suggested(geographic_locations()));
 }
 
 std::vector<std::array<double, 3> > MTSurveyData::get_stations_locations(const std::vector<std::string> &names) const
@@ -219,19 +237,21 @@ std::vector<std::array<double, 3> > MTSurveyData::get_stations_locations(const s
     locations.push_back(data.position());
   }
 
-  return locations;
+  return m_coordinates.transform(locations);
 }
 
 std::string MTSurveyData::closest_station_name(const double &lat,
                                                const double &lon) const
 {
   std::map<double, std::string> dist_map;
+  const auto locations = get_stations_locations();
+  unsigned index = 0;
 
   for(const auto &station: m_stations_data)
   {
     const MTStationData &data = station.second;
-    const double &lat_i = data.position()[0];
-    const double &lon_i = data.position()[1];
+    const double lat_i = locations[index][0];
+    const double lon_i = locations[index++][1];
     const double distance = sqrt((lat - lat_i)*(lat-lat_i) + (lon-lon_i)*(lon-lon_i));
     dist_map.insert(std::make_pair(distance, data.name()));
   }
@@ -302,12 +322,17 @@ void MTSurveyData::write_gofem(const std::string &file,
                                const std::vector<RealDataType> &types,
                                const std::vector<double> &periods) const
 {
+  std::set<double> written_frequencies;
+  const auto geographic = geographic_locations();
+  const auto output_coordinates = m_coordinates.utm ? m_coordinates : SurveyCoordinates::suggested(geographic);
+  const auto locations = output_coordinates.transform(geographic);
   // Write data file
   {
     std::ofstream ofs(file);
 
     if(!ofs.is_open())
       throw std::runtime_error("Cannot open file " + file);
+    ofs.imbue(std::locale::classic());
 
     ofs << "# DataType Frequency SourceName ReceiverName Value Error" << std::endl;
 
@@ -318,8 +343,9 @@ void MTSurveyData::write_gofem(const std::string &file,
       if(!data.active())
         continue;
 
-      data.write(ofs, types, periods);
+      data.write(ofs, types, periods, &written_frequencies);
     }
+    if(!ofs) throw std::runtime_error("Cannot write data file " + file);
   }
 
   // Write receiver file
@@ -328,23 +354,36 @@ void MTSurveyData::write_gofem(const std::string &file,
 
     if(!ofs.is_open())
       throw std::runtime_error("Cannot open file " + file);
+    ofs.imbue(std::locale::classic());
+    ofs << std::setprecision(std::numeric_limits<double>::max_digits10);
 
     ofs << "# Type Name Electrodes x y z" << std::endl;
+    {
+      std::istringstream provenance(output_coordinates.description());
+      std::string line;
+      while(std::getline(provenance, line)) ofs << "# " << line << '\n';
+    }
+    unsigned index = 0;
 
     for(auto &station: m_stations_data)
     {
       const MTStationData &data = station.second;
+      const auto &position = locations[index++];
 
       if(!data.active())
         continue;
 
       ofs << "Dipole\t" << data.name() << "\t1\t"
-          << data.position()[0] << "\t"
-          << data.position()[1] << "\t"
-          << data.position()[2] << std::endl;
+          << position[0] << "\t"
+          << position[1] << "\t"
+          << position[2] << std::endl;
     }
   }
-
+  std::ofstream frequencies(file + ".freqs");
+  frequencies.imbue(std::locale::classic());
+  frequencies << std::setprecision(std::numeric_limits<double>::max_digits10);
+  for(double f: written_frequencies) frequencies << f << '\n';
+  if(!frequencies) throw std::runtime_error("Cannot write frequency file " + file + ".freqs");
 }
 
 void MTSurveyData::set_error_floor(double error_floor)

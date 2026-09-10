@@ -73,10 +73,27 @@ void MapPlot::set_station_names_visible(bool on)
   m_plot->replot();
 }
 
+void MapPlot::set_coordinate_labels(bool utm, bool centered)
+{
+  m_plot->xAxis->setLabel(utm ? (centered ? "East offset (m)" : "UTM easting (m)") : "Longitude");
+  m_plot->yAxis->setLabel(utm ? (centered ? "North offset (m)" : "UTM northing (m)") : "Latitude");
+}
+
 void MapPlot::get_point_value(const unsigned idx, double &key, double &value) const
 {
   key = m_plot->graph(0)->data()->at(idx)->key;
   value = m_plot->graph(0)->data()->at(idx)->value;
+}
+
+std::string MapPlot::station_name(unsigned idx) const
+{
+  double key, value;
+  get_point_value(idx, key, value);
+  // QCustomPlot sorts by the horizontal coordinate, not by station name.
+  // Match against the displayed positions so picking works in either frame.
+  for(unsigned i = 0; i < m_names.size(); ++i)
+    if(m_locations[i][1] == key && m_locations[i][0] == value) return m_names[i];
+  return {};
 }
 
 void MapPlot::set_layout()

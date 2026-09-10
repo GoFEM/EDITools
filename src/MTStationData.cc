@@ -622,9 +622,10 @@ void MTStationData::propagate_phase_tensor_error()
 }
 
 void MTStationData::write(std::ofstream &ofs, const std::vector<RealDataType> &types,
-                          const std::vector<double> &selected_periods) const
+                          const std::vector<double> &selected_periods,
+                          std::set<double> *written_frequencies) const
 {
-  ofs << std::setprecision(10);
+  ofs << std::setprecision(std::numeric_limits<double>::max_digits10);
 
   for(unsigned f = 0; f < freqs.size(); ++f)
   {
@@ -644,6 +645,7 @@ void MTStationData::write(std::ofstream &ofs, const std::vector<RealDataType> &t
       continue;
 
     std::set<RealDataType> processed_types;
+    const auto start = ofs.tellp();
 
     for(RealDataType type: types)
     {
@@ -830,6 +832,7 @@ void MTStationData::write(std::ofstream &ofs, const std::vector<RealDataType> &t
       if(complement_type != InvalidType)
         processed_types.insert(complement_type);
     }
+    if(written_frequencies && ofs.tellp() > start) written_frequencies->insert(freqs[f]);
   }
 }
 

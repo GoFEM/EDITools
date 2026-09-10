@@ -25,8 +25,10 @@
 #include <map>
 
 #include <boost/serialization/map.hpp>
+#include <boost/serialization/version.hpp>
 
 #include "EDIFileReader.h"
+#include "SurveyCoordinates.h"
 
 class MTSurveyData
 {
@@ -48,6 +50,10 @@ public:
 
   std::vector<std::array<double, 3>> get_stations_locations() const;
   std::vector<std::array<double, 3>> get_stations_locations(const std::vector<std::string> &names) const;
+  std::vector<std::array<double, 3>> geographic_locations() const;
+  const SurveyCoordinates &coordinates() const { return m_coordinates; }
+  void set_coordinates(const SurveyCoordinates &coordinates);
+  void ensure_utm_coordinates();
 
   std::string closest_station_name(const double &lat, const double &lon) const;
 
@@ -81,11 +87,16 @@ private:
   {
       ar & m_survey_name;
       ar & m_stations_data;
+      if(version >= 1) ar & m_coordinates;
+      else if(Archive::is_loading::value) m_coordinates = SurveyCoordinates{};
   }
 
 private:
   std::string m_survey_name;
   std::map<std::string, MTStationData> m_stations_data;
+  SurveyCoordinates m_coordinates;
 };
+
+BOOST_CLASS_VERSION(MTSurveyData, 1)
 
 #endif // MT_SURVEY_DATA_H
