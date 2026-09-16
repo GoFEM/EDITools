@@ -1,7 +1,7 @@
 #ifndef NATIVE_MT_H
 #define NATIVE_MT_H
 
-#include "MTStationData.h"
+#include "MTResponseData.h"
 #include <array>
 #include <istream>
 #include <map>
@@ -17,12 +17,7 @@ struct Mapping {
 };
 const std::vector<Mapping> &mappings();
 const Mapping &mapping(RealDataType type);
-struct Observation {
-  double frequency;
-  std::string receiver;
-  RealDataType type;
-  double value, error;
-};
+using Observation = MTResponseData::Scalar;
 using Receivers = std::map<std::string, std::array<double, 3>>;
 struct Options {
   std::vector<RealDataType> types;
@@ -47,6 +42,9 @@ struct Export {
 bool same_frequency(double a, double b);
 // Parsers preserve sparse scalar keys; no adjacency or rectangular-grid assumptions.
 std::vector<Observation> read_observations(std::istream &input);
+// Build plot-ready stations, deriving resistivity, phase and phase tensor from
+// available impedances. Explicit scalar responses take precedence; gaps stay NaN.
+std::map<std::string, MTStationData> read_responses(std::istream &input);
 Receivers read_receivers(std::istream &input);
 // Four columns: name easting northing elevation. Origin uses that same ordering.
 Receivers read_projected_receivers(std::istream &input,

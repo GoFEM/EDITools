@@ -35,6 +35,9 @@ set( Srcs ${QCUSTOMPLOT_PATH}/qcustomplot.cpp
           src/mtcomp_interface.f90
           src/MTStationData.cc
           src/NativeMT.cc
+          src/MTResponseData.cc
+          src/FitStatistics.cc
+          src/MTMapData.cc
           src/SurveyCoordinates.cc
           src/MTSurveyData.cc
           src/EDIFileReader.cc
@@ -47,6 +50,8 @@ set( Srcs ${QCUSTOMPLOT_PATH}/qcustomplot.cpp
           ExportGOFEMDialog.cpp
           ExportNativeMTDialog.cpp
           SurveyCoordinatesDialog.cpp
+          FitStatisticsWindow.cpp
+          PeriodMapWindow.cpp
           mainwindow.cpp
           ${TARGET}.cpp)
 
@@ -95,7 +100,7 @@ target_link_libraries(${TARGET} PROJ::proj)
 
 include(CTest)
 if(BUILD_TESTING)
-  add_executable(native_mt_test tests/native_mt_test.cc src/NativeMT.cc src/MTStationData.cc)
+  add_executable(native_mt_test tests/native_mt_test.cc src/NativeMT.cc src/MTResponseData.cc src/MTStationData.cc)
   set_target_properties(native_mt_test PROPERTIES AUTOMOC OFF AUTOUIC OFF)
   target_include_directories(native_mt_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
   target_link_libraries(native_mt_test ${Boost_LIBRARIES})
@@ -103,7 +108,7 @@ if(BUILD_TESTING)
   add_test(NAME native_mt_format COMMAND native_mt_test)
   add_executable(native_mt_dialog_test tests/native_mt_dialog_test.cc ExportNativeMTDialog.cpp
     SurveyCoordinatesDialog.cpp src/SurveyCoordinates.cc
-    src/NativeMT.cc src/MTStationData.cc src/MTSurveyData.cc src/EDIFileReader.cc
+    src/NativeMT.cc src/MTResponseData.cc src/MTStationData.cc src/MTSurveyData.cc src/EDIFileReader.cc
     src/mtcomp.f src/mtcomp_interface.f90)
   set_target_properties(native_mt_dialog_test PROPERTIES AUTOMOC OFF AUTOUIC OFF
     Fortran_MODULE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native_mt_dialog_modules")
@@ -111,4 +116,14 @@ if(BUILD_TESTING)
   target_link_libraries(native_mt_dialog_test Qt5::Widgets ${Boost_LIBRARIES} PROJ::proj)
   add_test(NAME native_mt_dialog COMMAND native_mt_dialog_test)
   set_tests_properties(native_mt_dialog PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 20)
+  set(ResponseTestSrcs ${Srcs})
+  list(REMOVE_ITEM ResponseTestSrcs ${TARGET}.cpp)
+  add_executable(response_plot_test tests/response_plot_test.cc ${ResponseTestSrcs}
+    ${Hdrs} ${UI_Srcs} ${MOC_Hdrs} ${QRC_Srcs})
+  set_target_properties(response_plot_test PROPERTIES
+    Fortran_MODULE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/response_plot_modules")
+  qt5_use_modules(response_plot_test Core Gui Widgets PrintSupport)
+  target_link_libraries(response_plot_test ${Boost_LIBRARIES} PROJ::proj)
+  add_test(NAME response_plots COMMAND response_plot_test)
+  set_tests_properties(response_plots PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
 endif()

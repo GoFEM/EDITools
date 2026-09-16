@@ -21,6 +21,7 @@
 #include "ui_mainwindow.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <fstream>
 #include <stdexcept>
@@ -71,6 +72,8 @@
 #include "ExportGOFEMDialog.h"
 #include "ExportNativeMTDialog.h"
 #include "SurveyCoordinatesDialog.h"
+#include "FitStatisticsWindow.h"
+#include "PeriodMapWindow.h"
 
 namespace
 {
@@ -79,7 +82,7 @@ namespace
 // version so the loader can distinguish both layouts and keep old .mtd files
 // readable.
 const std::uint32_t projectFileMagic = 0x45444954; // "EDIT"
-const std::uint32_t projectFileVersion = 4;
+const std::uint32_t projectFileVersion = 6;
 }
 
 MainWindow::MainWindow(QWidget *parent) :
@@ -87,6 +90,8 @@ MainWindow::MainWindow(QWidget *parent) :
   ui(new Ui::MainWindow)
 {
   ui->setupUi(this);
+  ui->responsesList->setTextElideMode(Qt::ElideLeft);
+  ui->responsesList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
   ui->actionShow_error_bars->setChecked(true);
   ui->actionPhase_wrap->setChecked(true);
 
@@ -116,11 +121,27 @@ MainWindow::MainWindow(QWidget *parent) :
 
   plotHandlers[0]->set_associated_plot(*plotHandlers[1]);
   plotHandlers[1]->set_associated_plot(*plotHandlers[0]);
+  for(const auto &plot: plotHandlers) {
+    connect(plot.get(), &MTDataPlot::observationsChanged, this, [this] { refreshAnalysisWindows(); });
+    connect(plot.get(), &MTDataPlot::componentVisibilityChanged, this, [this] { updatePlots(); });
+  }
 
   mapHandler.reset(new MapPlot(ui->mapPlot, this));
   auto *mapControls = new QWidget(ui->splitter_3);
   auto *mapControlsLayout = new QVBoxLayout(mapControls);
   mapControlsLayout->setContentsMargins(4, 0, 4, 0);
+  auto *mapActions = new QHBoxLayout;
+  mapStationNames = new QCheckBox(tr("Station names"), mapControls);
+  mapStationNames->setObjectName("stationMapNames");
+  mapActions->addWidget(mapStationNames);
+  mapActions->addStretch();
+  auto *mapsButton = new QPushButton(tr("Maps…"), mapControls);
+  mapsButton->setObjectName("openPeriodMaps");
+  mapsButton->setToolTip(tr("Induction vector and phase tensor maps at a selected period"));
+  mapActions->addWidget(mapsButton);
+  mapControlsLayout->addLayout(mapActions);
+  connect(mapStationNames, &QCheckBox::toggled, ui->actionShow_station_names, &QAction::setChecked);
+  connect(mapsButton, &QPushButton::clicked, this, &MainWindow::on_actionPeriod_maps_triggered);
   mapCoordinateSwitch = new QComboBox(mapControls);
   mapCoordinateSwitch->setObjectName("mapCoordinateSwitch");
   mapCoordinateSwitch->addItems({tr("Lat/Lon"), tr("UTM")});
@@ -134,7 +155,7 @@ MainWindow::MainWindow(QWidget *parent) :
   coordinateInfoLabel->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
   coordinateInfoLabel->setMaximumHeight(85);
   mapControlsLayout->addWidget(coordinateInfoLabel);
-  mapControls->setMaximumHeight(125);
+  mapControls->setMaximumHeight(155);
   ui->splitter_3->addWidget(mapControls);
   ui->splitter_3->setCollapsible(ui->splitter_3->indexOf(mapControls), false);
   connect(mapCoordinateSwitch, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this] {
@@ -146,7 +167,7 @@ MainWindow::MainWindow(QWidget *parent) :
       QMessageBox::warning(this, tr("Map coordinates"), QString::fromUtf8(e.what()));
     }
   });
-  ui->actionShow_station_names->setChecked(true);
+  ui->actionShow_station_names->setChecked(false);
 
   setupListContextMenu();
 
@@ -172,6 +193,8 @@ void MainWindow::rememberDirectory(const QString &path)
 MainWindow::PlotOptions MainWindow::currentPlotOptions() const
 {
   PlotOptions options;
+  for(unsigned i = 0; i < plotHandlers.size(); ++i)
+    options.componentVisible[i] = plotHandlers[i]->component_visibility();
   options.axes.reserve(plotHandlers.size());
 
   for(const auto &plot: plotHandlers)
@@ -201,6 +224,9 @@ MainWindow::PlotOptions MainWindow::currentPlotOptions() const
 
 void MainWindow::applyPlotOptions(const PlotOptions &options)
 {
+  const QSignalBlocker phaseBlock(ui->actionPhase_wrap);
+  const QSignalBlocker namesBlock(ui->actionShow_station_names);
+  const QSignalBlocker arrowsBlock(ui->actionTipper_arrows);
   const size_t nAxes = std::min(options.axes.size(), plotHandlers.size());
   for(size_t i = 0; i < nAxes; ++i)
   {
@@ -210,6 +236,10 @@ void MainWindow::applyPlotOptions(const PlotOptions &options)
 
   ui->actionPhase_wrap->setChecked(options.phaseWrap);
   ui->actionShow_station_names->setChecked(options.showStationNames);
+  {
+    const QSignalBlocker block(mapStationNames);
+    mapStationNames->setChecked(options.showStationNames);
+  }
   ui->actionTipper_arrows->setChecked(options.tipperArrows);
   if(plotHandlers.size() > 1)
   {
@@ -222,6 +252,8 @@ void MainWindow::applyPlotOptions(const PlotOptions &options)
       tipperPlot->set_arrow_mode(options.tipperArrows);
   }
   mapHandler->set_station_names_visible(options.showStationNames);
+  for(unsigned i = 0; i < plotHandlers.size(); ++i)
+    plotHandlers[i]->set_component_visibility(options.componentVisible[i]);
 }
 
 MainWindow::~MainWindow()
@@ -286,6 +318,7 @@ void MainWindow::on_actionLoad_EDI_triggered()
 
   createStationsList();
   updateMap();
+  refreshAnalysisWindows();
 }
 
 void MainWindow::createStationsList()
@@ -333,8 +366,11 @@ void MainWindow::updatePlots()
     return;
 
   MTStationData& data = mtSurvey->get_station_data(item->text().toStdString());
-  for(auto &ph: plotHandlers)
+  for(auto &ph: plotHandlers) {
+    ph->clear_predicted_data();
     ph->set_observed_data(data);
+  }
+  ui->label->setText(tr("Stations (%1):").arg(mtSurvey->n_stations()));
 
   // Display calculated responses if any were loaded
   QListWidgetItem* resp_item = ui->responsesList->currentItem();
@@ -351,8 +387,12 @@ void MainWindow::updatePlots()
         for(auto &ph: plotHandlers)
           ph->set_predicted_data(resp_data);
 
-        ui->label->setText(QString("RMS = %1").arg(data.rms(resp_data)));
+        const double rms = data.rms(resp_data);
+        ui->label->setText(std::isfinite(rms) ? tr("RMS = %1").arg(rms) :
+                                             tr("RMS: no matching data"));
       }
+      else
+        ui->label->setText(tr("No response for this station"));
     }
   }
 
@@ -386,6 +426,7 @@ void MainWindow::maskDataType(bool on)
   mtSurvey->set_active_flag(station_name, type, on);
 
   updatePlots();
+  refreshAnalysisWindows();
 }
 
 void MainWindow::deleteStation()
@@ -395,6 +436,7 @@ void MainWindow::deleteStation()
   ui->stationList->blockSignals(false);
 
   mtSurvey->remove_station(item->text().toStdString());
+  refreshAnalysisWindows();
 
   ui->label->setText("Stations (" + QString("%1").arg(mtSurvey->n_stations()) + "):");
 
@@ -413,6 +455,7 @@ void MainWindow::renameStation()
   {
     mtSurvey->rename_station(item->text().toStdString(), newName.toStdString());
     item->setText(newName);
+    refreshAnalysisWindows();
   }
 }
 
@@ -498,7 +541,27 @@ void MainWindow::on_actionLoad_project_triggered()
         plotOptions.showStationNames = legacyPlotOptions.showStationNames;
         plotOptions.axes = legacyPlotOptions.axes;
       }
-      else if(version >= 4)
+      else if(version == 4)
+      {
+        PlotOptionsV4 legacyPlotOptions;
+        ia >> legacyPlotOptions;
+        plotOptions.phaseWrap = legacyPlotOptions.phaseWrap;
+        plotOptions.showStationNames = legacyPlotOptions.showStationNames;
+        plotOptions.tipperArrows = legacyPlotOptions.tipperArrows;
+        plotOptions.axes = legacyPlotOptions.axes;
+      }
+      else if(version == 5)
+      {
+        PlotOptionsV5 legacyPlotOptions;
+        ia >> legacyPlotOptions;
+        plotOptions.phaseWrap = legacyPlotOptions.phaseWrap;
+        plotOptions.showStationNames = legacyPlotOptions.showStationNames;
+        plotOptions.tipperArrows = legacyPlotOptions.tipperArrows;
+        plotOptions.axes = legacyPlotOptions.axes;
+        plotOptions.componentVisible = {{legacyPlotOptions.impedanceVisible, legacyPlotOptions.impedanceVisible,
+                                        legacyPlotOptions.tipperVisible, legacyPlotOptions.impedanceVisible}};
+      }
+      else if(version >= 6)
       {
         ia >> plotOptions;
       }
@@ -547,17 +610,14 @@ void MainWindow::on_actionLoad_project_triggered()
   }
 
   createStationsList();
+  createResponsesList();
   updateMap();
+  refreshAnalysisWindows();
 }
 
 void MainWindow::on_stationList_currentRowChanged(int /*currentRow*/)
 {
   updatePlots();
-
-  std::vector<std::string> names;
-
-  QListWidgetItem* item = ui->stationList->currentItem();
-  names.push_back(item->text().toStdString());
 }
 
 void MainWindow::on_stationList_itemChanged(QListWidgetItem *item)
@@ -578,6 +638,7 @@ void MainWindow::on_stationList_itemChanged(QListWidgetItem *item)
   }
 
   updatePlots();
+  refreshAnalysisWindows();
 }
 
 void MainWindow::on_actionDecimate_triggered()
@@ -587,6 +648,7 @@ void MainWindow::on_actionDecimate_triggered()
 
   mtSurvey->decimate();
   updatePlots();
+  refreshAnalysisWindows();
 }
 
 void MainWindow::on_stationList_itemSelectionChanged()
@@ -650,6 +712,7 @@ void MainWindow::on_actionConvert_UTM_triggered()
       const QSignalBlocker blocker(mapCoordinateSwitch);
       mapCoordinateSwitch->setCurrentIndex(1);
       updateMap();
+      refreshAnalysisWindows();
     }
   } catch(const std::exception &e) {
     QMessageBox::warning(this, tr("Coordinate conversion"), QString::fromUtf8(e.what()));
@@ -672,6 +735,7 @@ void MainWindow::on_actionSet_error_floor_triggered()
     mtSurvey->set_error_floor(error_floor / 100.);
 
   updatePlots();
+  refreshAnalysisWindows();
 }
 
 void MainWindow::on_actionShow_error_bars_toggled(bool on)
@@ -695,6 +759,8 @@ void MainWindow::on_actionPhase_wrap_toggled(bool on)
 
 void MainWindow::on_actionShow_station_names_toggled(bool on)
 {
+  const QSignalBlocker block(mapStationNames);
+  mapStationNames->setChecked(on);
   mapHandler->set_station_names_visible(on);
 }
 
@@ -887,39 +953,87 @@ void MainWindow::on_actionPlot_axis_ranges_triggered()
   updatePlots();
 }
 
-void MainWindow::on_actionLoad_GoFEM_responses_triggered()
+void MainWindow::on_actionLoad_responses_triggered()
 {
-  QString responseFile = QFileDialog::getOpenFileName(
-                            this,
-                            "Open GoFEM data file",
-                            lastDirectory,
-                            "Project file (*.*)");
+  loadResponseFiles(QFileDialog::getOpenFileNames(
+    this, tr("Open computed responses"), lastDirectory,
+    tr("Response files (*.txt *.data *.dat *.gofem);;All files (*)")));
+}
 
-  if(responseFile.length() == 0)
-    return;
-
-  rememberDirectory(responseFile);
-
-  QString fileName = QFileInfo(responseFile).fileName();
-
-  try
+void MainWindow::loadResponseFiles(const QStringList &files)
+{
+  if(files.isEmpty()) return;
+  rememberDirectory(files.front());
+  QStringList errors;
+  QListWidgetItem *selected = nullptr;
+  auto sorted = files;
+  sorted.sort();
   {
-    MTSurveyData responses;
-    responses.load_from_gofem(responseFile.toStdString());
-    mtResponses.insert(std::make_pair(responseFile.toStdString(), responses));
+    const QSignalBlocker blocker(ui->responsesList);
+    for(const auto &file: sorted) {
+      const QString path = QFileInfo(file).absoluteFilePath();
+      try {
+        MTSurveyData responses;
+        responses.load_responses(path.toStdString());
+        mtResponses[path.toStdString()] = std::move(responses);
 
-    QListWidgetItem* item = new QListWidgetItem(fileName);
-    item->setToolTip(responseFile);
-    ui->responsesList->addItem(item);
+        QListWidgetItem *item = nullptr;
+        for(int i = 0; i < ui->responsesList->count(); ++i)
+          if(ui->responsesList->item(i)->toolTip() == path)
+            item = ui->responsesList->item(i);
+        if(!item) {
+          item = new QListWidgetItem(QFileInfo(path).fileName(), ui->responsesList);
+          item->setToolTip(path);
+        }
+        selected = item;
+      } catch(const std::exception &e) {
+        errors.push_back(path + "\n" + QString::fromUtf8(e.what()));
+      }
+    }
+    if(selected) ui->responsesList->setCurrentItem(selected);
   }
-  catch(std::exception &e)
-  {
-    QMessageBox msgBox;
-    msgBox.setIcon(QMessageBox::Critical);
-    msgBox.setText(QString("Exception on file reading. The error message: ") + e.what());
-    msgBox.setStandardButtons(QMessageBox::Ok);
-    msgBox.exec();
+  updatePlots();
+  if(!errors.isEmpty())
+    QMessageBox::warning(this, tr("Load responses"), errors.join("\n\n"));
+  refreshAnalysisWindows();
+}
+
+void MainWindow::on_actionFit_statistics_triggered()
+{
+  if(!fitStatistics)
+    fitStatistics = new FitStatisticsWindow(this, [this] { refreshAnalysisWindows(); });
+  refreshAnalysisWindows();
+  fitStatistics->show();
+  fitStatistics->raise();
+  fitStatistics->activateWindow();
+}
+
+void MainWindow::refreshAnalysisWindows()
+{
+  if(fitStatistics) fitStatistics->setData(mtSurvey, mtResponses);
+  if(periodMaps) periodMaps->setData(mtSurvey, mtResponses);
+}
+
+void MainWindow::on_actionPeriod_maps_triggered()
+{
+  if(!periodMaps) periodMaps = new PeriodMapWindow(this);
+  periodMaps->setData(mtSurvey, mtResponses);
+  periodMaps->show();
+  periodMaps->raise();
+  periodMaps->activateWindow();
+}
+
+void MainWindow::createResponsesList()
+{
+  const QSignalBlocker blocker(ui->responsesList);
+  ui->responsesList->clear();
+  for(const auto &response: mtResponses) {
+    const QString path = QString::fromStdString(response.first);
+    auto *item = new QListWidgetItem(QFileInfo(path).fileName(), ui->responsesList);
+    item->setToolTip(path);
   }
+  if(ui->responsesList->count())
+    ui->responsesList->setCurrentRow(ui->responsesList->count() - 1);
 }
 
 void MainWindow::on_responsesList_currentRowChanged(int /*currentRow*/)

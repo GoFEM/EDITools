@@ -18,6 +18,74 @@
  */
 
 #include "include/MTDataPlot.h"
+#include <QCheckBox>
+#include <QSignalBlocker>
+#include <QStyleOptionButton>
+#include <functional>
+
+namespace {
+// Native checkboxes handle mouse, keyboard and accessibility on screen. The
+// legend item draws the same controls when QCustomPlot exports without widgets.
+class ComponentLegendItem : public QCPPlottableLegendItem
+{
+public:
+  ComponentLegendItem(QCPLegend *legend, QCPGraph *graph, int component,
+                      const std::function<void(bool)> &toggle)
+    : QCPPlottableLegendItem(legend, graph), m_checkBox(new QCheckBox(legend->parentPlot()))
+  {
+    m_checkBox->setObjectName("componentVisibility" + QString::number(component));
+    m_checkBox->setFont(font());
+    setSelectable(false);
+    sync();
+    QObject::connect(m_checkBox, &QCheckBox::toggled, m_checkBox, toggle);
+    QObject::connect(legend->parentPlot(), &QCustomPlot::afterReplot, m_checkBox, [this] {
+      m_checkBox->setGeometry(rect());
+      m_checkBox->setVisible(realVisibility());
+      m_checkBox->raise();
+    });
+  }
+
+  ~ComponentLegendItem() override { delete m_checkBox.data(); }
+
+  void sync()
+  {
+    const QSignalBlocker block(m_checkBox);
+    m_checkBox->setChecked(mPlottable->visible());
+    m_checkBox->setText(mPlottable->name());
+    m_checkBox->setAccessibleName(QObject::tr("Show %1").arg(mPlottable->name()));
+    m_checkBox->setToolTip(QObject::tr("Show or hide %1 points, error bars and response curves on this plot.")
+                             .arg(mPlottable->name()));
+    auto palette = m_checkBox->palette();
+    const auto *graph = static_cast<QCPGraph *>(mPlottable);
+    palette.setColor(QPalette::WindowText, graph->visible() ? graph->scatterStyle().pen().color() : QColor("#808080"));
+    m_checkBox->setPalette(palette);
+  }
+
+protected:
+  QSize minimumOuterSizeHint() const override
+  {
+    return m_checkBox->sizeHint() + QSize(mMargins.left() + mMargins.right(), mMargins.top() + mMargins.bottom());
+  }
+
+  void draw(QCPPainter *painter) override
+  {
+    if(!painter->modes().testFlag(QCPPainter::pmNoCaching)) return;
+    QStyleOptionButton option;
+    option.initFrom(m_checkBox);
+    option.rect = rect();
+    option.text = m_checkBox->text();
+    option.state &= ~(QStyle::State_On | QStyle::State_Off | QStyle::State_HasFocus | QStyle::State_MouseOver);
+    option.state |= m_checkBox->isChecked() ? QStyle::State_On : QStyle::State_Off;
+    painter->save();
+    painter->setFont(m_checkBox->font());
+    m_checkBox->style()->drawControl(QStyle::CE_CheckBox, &option, painter, m_checkBox);
+    painter->restore();
+  }
+
+private:
+  QPointer<QCheckBox> m_checkBox;
+};
+}
 
 namespace PlotColors
 {
@@ -131,8 +199,50 @@ void MTDataPlot::set_associated_plot(MTDataPlot &plot)
 
 void MTDataPlot::set_error_bars_visible(bool on)
 {
-  for(auto &eb: m_errorBars)
-    eb->setVisible(on);
+  m_errorBarsVisible = on;
+  apply_component_visibility();
+}
+
+void MTDataPlot::set_component_visibility(const std::array<bool, 4> &visible)
+{
+  m_componentVisible = visible;
+  apply_component_visibility();
+  m_plot->replot();
+}
+
+void MTDataPlot::set_legend_component_visible(unsigned component, bool visible)
+{
+  auto components = m_componentVisible;
+  components.at(component) = visible;
+  set_component_visibility(components);
+  emit componentVisibilityChanged();
+}
+
+void MTDataPlot::rebuild_component_legend(const std::vector<int> &graphIndices)
+{
+  m_plot->legend->clearItems();
+  for(int component: graphIndices)
+    m_plot->legend->addItem(new ComponentLegendItem(m_plot->legend, m_plot->graph(component), component,
+      [this, component](bool visible) { set_legend_component_visible(component, visible); }));
+}
+
+void MTDataPlot::update_component_legend()
+{
+  for(int i = 0; i < m_plot->legend->itemCount(); ++i)
+    if(auto *item = dynamic_cast<ComponentLegendItem *>(m_plot->legend->item(i))) item->sync();
+}
+
+void MTDataPlot::apply_component_visibility()
+{
+  for(int i = 0; i < m_plot->graphCount(); ++i) {
+    auto *graph = m_plot->graph(i);
+    const bool visible = m_componentVisible[i % 4];
+    graph->setVisible(visible);
+    if(!visible) graph->setSelection(QCPDataSelection());
+  }
+  for(unsigned i = 0; i < m_errorBars.size(); ++i)
+    m_errorBars[i]->setVisible(m_errorBarsVisible && m_componentVisible[i % 4]);
+  update_component_legend();
 }
 
 void MTDataPlot::set_masking_mode(bool on)
@@ -253,14 +363,24 @@ void MTDataPlot::set_graph_responses(const std::vector<std::vector<double> > &da
   for(unsigned i = 0; i < data.size(); ++i)
   {
     QVector<double> x, y;
+    bool has_values = false;
     for (unsigned j = 0; j < frequencies.size(); ++j)
     {
       x.push_back(1.0 / frequencies[j]);
-      y.push_back(data[i][j]);
+      const bool valid = std::isfinite(data[i][j]);
+      y.push_back(valid ? data[i][j] : std::numeric_limits<double>::quiet_NaN());
+      has_values |= valid;
     }
 
+    if(!has_values) { x.clear(); y.clear(); }
     m_plot->graph(i + data.size()*2)->setData(x, y);
   }
+}
+
+void MTDataPlot::clear_predicted_data()
+{
+  for(int i = static_cast<int>(m_errorBars.size()); i < m_plot->graphCount(); ++i)
+    m_plot->graph(i)->data()->clear();
 }
 
 void MTDataPlot::set_layout_generic(const std::vector<QString> &data_graph_names,
@@ -333,6 +453,7 @@ void MTDataPlot::set_layout_generic(const std::vector<QString> &data_graph_names
   m_plot->legend->setVisible(true);
   m_plot->legend->setBrush(QBrush(QColor(255,255,255,100)));
   m_plot->axisRect()->insetLayout()->setInsetAlignment(0, Qt::AlignLeft|Qt::AlignTop); //
+  rebuild_component_legend({0, 1, 2, 3});
 
   m_plot->setContextMenuPolicy(Qt::CustomContextMenu);
   connect(m_plot, SIGNAL(customContextMenuRequested(QPoint)), this, SLOT(plotContextRequest(QPoint)));
@@ -341,9 +462,9 @@ void MTDataPlot::set_layout_generic(const std::vector<QString> &data_graph_names
 void MTDataPlot::apply_axis_ranges(bool rescaleAxes, bool useDefaultYRange,
                                    const QCPRange &defaultYRange)
 {
-  if(rescaleAxes)
+  if(rescaleAxes && std::any_of(m_componentVisible.begin(), m_componentVisible.end(), [](bool visible) { return visible; }))
   {
-    m_plot->xAxis->rescale();
+    m_plot->xAxis->rescale(true);
     QCPRange xrange = m_plot->xAxis->range();
     m_plot->xAxis->setRange(xrange.lower / 2., xrange.upper * 2.);
 
@@ -352,7 +473,7 @@ void MTDataPlot::apply_axis_ranges(bool rescaleAxes, bool useDefaultYRange,
       if(useDefaultYRange)
         m_plot->yAxis->setRange(defaultYRange);
       else
-        m_plot->yAxis->rescale();
+        m_plot->yAxis->rescale(true);
     }
   }
 
@@ -385,6 +506,7 @@ void MTDataPlot::mask_selected_data(bool on)
   set_observed_data(*m_data, false);
   if(m_associated_plot)
     m_associated_plot->set_observed_data(*m_associated_plot->m_data, false);
+  emit observationsChanged();
 }
 
 void MTDataPlot::maskSelectedData()
@@ -433,6 +555,7 @@ void MTDataPlot::invMaskSelectedData()
 
   if(m_associated_plot)
     m_associated_plot->set_observed_data(*m_associated_plot->m_data, false);
+  emit observationsChanged();
 }
 
 void MTDataPlot::unmaskSelectedData()

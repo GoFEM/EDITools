@@ -52,7 +52,7 @@ c-- unpack spectral matrix
           end do
         end do
 
-c-- change matrix from geotools to jones (geotools Hx Hy Hz Ex Ey Rx Ry)
+c-- change matrix from Hx Hy Hz Ex Ey Rx Ry to Jones order
 
 c swap columns 4 & 5 (Ex and Ey)
 

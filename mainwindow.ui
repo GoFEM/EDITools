@@ -136,7 +136,7 @@
     <addaction name="actionLoad_project"/>
     <addaction name="actionExport_in_GoFEM"/>
     <addaction name="actionExport_native_MT"/>
-    <addaction name="actionLoad_GoFEM_responses"/>
+    <addaction name="actionLoad_responses"/>
    </widget>
    <widget class="QMenu" name="menuData">
     <property name="title">
@@ -144,6 +144,8 @@
     </property>
     <addaction name="actionDecimate"/>
     <addaction name="actionSet_error_floor"/>
+    <addaction name="actionFit_statistics"/>
+    <addaction name="actionPeriod_maps"/>
    </widget>
    <widget class="QMenu" name="menuPlot">
     <property name="title">
@@ -173,14 +175,6 @@
    <addaction name="menuCoordinates"/>
    <addaction name="menuPlot"/>
    <addaction name="menuAbout"/>
-  </widget>
-  <widget class="QToolBar" name="mainToolBar">
-   <attribute name="toolBarArea">
-    <enum>TopToolBarArea</enum>
-   </attribute>
-   <attribute name="toolBarBreak">
-    <bool>false</bool>
-   </attribute>
   </widget>
   <widget class="QStatusBar" name="statusBar"/>
   <action name="actionLoad_EDI">
@@ -292,9 +286,19 @@
     <string>Axis ranges</string>
    </property>
   </action>
-  <action name="actionLoad_GoFEM_responses">
+  <action name="actionLoad_responses">
    <property name="text">
-    <string>Load GoFEM responses</string>
+    <string>Load responses…</string>
+   </property>
+  </action>
+  <action name="actionFit_statistics">
+   <property name="text">
+    <string>Data fit statistics…</string>
+   </property>
+  </action>
+  <action name="actionPeriod_maps">
+   <property name="text">
+    <string>Induction / phase tensor maps…</string>
    </property>
   </action>
   <action name="actionAbout_EDI_Tools">

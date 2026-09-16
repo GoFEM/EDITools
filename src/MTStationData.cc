@@ -23,6 +23,7 @@
 
 #include <iomanip>
 #include <fstream>
+#include <algorithm>
 #include <math.h>
 
 #include <Eigen/Dense>
@@ -74,21 +75,57 @@ void MTStationData::set_frequencies(const std::set<double> &fvalues)
   freqs = std::vector<double>(fvalues.begin(), fvalues.end());
 }
 
+bool MTStationData::scalar_value(RealDataType type, unsigned f, double &value, double &error) const
+{
+  if(!is_active || f >= freqs.size()) return false;
+  const auto column = type_to_column_table.find(type);
+  if(column == type_to_column_table.end()) return false;
+  const auto c = column->second;
+  switch(type) {
+  case RealZxx: case RealZxy: case RealZyx: case RealZyy:
+  case ImagZxx: case ImagZxy: case ImagZyx: case ImagZyy:
+    if(!Z_mask[c][f]) return false;
+    value = (type == RealZxx || type == RealZxy || type == RealZyx || type == RealZyy) ?
+      Z[c][f].real() : Z[c][f].imag();
+    error = Z_err_floor[c][f];
+    break;
+  case RealTzx: case RealTzy: case ImagTzx: case ImagTzy:
+    if(!T_mask[c][f]) return false;
+    value = (type == RealTzx || type == RealTzy) ? T[c][f].real() : T[c][f].imag();
+    error = T_err_floor[c][f];
+    break;
+  case PTxx: case PTxy: case PTyx: case PTyy:
+    if(!PT_mask[c][f]) return false;
+    value = PT[c][f]; error = PT_err[c][f];
+    break;
+  case RhoZxx: case RhoZxy: case RhoZyx: case RhoZyy:
+    if(!Z_mask[c][f]) return false;
+    value = Rho[c][f]; error = Rho_err[c][f];
+    break;
+  case PhsZxx: case PhsZxy: case PhsZyx: case PhsZyy:
+    if(!Z_mask[c][f]) return false;
+    value = Phs[c][f]; error = Phs_err[c][f];
+    break;
+  default: return false;
+  }
+  return std::isfinite(value);
+}
+
 void MTStationData::set_data(double frequency,
                              const std::vector<RealDataType> &types,
                              const std::vector<double> &values,
                              const std::vector<double> &errors)
 {
-  unsigned fidx = std::numeric_limits<unsigned>::max();
-  for(unsigned i = 0; i < freqs.size(); ++i)
-    if(fabs(freqs[i] - frequency) < 1e-10)
-    {
-      fidx = i;
-      break;
-    }
-
-  if(fidx > freqs.size())
+  // Prefer the exact key so distinct, closely spaced response frequencies do
+  // not overwrite one another. Keep the legacy tolerance for other callers.
+  auto it = std::find(freqs.begin(), freqs.end(), frequency);
+  if(it == freqs.end())
+    it = std::find_if(freqs.begin(), freqs.end(), [frequency](double f) {
+      return std::abs(f - frequency) < 1e-10;
+    });
+  if(it == freqs.end())
     return;
+  const auto fidx = std::distance(freqs.begin(), it);
 
   for(unsigned i = 0; i < types.size(); ++i)
   {
@@ -158,6 +195,20 @@ void MTStationData::set_data(double frequency,
       T[1][fidx].imag(values[i]);
       T_err[1][fidx] = errors[i];
       break;
+    case RhoZxx:
+    case RhoZxy:
+    case RhoZyx:
+    case RhoZyy:
+      Rho[type_to_column_table.at(types[i])][fidx] = values[i];
+      Rho_err[type_to_column_table.at(types[i])][fidx] = errors[i];
+      break;
+    case PhsZxx:
+    case PhsZxy:
+    case PhsZyx:
+    case PhsZyy:
+      Phs[type_to_column_table.at(types[i])][fidx] = values[i];
+      Phs_err[type_to_column_table.at(types[i])][fidx] = errors[i];
+      break;
     default:
       break;
     }
@@ -213,15 +264,16 @@ std::vector<std::vector<bool> > MTStationData::phase_tensor_mask() const
   }
 }
 
-void MTStationData::set_size(const unsigned n_frequencies)
+void MTStationData::set_size(const unsigned n_frequencies, bool missing_values)
 {
   freqs.resize(n_frequencies);
 
-  Z.resize(4, cvector(n_frequencies));
-  T.resize(2, cvector(n_frequencies));
-  Rho.resize(4, dvector(n_frequencies));
-  Phs.resize(4, dvector(n_frequencies));
-  PT.resize(4, dvector(n_frequencies));
+  const double initial = missing_values ? std::numeric_limits<double>::quiet_NaN() : 0.;
+  Z.resize(4, cvector(n_frequencies, dcomplex(initial, initial)));
+  T.resize(2, cvector(n_frequencies, dcomplex(initial, initial)));
+  Rho.resize(4, dvector(n_frequencies, initial));
+  Phs.resize(4, dvector(n_frequencies, initial));
+  PT.resize(4, dvector(n_frequencies, initial));
 
   Z_err.resize(4, dvector(n_frequencies));
   T_err.resize(2, dvector(n_frequencies));
@@ -839,36 +891,46 @@ void MTStationData::write(std::ofstream &ofs, const std::vector<RealDataType> &t
 double MTStationData::rms(const MTStationData &other) const
 {
   unsigned n = 0;
-
   double residual = 0;
-  for(size_t i = 0; i < Z.size(); ++i)
-  {
-    for(size_t j = 0; j < Z[i].size(); ++j)
-    {
-      if(Z_err_floor[i][j] != 0. && other.Z_err_floor[i][j] != 0.)
-      {
-        residual += pow((Z[i][j] - other.Z[i][j]).real() / Z_err_floor[i][j], 2.) +
-                    pow((Z[i][j] - other.Z[i][j]).imag() / Z_err_floor[i][j], 2.);
-        n += 2;
-      }
 
-      if(PT_err[i][j] != 0. && other.PT_err[i][j] != 0.)
-      {
-        residual += pow((PT[i][j] - other.PT[i][j]) / PT_err[i][j], 2.);
-        ++n;
-      }
+  auto add = [&](double observed, double predicted, double error,
+                 double response_error, bool active, bool phase = false) {
+    if(!active || !std::isfinite(observed) || !std::isfinite(predicted) ||
+       !std::isfinite(error) || error <= 0 ||
+       !std::isfinite(response_error) || response_error <= 0)
+      return;
+    const double difference = phase ? std::remainder(observed - predicted, 360.) : observed - predicted;
+    residual += std::pow(difference / error, 2.);
+    ++n;
+  };
 
-      if(i < T.size())
-      {
-        if(T_err_floor[i][j] != 0. && other.T_err_floor[i][j] != 0.)
-        {
-          residual += pow((T[i][j] - other.T[i][j]).real() / T_err_floor[i][j], 2.) +
-                      pow((T[i][j] - other.T[i][j]).imag() / T_err_floor[i][j], 2.);
-          n += 2;
+  if(is_active && other.is_active)
+    for(size_t j = 0; j < freqs.size(); ++j) {
+      auto match = std::find(other.freqs.begin(), other.freqs.end(), freqs[j]);
+      if(match == other.freqs.end()) {
+        // EDI and exported response frequencies may differ in printed precision.
+        double closest = 1e-3;
+        for(auto it = other.freqs.begin(); it != other.freqs.end(); ++it) {
+          const double distance = std::abs(*it - freqs[j]) / freqs[j];
+          if(distance < closest) { closest = distance; match = it; }
+        }
+      }
+      if(match == other.freqs.end()) continue;
+      const auto k = std::distance(other.freqs.begin(), match);
+      for(size_t i = 0; i < Z.size(); ++i) {
+        const bool impedance_active = Z_mask[i][j] && other.Z_mask[i][k];
+        add(Z[i][j].real(), other.Z[i][k].real(), Z_err_floor[i][j], other.Z_err_floor[i][k], impedance_active);
+        add(Z[i][j].imag(), other.Z[i][k].imag(), Z_err_floor[i][j], other.Z_err_floor[i][k], impedance_active);
+        add(Rho[i][j], other.Rho[i][k], Rho_err[i][j], other.Rho_err[i][k], impedance_active);
+        add(Phs[i][j], other.Phs[i][k], Phs_err[i][j], other.Phs_err[i][k], impedance_active, true);
+        add(PT[i][j], other.PT[i][k], PT_err[i][j], other.PT_err[i][k], PT_mask[i][j] && other.PT_mask[i][k]);
+        if(i < T.size()) {
+          const bool tipper_active = T_mask[i][j] && other.T_mask[i][k];
+          add(T[i][j].real(), other.T[i][k].real(), T_err_floor[i][j], other.T_err_floor[i][k], tipper_active);
+          add(T[i][j].imag(), other.T[i][k].imag(), T_err_floor[i][j], other.T_err_floor[i][k], tipper_active);
         }
       }
     }
-  }
 
-  return sqrt(1.0 / n * residual);
+  return n ? std::sqrt(residual / n) : std::numeric_limits<double>::quiet_NaN();
 }

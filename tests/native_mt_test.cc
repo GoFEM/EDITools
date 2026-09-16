@@ -294,6 +294,92 @@ void resistivity_phase_contract()
   for(const auto &row: result.observations)
     check(row.type == RhoZyx || row.type == PhsZyx, "Masked xy observation exported");
 }
+
+void response_import()
+{
+  auto rows = example();
+  std::reverse(rows.begin(), rows.end());
+  std::istringstream all(encode(rows, receivers, "Responses").data_text);
+  auto stations = read_responses(all);
+  check(stations.size() == 1, "Response receiver grouping");
+  auto &s = stations.at("S01");
+  std::vector<dvector> values, errors;
+  for(const auto &row: rows) {
+    const std::string observable = mapping(row.type).observable;
+    const auto c = type_to_column_table.at(row.type);
+    if(observable.find("apparent_resistivity_") == 0) s.get_apparent_resistivity(values, errors);
+    else if(observable.find("phase_tensor_") == 0) s.get_phase_tensor(values, errors);
+    else if(observable.find("phase_") == 0) s.get_phase(values, errors);
+    else continue;
+    near(values[c][0], row.value);
+    near(errors[c][0], row.error);
+  }
+
+  std::istringstream sparse(
+    " # frequency_hz receiver observable component value error\r\n"
+    "100 S02 phase_yx value -135 2\r\n"
+    "2 S01 induction_x real 0 0.01\r\n"
+    "1 S01 impedance_xy imag 0.002 0.0001\r\n"
+    "4 S01 impedance_xy real 0.004 0.0001\r\n"
+    "1 S01 phase_tensor_xy value 0.75 0.1\r\n"
+    "1 S01 impedance_xy real 0.002 0.0001\r\n");
+  stations = read_responses(sparse);
+  check(stations.size() == 2 && stations.at("S01").frequencies() == dvector({1., 2., 4.}),
+        "Sparse, shuffled response keys were not preserved");
+  stations.at("S01").get_apparent_resistivity(values, errors);
+  near(values[1][0], 1.0132118364233778);
+  check(std::isnan(values[0][0]) && std::isnan(values[1][1]) && std::isnan(values[1][2]),
+        "Missing impedance components were filled with zero");
+  stations.at("S01").get_phase(values, errors);
+  near(values[1][0], 45.);
+  check(std::isnan(values[1][2]), "Incomplete impedance yielded a phase");
+  stations.at("S01").get_phase_tensor(values, errors);
+  near(values[1][0], .75);
+  check(std::isnan(values[0][0]), "Incomplete tensor yielded a phase tensor");
+  stations.at("S01").get_tipper(values, errors);
+  near(values[0][1], 0.);
+  check(std::isnan(values[2][1]) && std::isnan(values[1][1]), "Missing tipper scalar became a zero");
+  stations.at("S02").get_phase(values, errors);
+  near(values[2][0], -135.);
+
+  std::istringstream close_frequencies(
+    "1e-8 S01 apparent_resistivity_xy value 10 1\n"
+    "1.005e-8 S01 apparent_resistivity_xy value 20 1\n");
+  auto close = read_responses(close_frequencies);
+  close.at("S01").get_apparent_resistivity(values, errors);
+  near(values[1][0], 10.); near(values[1][1], 20.);
+
+  auto dense = example();
+  dense.resize(12); // Impedance and tipper only; the other curves must be derived.
+  std::istringstream derived(encode(dense, receivers, "Derived").data_text);
+  auto calculated = read_responses(derived);
+  calculated.at("S01").get_phase_tensor(values, errors);
+  for(const auto &component: values)
+    check(std::isfinite(component[0]), "Full impedance did not produce a phase tensor");
+}
+
+void response_rms()
+{
+  auto observed = station("S01", {1., 2., 4.});
+  std::istringstream partial(
+    "2 S01 impedance_xy imag 0.0022 0.0001\n"
+    "2 S01 impedance_xy real 0.0021 0.0001\n"
+    "8 S01 impedance_xy real 9 0.0001\n");
+  auto responses = read_responses(partial);
+  near(observed.rms(responses.at("S01")), std::sqrt(2.5));
+  observed.set_data_mask(RealZxy, 2., false);
+  check(std::isnan(observed.rms(responses.at("S01"))), "RMS included masked/unmatched observations");
+
+  std::istringstream rounded("1.0000001 S01 impedance_xy real 0.0021 0.0001\n");
+  responses = read_responses(rounded);
+  near(observed.rms(responses.at("S01")), 1.);
+
+  std::istringstream phase_only("1 S01 phase_xy value 405 2\n");
+  responses = read_responses(phase_only);
+  near(observed.rms(responses.at("S01")), 0.);
+  observed.set_active(false);
+  check(std::isnan(observed.rms(responses.at("S01"))), "RMS included disabled station");
+}
 }
 
 int main(int argc, char **argv)
@@ -302,6 +388,7 @@ int main(int argc, char **argv)
     format_roundtrip(); invalid_format(); precision_and_comments(); coordinates();
     frequencies_and_distortion(); station_export(); masks_and_missing(); halfspace_and_selection_validation();
     resistivity_phase_contract();
+    response_import(); response_rms();
     if(argc == 2) {
       const auto output = encode(example(), receivers, "Specification example in local Cartesian model coordinates");
       std::ofstream(std::string(argv[1]) + ".data") << output.data_text;
