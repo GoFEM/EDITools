@@ -72,10 +72,13 @@ public:
 
   virtual void set_observed_data(MTStationData &data, bool rescaleAxes = true) = 0;
   virtual void set_predicted_data(const MTStationData &data, bool rescaleAxes = false) = 0;
+  void clear_predicted_data();
 
   void set_associated_plot(MTDataPlot &plot);
 
   void set_error_bars_visible(bool on);
+  void set_component_visibility(const std::array<bool, 4> &visible);
+  const std::array<bool, 4> &component_visibility() const { return m_componentVisible; }
   void set_masking_mode(bool on);
   void set_y_axis_autoscale(bool on);
   bool y_axis_autoscale() const;
@@ -84,6 +87,10 @@ public:
   QCPRange fixed_y_axis_range() const;
 
   std::string get_graph_data_type_name(const QCPGraph *graph) const;
+
+signals:
+  void observationsChanged();
+  void componentVisibilityChanged();
 
 public slots:
   void maskSelectedData();
@@ -94,6 +101,10 @@ public slots:
   void showPointToolTip(QMouseEvent* event);
 
 protected:
+  virtual void apply_component_visibility();
+  virtual void set_legend_component_visible(unsigned component, bool visible);
+  void rebuild_component_legend(const std::vector<int> &graphIndices);
+  void update_component_legend();
   virtual std::vector<RealDataType> get_graph_data_types(const QCPGraph *graph) const;
 
   void set_graph_data(const std::vector<std::vector<bool>> &mask,
@@ -125,6 +136,8 @@ protected:
 
   bool m_yAxisAutoscale;
   QCPRange m_fixedYRange;
+  std::array<bool, 4> m_componentVisible{{true, true, true, true}};
+  bool m_errorBarsVisible = true;
 };
 
 #endif

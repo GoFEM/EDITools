@@ -219,11 +219,12 @@ int main(int argc, char **argv)
         if(!failure.isEmpty()) dialog.reject();
       } else if(auto *file = qobject_cast<QFileDialog *>(QApplication::activeModalWidget())) {
         if(!file_selected) {
-          file->selectFile(destination);
+          file->setDirectory(dir.path());
           file_selected = true;
         } else {
-          // Let QFileSystemModel finish loading the selected directory before
-          // accepting. Re-selecting on every tick can restart that async load.
+          // Enter the filename after opening the directory. selectFile() can
+          // lose its selection while QFileSystemModel loads asynchronously.
+          widget<QLineEdit>(*file, "fileNameEdit")->setText("survey.data");
           QMetaObject::invokeMethod(file, "accept", Qt::DirectConnection);
           saved = true;
         }

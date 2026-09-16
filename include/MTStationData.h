@@ -90,6 +90,9 @@ public:
   void set_active(bool flag);
 
   const dvector &frequencies() const;
+  // Returns false for masked or missing scalars. Error validation is left to
+  // the caller so comparisons can choose observed or inversion errors.
+  bool scalar_value(RealDataType type, unsigned frequency_index, double &value, double &error) const;
 
   void set_frequencies(const std::set<double> &fvalues);
   void set_data(double frequency,
@@ -101,7 +104,7 @@ public:
   std::vector<std::vector<bool>> tipper_mask() const;
   std::vector<std::vector<bool>> phase_tensor_mask() const;
 
-  void set_size(const unsigned n_frequencies);
+  void set_size(const unsigned n_frequencies, bool missing_values = false);
 
   void decimate();
 

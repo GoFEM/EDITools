@@ -25,6 +25,7 @@
 #include <QMenu>
 #include <QAction>
 #include <QComboBox>
+#include <QCheckBox>
 
 #include <memory>
 #include <vector>
@@ -36,6 +37,8 @@
 namespace Ui {
 class MainWindow;
 }
+class FitStatisticsWindow;
+class PeriodMapWindow;
 
 class MainWindow : public QMainWindow
 {
@@ -78,7 +81,9 @@ private slots:
   void on_stationList_itemSelectionChanged();
   void on_stationList_customContextMenuRequested(const QPoint &pos);
 
-  void on_actionLoad_GoFEM_responses_triggered();
+  void on_actionLoad_responses_triggered();
+  void on_actionFit_statistics_triggered();
+  void on_actionPeriod_maps_triggered();
 
   void on_responsesList_currentRowChanged(int currentRow);
 
@@ -103,9 +108,29 @@ private slots:
   struct PlotOptions
   {
     bool phaseWrap = true;
+    bool showStationNames = false;
+    bool tipperArrows = false;
+    std::vector<PlotAxisOptions> axes;
+    std::array<std::array<bool, 4>, 4> componentVisible{{
+      {{true, true, true, true}}, {{true, true, true, true}},
+      {{true, true, true, true}}, {{true, true, true, true}}
+    }};
+
+    template<class Archive>
+    void serialize(Archive &ar, const unsigned int)
+    {
+      ar & phaseWrap & showStationNames & tipperArrows & axes & componentVisible;
+    }
+  };
+
+  struct PlotOptionsV5
+  {
+    bool phaseWrap = true;
     bool showStationNames = true;
     bool tipperArrows = false;
     std::vector<PlotAxisOptions> axes;
+    std::array<bool, 4> impedanceVisible{{true, true, true, true}};
+    std::array<bool, 4> tipperVisible{{true, true, true, true}};
 
     template<class Archive>
     void serialize(Archive & ar, const unsigned int version)
@@ -114,6 +139,8 @@ private slots:
       ar & showStationNames;
       ar & tipperArrows;
       ar & axes;
+      ar & impedanceVisible;
+      ar & tipperVisible;
     }
   };
 
@@ -145,7 +172,24 @@ private slots:
     }
   };
 
+  struct PlotOptionsV4
+  {
+    bool phaseWrap = true;
+    bool showStationNames = true;
+    bool tipperArrows = false;
+    std::vector<PlotAxisOptions> axes;
+
+    template<class Archive>
+    void serialize(Archive &ar, const unsigned int)
+    {
+      ar & phaseWrap & showStationNames & tipperArrows & axes;
+    }
+  };
+
   void setupListContextMenu();
+  void loadResponseFiles(const QStringList &files);
+  void createResponsesList();
+  void refreshAnalysisWindows();
   void rememberDirectory(const QString &path);
   PlotOptions currentPlotOptions() const;
   void applyPlotOptions(const PlotOptions &options);
@@ -173,7 +217,10 @@ private:
   QLabel *stationInfoLabel;
   QLabel *coordinateInfoLabel;
   QComboBox *mapCoordinateSwitch;
+  QCheckBox *mapStationNames;
   SurveyCoordinates mapCoordinates;
+  FitStatisticsWindow *fitStatistics = nullptr;
+  PeriodMapWindow *periodMaps = nullptr;
 };
 
 #endif // MAINWINDOW_H

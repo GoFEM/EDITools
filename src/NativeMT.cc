@@ -140,6 +140,12 @@ std::vector<Observation> read_observations(std::istream &input)
   validate_keys(rows);
   return rows;
 }
+std::map<std::string, MTStationData> read_responses(std::istream &input)
+{
+  return MTResponseData::stations(read_observations(input));
+}
+
+
 Receivers read_receivers(std::istream &input)
 {
   Receivers receivers;

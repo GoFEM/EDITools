@@ -33,6 +33,8 @@ public:
   bool arrow_mode() const;
 
 private:
+  void apply_component_visibility() override;
+  void set_legend_component_visible(unsigned component, bool visible) override;
   std::vector<RealDataType> get_graph_data_types(const QCPGraph *graph) const override;
   void set_layout();
   void clear_arrow_items();
@@ -49,6 +51,7 @@ private:
                           bool predicted);
 
   bool m_arrowMode;
+  std::array<unsigned, 2> m_arrowComponents{{3, 12}};
   std::vector<QCPItemLine*> m_arrowItems;
   std::vector<QCPAbstractItem*> m_referenceItems;
 };

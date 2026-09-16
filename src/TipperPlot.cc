@@ -45,7 +45,8 @@ void TipperPlot::set_observed_data(MTStationData &data, bool rescaleAxes)
     clear_graph_data();
     set_arrow_selection_data(mask, data.frequencies());
     draw_tipper_arrows(tipper, &mask, data.frequencies(), false);
-    draw_reference_arrow();
+    if(std::any_of(m_componentVisible.begin(), m_componentVisible.end(), [](bool visible) { return visible; }))
+      draw_reference_arrow();
   }
   else
   {
@@ -104,10 +105,14 @@ std::vector<RealDataType> TipperPlot::get_graph_data_types(const QCPGraph *graph
   if(m_arrowMode)
   {
     const int idx = graph->property("tipperArrowRole").toInt();
-    if(idx == 1)
-      return {RealTzx, RealTzy};
-    if(idx == 2)
-      return {ImagTzx, ImagTzy};
+    if(idx == 1 || idx == 2) {
+      const unsigned offset = idx == 1 ? 0 : 2;
+      const std::array<RealDataType, 4> types{{RealTzx, RealTzy, ImagTzx, ImagTzy}};
+      std::vector<RealDataType> result;
+      for(unsigned c = offset; c < offset + 2; ++c)
+        if(m_componentVisible[c]) result.push_back(types[c]);
+      return result;
+    }
   }
 
   return MTDataPlot::get_graph_data_types(graph);
@@ -122,6 +127,52 @@ void TipperPlot::clear_arrow_items()
   for(auto *item: m_referenceItems)
     m_plot->removeItem(item);
   m_referenceItems.clear();
+}
+
+void TipperPlot::apply_component_visibility()
+{
+  if(!m_arrowMode) {
+    MTDataPlot::apply_component_visibility();
+    return;
+  }
+  for(unsigned group = 0; group < 2; ++group) {
+    unsigned active = 0;
+    for(unsigned c = group * 2; c < group * 2 + 2; ++c)
+      if(m_componentVisible[c]) active |= 1u << c;
+    if(active) m_arrowComponents[group] = active;
+  }
+  for(int i = 0; i < m_plot->graphCount(); ++i) {
+    auto *graph = m_plot->graph(i);
+    const int role = graph->property("tipperArrowRole").toInt();
+    const unsigned offset = role == 1 ? 0 : 2;
+    const bool visible = (role == 1 || role == 2) &&
+                        (m_componentVisible[offset] || m_componentVisible[offset + 1]);
+    graph->setVisible(visible);
+    if(!visible) graph->setSelection(QCPDataSelection());
+    if(i < 4 && (role == 1 || role == 2)) {
+      QString name = role == 1 ? tr("Real") : tr("Imaginary");
+      const auto mask = m_arrowComponents[offset / 2];
+      if(!(mask & (1u << offset))) name += " Tzy";
+      else if(!(mask & (1u << (offset + 1)))) name += " Tzx";
+      graph->setName(name);
+    }
+  }
+  for(auto *errorBar: m_errorBars) errorBar->setVisible(false);
+  update_component_legend();
+}
+
+void TipperPlot::set_legend_component_visible(unsigned component, bool visible)
+{
+  if(!m_arrowMode) {
+    MTDataPlot::set_legend_component_visible(component, visible);
+    return;
+  }
+  auto components = m_componentVisible;
+  const auto mask = m_arrowComponents[component / 2];
+  for(unsigned c = component; c < component + 2; ++c)
+    components[c] = visible && (mask & (1u << c));
+  set_component_visibility(components);
+  emit componentVisibilityChanged();
 }
 
 void TipperPlot::clear_graph_data()
@@ -140,9 +191,6 @@ void TipperPlot::update_legend()
 
   if(m_arrowMode)
   {
-    for(int i = 0; i < m_plot->graphCount(); ++i)
-      m_plot->graph(i)->removeFromLegend();
-
     if(m_plot->graphCount() >= 3)
     {
       m_plot->graph(0)->setName("Real");
@@ -151,7 +199,6 @@ void TipperPlot::update_legend()
       m_plot->graph(0)->setScatterStyle(QCPScatterStyle(QCPScatterStyle::ssDisc,
                                                         PlotColors::tipperReal(),
                                                         PlotColors::tipperReal(), 5));
-      m_plot->graph(0)->addToLegend();
 
       m_plot->graph(2)->setName("Imaginary");
       m_plot->graph(2)->setProperty("tipperArrowRole", 2);
@@ -159,7 +206,6 @@ void TipperPlot::update_legend()
       m_plot->graph(2)->setScatterStyle(QCPScatterStyle(QCPScatterStyle::ssDisc,
                                                         PlotColors::tipperImaginary(),
                                                         PlotColors::tipperImaginary(), 5));
-      m_plot->graph(2)->addToLegend();
 
       if(m_errorBars.size() >= 3)
       {
@@ -193,9 +239,6 @@ void TipperPlot::update_legend()
   }
   else
   {
-    for(int i = 0; i < m_plot->graphCount(); ++i)
-      m_plot->graph(i)->removeFromLegend();
-
     for(unsigned i = 0; i < pointNames.size() && i < static_cast<unsigned>(m_plot->graphCount()); ++i)
     {
       m_plot->graph(i)->setProperty("tipperArrowRole", 0);
@@ -203,7 +246,6 @@ void TipperPlot::update_legend()
       m_plot->graph(i)->setPen(QPen(pointColors[i]));
       m_plot->graph(i)->setScatterStyle(QCPScatterStyle(QCPScatterStyle::ssCircle,
                                                         pointColors[i], pointColors[i], 5));
-      m_plot->graph(i)->addToLegend();
 
       if(i < m_errorBars.size())
         m_errorBars[i]->setPen(QPen(pointColors[i]));
@@ -226,6 +268,8 @@ void TipperPlot::update_legend()
       m_plot->graph(i + pointNames.size()*2)->setPen(QPen(pointColors[i]));
     }
   }
+  rebuild_component_legend(m_arrowMode ? std::vector<int>{0, 2} : std::vector<int>{0, 1, 2, 3});
+  apply_component_visibility();
 }
 
 void TipperPlot::update_axis_style()
@@ -250,7 +294,7 @@ void TipperPlot::set_arrow_selection_data(const std::vector<std::vector<bool>> &
   {
     const double period = 1.0 / frequencies[i];
 
-    if(mask[0][i] && mask[1][i])
+    if((!m_componentVisible[0] || mask[0][i]) && (!m_componentVisible[1] || mask[1][i]))
     {
       realActiveX.push_back(period);
       realActiveY.push_back(0.0);
@@ -261,7 +305,7 @@ void TipperPlot::set_arrow_selection_data(const std::vector<std::vector<bool>> &
       realMaskedY.push_back(0.0);
     }
 
-    if(mask[2][i] && mask[3][i])
+    if((!m_componentVisible[2] || mask[2][i]) && (!m_componentVisible[3] || mask[3][i]))
     {
       imagActiveX.push_back(period);
       imagActiveY.push_back(0.0);
@@ -282,6 +326,9 @@ void TipperPlot::set_arrow_selection_data(const std::vector<std::vector<bool>> &
 void TipperPlot::draw_arrow(double period, double xComponent,
                             double yComponent, const QPen &pen)
 {
+  if(!std::isfinite(period) || !std::isfinite(xComponent) || !std::isfinite(yComponent))
+    return;
+
   QCPItemLine *arrow = new QCPItemLine(m_plot);
   arrow->setSelectable(false);
   arrow->setLayer("overlay");
@@ -349,14 +396,14 @@ void TipperPlot::draw_tipper_arrows(const std::vector<dvector> &tipper,
   {
     const double period = 1.0 / frequencies[i];
 
-    QPen activeRealPen = realPen;
-    if(mask != nullptr && (!(*mask)[0][i] || !(*mask)[1][i]))
-      activeRealPen = maskedPen;
-    draw_arrow(period, tipper[0][i], tipper[1][i], activeRealPen);
-
-    QPen activeImagPen = imagPen;
-    if(mask != nullptr && (!(*mask)[2][i] || !(*mask)[3][i]))
-      activeImagPen = maskedPen;
-    draw_arrow(period, tipper[2][i], tipper[3][i], activeImagPen);
+    for(unsigned offset: {0u, 2u}) {
+      if(!m_componentVisible[offset] && !m_componentVisible[offset + 1]) continue;
+      QPen pen = offset == 0 ? realPen : imagPen;
+      if(mask && ((m_componentVisible[offset] && !(*mask)[offset][i]) ||
+                  (m_componentVisible[offset + 1] && !(*mask)[offset + 1][i])))
+        pen = maskedPen;
+      draw_arrow(period, m_componentVisible[offset] ? tipper[offset][i] : 0.,
+                 m_componentVisible[offset + 1] ? tipper[offset + 1][i] : 0., pen);
+    }
   }
 }

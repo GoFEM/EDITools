@@ -26,9 +26,11 @@
 
 #include <boost/serialization/map.hpp>
 #include <boost/serialization/version.hpp>
+#include <boost/serialization/vector.hpp>
 
 #include "EDIFileReader.h"
 #include "SurveyCoordinates.h"
+#include "MTResponseData.h"
 
 class MTSurveyData
 {
@@ -42,11 +44,15 @@ public:
 
   // Returns stations names which have duplicates (and therefore were ignored)
   std::vector<std::string> load_from_edi(std::vector<std::string> &file_list);
+  void load_responses(const std::string &file_path, MTResponseData::Format format = MTResponseData::Format::Auto);
   void load_from_gofem(std::string file_path);
+  void load_from_native_responses(const std::string &file_path);
 
   std::vector<std::string> get_stations_names() const;
 
   MTStationData &get_station_data(const std::string &name);
+  const MTStationData &get_station_data(const std::string &name) const;
+  const std::vector<MTResponseData::Scalar> &response_observations() const { return m_response_observations; }
 
   std::vector<std::array<double, 3>> get_stations_locations() const;
   std::vector<std::array<double, 3>> get_stations_locations(const std::vector<std::string> &names) const;
@@ -89,14 +95,17 @@ private:
       ar & m_stations_data;
       if(version >= 1) ar & m_coordinates;
       else if(Archive::is_loading::value) m_coordinates = SurveyCoordinates{};
+      if(version >= 2) ar & m_response_observations;
+      else if(Archive::is_loading::value) m_response_observations.clear();
   }
 
 private:
   std::string m_survey_name;
   std::map<std::string, MTStationData> m_stations_data;
   SurveyCoordinates m_coordinates;
+  std::vector<MTResponseData::Scalar> m_response_observations;
 };
 
-BOOST_CLASS_VERSION(MTSurveyData, 1)
+BOOST_CLASS_VERSION(MTSurveyData, 2)
 
 #endif // MT_SURVEY_DATA_H

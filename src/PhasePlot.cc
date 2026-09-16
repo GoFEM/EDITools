@@ -150,15 +150,18 @@ void PhasePlot::set_phase_graph_responses(const std::vector<dvector> &phase,
   for(unsigned i = 0; i < phase.size(); ++i)
   {
     QVector<double> x, y;
+    bool has_values = false;
     for(unsigned j = 0; j < frequencies.size(); ++j)
     {
-      if(appRes[i][j] <= minPhaseApparentResistivity)
-        continue;
-
       x.push_back(1.0 / frequencies[j]);
-      y.push_back(phase[i][j]);
+      // A native response can supply phase without a companion resistivity.
+      const bool valid = std::isfinite(phase[i][j]) &&
+        !(std::isfinite(appRes[i][j]) && appRes[i][j] <= minPhaseApparentResistivity);
+      y.push_back(valid ? phase[i][j] : std::numeric_limits<double>::quiet_NaN());
+      has_values |= valid;
     }
 
+    if(!has_values) { x.clear(); y.clear(); }
     m_plot->graph(i + phase.size()*2)->setData(x, y);
   }
 }
