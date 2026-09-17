@@ -28,7 +28,8 @@ QCPColorGradient mapGradient(const QString &name)
 QColor arrowColor(bool imaginary) { return imaginary ? QColor("#c2410c") : QColor("#111827"); }
 }
 
-PeriodMapWindow::PeriodMapWindow(QWidget *parent) : QDialog(parent, Qt::Window)
+PeriodMapWindow::PeriodMapWindow(QWidget *parent, std::function<void()> changed)
+  : QDialog(parent, Qt::Window), observationsChanged(std::move(changed))
 {
   setObjectName("periodMapWindow");
   setWindowTitle(tr("Induction vector and phase tensor maps"));
@@ -110,6 +111,24 @@ PeriodMapWindow::PeriodMapWindow(QWidget *parent) : QDialog(parent, Qt::Window)
   controls->addLayout(limits, 1, 5);
   layout->addLayout(controls);
 
+  auto *maskControls = new QHBoxLayout;
+  selectMode = new QCheckBox(tr("Select stations"), this); selectMode->setObjectName("mapSelectStations");
+  selectMode->setToolTip(tr("Click a station, arrow or ellipse; drag a box to select several stations. Ctrl-click toggles a station; Ctrl-drag adds stations. Turn off to pan."));
+  maskControls->addWidget(selectMode);
+  maskControls->addWidget(new QLabel(tr("Observed data at shown period:"), this));
+  maskGroup = new QComboBox(this); maskGroup->setObjectName("mapMaskGroup");
+  maskGroup->addItems({tr("Tippers"), tr("Phase tensor"), tr("Impedance + phase tensor")});
+  maskGroup->setToolTip(tr("Tippers: both directions, real and imaginary. Phase tensor: all four tensor components. Impedance + phase tensor: all impedance and tensor components, including derived resistivity and phase."));
+  maskControls->addWidget(maskGroup);
+  maskButton = new QPushButton(tr("Mask"), this); maskButton->setObjectName("mapMask");
+  unmaskButton = new QPushButton(tr("Unmask"), this); unmaskButton->setObjectName("mapUnmask");
+  clearSelection = new QPushButton(tr("Clear selection"), this); clearSelection->setObjectName("mapClearSelection");
+  for(auto *button: {maskButton, unmaskButton, clearSelection}) maskControls->addWidget(button);
+  maskControls->addStretch();
+  layout->addLayout(maskControls);
+  selectionSummary = new QLabel(this); selectionSummary->setObjectName("mapSelectionSummary");
+  selectionSummary->setWordWrap(true); layout->addWidget(selectionSummary);
+
   plot = new QCustomPlot(this); plot->setObjectName("periodMapPlot");
   plot->setMinimumSize(650, 450);
   plot->setInteractions(QCP::iRangeDrag | QCP::iRangeZoom);
@@ -127,6 +146,28 @@ PeriodMapWindow::PeriodMapWindow(QWidget *parent) : QDialog(parent, Qt::Window)
   summary = new QLabel(this); summary->setObjectName("mapSummary"); summary->setWordWrap(true);
   layout->addWidget(summary);
 
+  connect(selectMode, &QCheckBox::toggled, this, [this](bool selecting) {
+    plot->setSelectionRectMode(selecting ? QCP::srmCustom : QCP::srmNone);
+    plot->setInteraction(QCP::iRangeDrag, !selecting);
+    plot->setCursor(selecting ? Qt::CrossCursor : Qt::ArrowCursor);
+  });
+  connect(plot, &QCustomPlot::mousePress, this, [this](QMouseEvent *event) {
+    selectionStart = event->pos(); selectionDragged = false;
+    selectionStarted = selectMode->isChecked() && event->button() == Qt::LeftButton &&
+                       plot->axisRect()->rect().contains(selectionStart);
+  });
+  connect(plot, &QCustomPlot::mouseRelease, this, [this](QMouseEvent *event) {
+    if(selectionStarted && !selectionDragged && event->button() == Qt::LeftButton)
+      selectStations(QRect(event->pos(), event->pos()), event->modifiers().testFlag(Qt::ControlModifier), false);
+  });
+  connect(plot->selectionRect(), &QCPSelectionRect::accepted, this, [this](const QRect &rect, QMouseEvent *event) {
+    if(selectionStarted && event->button() == Qt::LeftButton)
+      selectStations(rect.normalized(), event->modifiers().testFlag(Qt::ControlModifier), true);
+  });
+  connect(maskButton, &QPushButton::clicked, this, [this] { setSelectedMasks(false); });
+  connect(unmaskButton, &QPushButton::clicked, this, [this] { setSelectedMasks(true); });
+  connect(clearSelection, &QPushButton::clicked, this, [this] { selectedStations.clear(); updateSelection(); });
+
   connect(plot, &QCustomPlot::afterLayout, this, [this] {
     const double width = plot->axisRect()->width(), height = plot->axisRect()->height();
     if(width <= 0. || height <= 0.) return;
@@ -140,6 +181,7 @@ PeriodMapWindow::PeriodMapWindow(QWidget *parent) : QDialog(parent, Qt::Window)
     }
   });
   connect(plot, &QCustomPlot::mouseMove, this, [this](QMouseEvent *event) {
+    if((event->pos() - selectionStart).manhattanLength() > 3) selectionDragged = true;
     QString tooltip;
     double distance = 20.;
     for(const auto &site: sites) {
@@ -182,6 +224,7 @@ void PeriodMapWindow::setData(const std::shared_ptr<MTSurveyData> &data,
 {
   const auto selected = dataset->currentData().toString();
   const auto previousSites = sites;
+  if(survey != data) selectedStations.clear();
   survey = data; responses.clear(); sites.clear(); locationError.clear(); coordinatesDescription.clear();
   {
     const QSignalBlocker block(dataset);
@@ -234,6 +277,11 @@ void PeriodMapWindow::setData(const std::shared_ptr<MTSurveyData> &data,
     }
   }
   geometryChanged = sites.size() != previousSites.size();
+  for(auto it = selectedStations.begin(); it != selectedStations.end();) {
+    if(std::none_of(sites.begin(), sites.end(), [&](const Site &site) { return site.name == *it; }))
+      it = selectedStations.erase(it);
+    else ++it;
+  }
   for(unsigned i = 0; !geometryChanged && i < sites.size(); ++i)
     geometryChanged = sites[i].name != previousSites[i].name || sites[i].position != previousSites[i].position;
   if(geometryChanged && !sites.empty()) {
@@ -302,6 +350,7 @@ void PeriodMapWindow::drawEllipse(const Site &site, const MTMapData::PhaseTensor
   }
   auto *ellipse = new QCPCurve(plot->xAxis, plot->yAxis);
   ellipse->setObjectName("phaseTensor_" + QString::fromStdString(site.name));
+  ellipse->setProperty("stationName", QString::fromStdString(site.name));
   ellipse->setProperty("phiMin", tensor.phiMin); ellipse->setProperty("phiMax", tensor.phiMax);
   ellipse->setProperty("skew", tensor.skew); ellipse->setProperty("azimuth", tensor.azimuth);
   ellipse->setProperty("axisRatio", tensor.axisRatio); ellipse->setProperty("period", actualPeriod);
@@ -320,6 +369,7 @@ void PeriodMapWindow::drawArrow(const Site &site, const std::array<double, 2> &v
   auto *arrow = new QCPItemLine(plot);
   arrow->setLayer("axes");
   arrow->setObjectName((imaginary ? "inductionImag_" : "inductionReal_") + QString::fromStdString(site.name));
+  arrow->setProperty("stationName", QString::fromStdString(site.name));
   arrow->setProperty("north", vector[0]); arrow->setProperty("east", vector[1]); arrow->setProperty("period", actualPeriod);
   arrow->setSelectable(false);
   arrow->start->setCoords(site.position); arrow->end->setCoords(end);
@@ -331,6 +381,7 @@ void PeriodMapWindow::drawArrow(const Site &site, const std::array<double, 2> &v
 void PeriodMapWindow::updateMap(bool fit)
 {
   referenceArrow = nullptr;
+  selectionGraph = nullptr;
   plot->clearPlottables(); plot->clearItems(); haveBounds = false;
   auto colors = mapGradient(colorMap->currentText());
   if(reverseColors->isChecked()) colors = colors.inverted();
@@ -378,8 +429,13 @@ void PeriodMapWindow::updateMap(bool fit)
     }
   }
   auto *stations = plot->addGraph(); stations->setName(tr("Station")); stations->setData(stationX, stationY);
+  stations->setObjectName("mapStations");
   stations->setLineStyle(QCPGraph::lsNone); stations->setScatterStyle(QCPScatterStyle(QCPScatterStyle::ssDisc, QColor("#888888"), 3));
   stations->setSelectable(QCP::stNone); stations->removeFromLegend();
+  selectionGraph = plot->addGraph(); selectionGraph->setObjectName("mapSelectedStations");
+  selectionGraph->setLayer("axes"); selectionGraph->setLineStyle(QCPGraph::lsNone);
+  selectionGraph->setScatterStyle(QCPScatterStyle(QCPScatterStyle::ssCircle, QPen(QColor("#2563eb"), 2), Qt::NoBrush, 13));
+  selectionGraph->setSelectable(QCP::stNone); selectionGraph->removeFromLegend();
   plot->legend->setVisible(realArrows->isChecked() || imagArrows->isChecked());
   for(bool imaginary: {false, true}) if((imaginary ? imagArrows : realArrows)->isChecked()) {
     auto *key = plot->addGraph(); key->setName(imaginary ? tr("Imaginary induction") : tr("Real induction"));
@@ -402,7 +458,83 @@ void PeriodMapWindow::updateMap(bool fit)
         "Missing, incomplete or masked data are omitted. Hover near a station for values.")
        .arg(matchingPeriods).arg(sites.size()).arg(nTensor).arg(nReal).arg(nImag)));
   plot->setProperty("phaseTensorCount", nTensor); plot->setProperty("realVectorCount", nReal); plot->setProperty("imagVectorCount", nImag);
+  updateSelection(false);
   if(fit) fitView(); else plot->replot();
+}
+
+int PeriodMapWindow::observedIndex(const std::string &name) const
+{
+  if(!survey || !survey->is_station_present(name) || !survey->is_active(name)) return -1;
+  return MTMapData::nearest_period(survey->get_station_data(name).frequencies(),
+                                 period->currentData().toDouble(), tolerance->value() / 100.);
+}
+
+void PeriodMapWindow::selectStations(const QRect &rectangle, bool multiple, bool drag)
+{
+  std::set<std::string> found;
+  double closest = 12.;
+  for(const auto &site: sites) {
+    const QPointF pixel(plot->xAxis->coordToPixel(site.position.x()), plot->yAxis->coordToPixel(site.position.y()));
+    if(drag) {
+      if(rectangle.contains(pixel.toPoint())) found.insert(site.name);
+    } else {
+      const auto offset = pixel - rectangle.topLeft();
+      const double distance = std::hypot(offset.x(), offset.y());
+      if(distance < closest) { closest = distance; found = {site.name}; }
+    }
+  }
+  // Stations remain selectable after masking; glyphs can also be clicked away from their centers.
+  if(!drag && found.empty()) {
+    auto hit = [&](QCPLayerable *glyph) {
+      const auto name = glyph->property("stationName");
+      if(!name.isValid()) return;
+      const double distance = glyph->selectTest(rectangle.topLeft(), false);
+      if(distance >= 0. && distance < closest) { closest = distance; found = {name.toString().toStdString()}; }
+    };
+    for(int i = 0; i < plot->plottableCount(); ++i) hit(plot->plottable(i));
+    for(int i = 0; i < plot->itemCount(); ++i) hit(plot->item(i));
+  }
+  if(!multiple) selectedStations = found;
+  else for(const auto &name: found) {
+    if(!drag && selectedStations.count(name)) selectedStations.erase(name);
+    else selectedStations.insert(name);
+  }
+  updateSelection();
+}
+
+void PeriodMapWindow::updateSelection(bool replot)
+{
+  QVector<double> x, y;
+  unsigned eligible = 0;
+  for(const auto &site: sites) if(selectedStations.count(site.name)) {
+    x.push_back(site.position.x()); y.push_back(site.position.y());
+    if(observedIndex(site.name) >= 0) ++eligible;
+  }
+  if(selectionGraph) selectionGraph->setData(x, y);
+  maskButton->setEnabled(eligible > 0); unmaskButton->setEnabled(eligible > 0);
+  clearSelection->setEnabled(!selectedStations.empty());
+  selectionSummary->setText(tr("%1 selected; %2 have active observed data at this period. Mask / Unmask edits only that observed period, within the tolerance. Computed responses are unchanged.")
+                            .arg(selectedStations.size()).arg(eligible));
+  if(replot) plot->replot();
+}
+
+void PeriodMapWindow::setSelectedMasks(bool enabled)
+{
+  bool changed = false;
+  for(const auto &name: selectedStations) {
+    const int index = observedIndex(name);
+    if(index < 0) continue;
+    auto &station = survey->get_station_data(name);
+    const double frequency = station.frequencies()[index];
+    std::vector<RealDataType> types = maskGroup->currentIndex() == 0 ?
+      std::vector<RealDataType>{RealTzx, RealTzy} : std::vector<RealDataType>{PTxx, PTxy, PTyx, PTyy};
+    if(maskGroup->currentIndex() == 2) types.insert(types.end(), {RealZxx, RealZxy, RealZyx, RealZyy});
+    for(auto type: types) station.set_data_mask(type, frequency, enabled);
+    changed = true;
+  }
+  if(!changed) return;
+  if(observationsChanged) observationsChanged();
+  updateMap();
 }
 
 void PeriodMapWindow::fitView()

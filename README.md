@@ -137,6 +137,21 @@ incomplete or masked components are omitted; valid zero vectors have no arrow.
 The summary reports coverage. Response maps use the observed station locations
 and enabled stations, with the selected response's available components.
 
+To mask observations from this map, enable **Select stations**, then click a
+station, arrow or ellipse, or drag a box around stations. **Ctrl-click** toggles
+individual stations; **Ctrl-drag** adds stations. Blue rings mark the selection.
+Choose **Tippers**, **Phase tensor**, or **Impedance + phase tensor**, then click
+**Mask** or **Unmask**. This changes all components in that group at the closest
+observed period within the tolerance; other periods are unaffected. Tipper masks
+apply to both real and imaginary parts. Impedance masks also apply to derived
+resistivity and phase. Masked stations retain their center dots for selection
+and unmasking. Turn off **Select stations** to pan again.
+
+Masking updates the data plots and fit statistics, and is saved with the project.
+It always edits observations, including when viewing a computed response;
+computed response values and curves remain unchanged. Disabled stations and
+stations without an observed period within the tolerance are skipped.
+
 Induction arrows use **Tzx = north**, **Tzy = east**. **Parkinson (−T)** reverses
 the stored components; **Wiese (+T)** keeps their signs. The chosen sign applies
 to both real and imaginary arrows. Set their length in kilometres for **|T| = 1**;
