@@ -490,6 +490,12 @@ void MTStationData::set_data_mask(RealDataType type, double frequency, bool on)
     break;
   }
 
+  // A selected stored frequency must win over nearby frequencies within the legacy tolerance.
+  const auto exact = std::find(freqs.begin(), freqs.end(), frequency);
+  if(exact != freqs.end()) {
+    (*v)[std::distance(freqs.begin(), exact)] = on;
+    return;
+  }
   for(unsigned i = 0; i < freqs.size(); ++i)
     if(fabs(frequency - freqs[i]) / freqs[i] < 1e-3)
     {

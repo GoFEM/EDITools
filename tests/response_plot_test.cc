@@ -38,6 +38,17 @@ template<class T> T *widget(QWidget &parent, const char *name)
   check(result != nullptr, std::string("Missing control: ") + name);
   return result;
 }
+void map_gesture(QCustomPlot *plot, QPointF start, QPointF end, bool drag = false,
+                 Qt::KeyboardModifiers modifiers = Qt::NoModifier)
+{
+  QMouseEvent press(QEvent::MouseButtonPress, start, Qt::LeftButton, Qt::LeftButton, modifiers);
+  QMouseEvent move(QEvent::MouseMove, end, Qt::NoButton, Qt::LeftButton, modifiers);
+  QMouseEvent release(QEvent::MouseButtonRelease, end, Qt::LeftButton, Qt::NoButton, modifiers);
+  QApplication::sendEvent(plot, &press);
+  if(drag) QApplication::sendEvent(plot, &move);
+  QApplication::sendEvent(plot, &release);
+  QApplication::processEvents();
+}
 void file_action(QWidget &window, const char *name, const QStringList &paths)
 {
   bool handled = false;
@@ -468,7 +479,8 @@ void period_maps(const QString &directory)
   explicitTensor.set_data(1., {PTxx, PTxy, PTyx, PTyy}, {2., 0., 0., 1.}, {.01, .01, .01, .01});
   check(MTMapData::phase_tensor(explicitTensor, 0, tensor), "Explicit phase tensor without impedance was rejected");
 
-  PeriodMapWindow window(nullptr);
+  int maskChanges = 0;
+  PeriodMapWindow window(nullptr, [&] { ++maskChanges; });
   window.setData(survey, responses); window.show(); QApplication::processEvents();
   auto *plot = widget<QCustomPlot>(window, "periodMapPlot");
   auto *period = widget<QComboBox>(window, "mapPeriod");
@@ -521,8 +533,83 @@ void period_maps(const QString &directory)
   near(period->currentData().toDouble(), 10.);
   check(plot->property("phaseTensorCount").toUInt() == 1, "Unavailable period was extrapolated");
   widget<QPushButton>(window, "mapPreviousPeriod")->click();
+
+  // Selection works on glyphs and on center dots after masking. Only this period changes.
+  auto &observedA = survey->get_station_data("A");
+  const int otherIndex = MTMapData::nearest_period(observedA.frequencies(), 10., 0.);
+  auto *mask = widget<QPushButton>(window, "mapMask");
+  auto *unmask = widget<QPushButton>(window, "mapUnmask");
+  auto *group = widget<QComboBox>(window, "mapMaskGroup");
+  check(!mask->isEnabled(), "Mask enabled without selected stations");
+  widget<QCheckBox>(window, "mapSelectStations")->setChecked(true);
+  auto selectedCount = [&] { return widget<QCPGraph>(*plot, "mapSelectedStations")->data()->size(); };
+  auto centerPixel = [&] { return QPointF(plot->xAxis->coordToPixel(center.x()), plot->yAxis->coordToPixel(center.y())); };
+  auto arrowTip = widget<QCPItemLine>(*plot, "inductionImag_A")->end->pixelPosition();
+  map_gesture(plot, arrowTip, arrowTip);
+  check(selectedCount() == 1 && mask->isEnabled(), "Clicking an arrow did not select its station");
+  mask->click();
+  check(maskChanges == 1 && !observedA.tipper_mask()[0][index] && !observedA.tipper_mask()[3][index] &&
+        observedA.tipper_mask()[0][otherIndex] && observedA.impedance_mask()[0][index] &&
+        !plot->findChild<QCPItemLine *>("inductionImag_A") && plot->findChild<QCPCurve *>("phaseTensor_A"),
+        "Tipper masking changed other periods/components or left masked arrows");
+  check(FitStatistics::compare(*survey, responses.begin()->second, FitStatistics::ErrorSource::Response).total.count == 8,
+        "Tipper masking did not exclude all four scalars from statistics");
+  group->setCurrentIndex(1); mask->click();
+  check(!observedA.phase_tensor_mask()[0][index] && observedA.impedance_mask()[0][index] &&
+        !plot->findChild<QCPCurve *>("phaseTensor_A"), "Tensor-only mask changed impedance or retained the ellipse");
+  // Round-trip the same station masks that projects serialize.
+  std::stringstream savedMasks;
+  { boost::archive::binary_oarchive archive(savedMasks); archive << *survey; }
+  MTSurveyData restoredMasks;
+  { boost::archive::binary_iarchive archive(savedMasks); archive >> restoredMasks; }
+  check(!restoredMasks.get_station_data("A").phase_tensor_mask()[0][index] &&
+        !restoredMasks.get_station_data("A").tipper_mask()[0][index], "Map masks were lost on serialization");
+  widget<QPushButton>(window, "mapClearSelection")->click();
+  map_gesture(plot, centerPixel(), centerPixel());
+  check(selectedCount() == 1, "Masked station center could not be selected");
+  unmask->click();
+  group->setCurrentIndex(0); unmask->click();
+  group->setCurrentIndex(2); mask->click();
+  check(!observedA.impedance_mask()[3][index] && !observedA.phase_tensor_mask()[3][index] &&
+        observedA.impedance_mask()[3][otherIndex] && observedA.tipper_mask()[0][index],
+        "Impedance + tensor masking changed the wrong components or period");
+  check(FitStatistics::compare(*survey, responses.begin()->second, FitStatistics::ErrorSource::Response).total.count == 4,
+        "Impedance masking did not exclude eight response scalars");
+  unmask->click();
+  // Ctrl-click toggles; dragging selects several centers, and disabled stations are skipped.
+  map_gesture(plot, centerPixel(), centerPixel(), false, Qt::ControlModifier);
+  check(selectedCount() == 0, "Ctrl-click did not remove the selected station");
+  auto *bArrow = widget<QCPItemLine>(*plot, "inductionImag_B");
+  const auto bPixel = bArrow->start->pixelPosition();
+  map_gesture(plot, centerPixel() - QPointF(8, 8), centerPixel() + QPointF(8, 8), true);
+  check(selectedCount() == 1, "Box selection failed");
+  map_gesture(plot, bPixel, bPixel, false, Qt::ControlModifier);
+  check(selectedCount() == 2, "Ctrl-click did not add a station");
+  survey->set_active_flag("B", false); window.setData(survey, responses);
+  mask->click(); survey->set_active_flag("B", true);
+  check(survey->get_station_data("B").impedance_mask()[0][0], "Map masking modified a disabled station");
+  unmask->click();
+  widget<QPushButton>(window, "mapNextPeriod")->click();
+  group->setCurrentIndex(0); mask->click();
+  check(!observedA.tipper_mask()[0][otherIndex] && observedA.tipper_mask()[0][index] &&
+        survey->get_station_data("B").tipper_mask()[0][0], "Masking extrapolated into an unavailable period");
+  unmask->click(); widget<QPushButton>(window, "mapPreviousPeriod")->click();
+  widget<QPushButton>(window, "mapClearSelection")->click();
+  // An ellipse boundary is also a selection target.
+  ellipse = widget<QCPCurve>(*plot, "phaseTensor_A");
+  const auto edge = ellipse->data()->constBegin();
+  const QPointF edgePixel(plot->xAxis->coordToPixel(edge->key), plot->yAxis->coordToPixel(edge->value));
+  map_gesture(plot, edgePixel, edgePixel);
+  check(selectedCount() == 1, "Clicking an ellipse did not select its station");
   dataset->setCurrentIndex(1);
   check(period->count() == 1 && plot->property("phaseTensorCount").toUInt() == 1, "Response map did not update");
+  group->setCurrentIndex(2); mask->click();
+  check(!observedA.impedance_mask()[0][index] && plot->property("phaseTensorCount").toUInt() == 1 &&
+        responses.begin()->second.get_station_data("A").impedance_mask()[0][0],
+        "Masking from a computed map modified the response instead of the observations");
+  unmask->click();
+  widget<QCheckBox>(window, "mapSelectStations")->setChecked(false);
+  check(plot->interactions().testFlag(QCP::iRangeDrag), "Turning selection off did not restore panning");
   survey->set_active_flag("A", false);
   window.setData(survey, responses);
   check(dataset->currentIndex() == 1 && plot->property("phaseTensorCount").toUInt() == 0,
@@ -548,7 +635,26 @@ void period_maps(const QString &directory)
   check(QFileInfo(directory + "/period-map.pdf").size() > 1000 &&
         plot->xAxis->range() == xRange && plot->yAxis->range() == yRange, "PDF export changed the map view");
   window.setData({}, {});
-  check(plot->property("phaseTensorCount").toUInt() == 0, "Empty survey retained old map data");
+  check(plot->property("phaseTensorCount").toUInt() == 0 && selectedCount() == 0 && !mask->isEnabled(),
+        "Empty survey retained old map data or selections");
+
+  // Close frequencies must not cause the first tolerance match to be masked instead.
+  write(observedPath, rows("A", "1") + rows("A", "1.0005"));
+  auto closeSurvey = std::make_shared<MTSurveyData>();
+  closeSurvey->load_from_native_responses(observedPath.toStdString());
+  auto &closeStation = closeSurvey->get_station_data("A");
+  closeStation.set_position({{55., 9., 100.}});
+  window.setData(closeSurvey, {});
+  period->setCurrentIndex(0);
+  near(period->currentData().toDouble(), 1. / 1.0005);
+  widget<QCheckBox>(window, "mapSelectStations")->setChecked(true);
+  const auto closeCenter = widget<QCPItemLine>(*plot, "inductionReal_A")->start->pixelPosition();
+  map_gesture(plot, closeCenter, closeCenter);
+  group->setCurrentIndex(0); mask->click();
+  const int exactIndex = MTMapData::nearest_period(closeStation.frequencies(), 1. / 1.0005, 0.);
+  const int neighborIndex = MTMapData::nearest_period(closeStation.frequencies(), 1., 0.);
+  check(!closeStation.tipper_mask()[0][exactIndex] && closeStation.tipper_mask()[0][neighborIndex],
+        "Map masked a nearby frequency instead of the selected frequency");
 }
 
 struct LegacyAxisV5 {
@@ -667,6 +773,26 @@ void workflow(const QString &directory)
   normalization->setCurrentIndex(1);
   check(checks->topLevelItem(0)->text(2) == "4 / 4", "Normalization lost paired scalars");
   normalization->setCurrentIndex(0);
+  // A map edit immediately refreshes both the main curves and the open fit window.
+  maps->show(); QApplication::processEvents();
+  auto *mapPlot = widget<QCustomPlot>(*maps, "periodMapPlot");
+  widget<QComboBox>(*maps, "mapPeriod")->setCurrentIndex(3); // 1 s (four sorted periods)
+  near(widget<QComboBox>(*maps, "mapPeriod")->currentData().toDouble(), 1.);
+  widget<QCheckBox>(*maps, "mapSelectStations")->setChecked(true);
+  const auto stationPoint = widget<QCPGraph>(*mapPlot, "mapStations")->data()->constBegin();
+  const QPointF stationPixel(mapPlot->xAxis->coordToPixel(stationPoint->key), mapPlot->yAxis->coordToPixel(stationPoint->value));
+  map_gesture(mapPlot, stationPixel, stationPixel);
+  widget<QComboBox>(*maps, "mapMaskGroup")->setCurrentIndex(2);
+  const auto responsePointCount = rho.graph(9)->data()->size();
+  widget<QPushButton>(*maps, "mapMask")->click();
+  check(checks->topLevelItem(0)->text(2) == "2 / 4", "Map mask did not refresh statistics");
+  check(rho.graph(5)->data()->size() == 1 && phase.graph(5)->data()->size() == 1,
+        "Map mask did not refresh observed curves");
+  check(rho.graph(9)->data()->size() == responsePointCount, "Map mask modified computed curves");
+  widget<QPushButton>(*maps, "mapUnmask")->click();
+  check(checks->topLevelItem(0)->text(2) == "4 / 4" && rho.graph(5)->data()->isEmpty(),
+        "Map unmask did not restore plots/statistics");
+  maps->hide();
   statistics_controls(*analysis);
   const auto pairedCount = checks->topLevelItem(1)->text(2);
   for(int mask: {6, 9, 1, 2, 4, 8, 0, 15}) {

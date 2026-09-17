@@ -1016,7 +1016,7 @@ void MainWindow::refreshAnalysisWindows()
 
 void MainWindow::on_actionPeriod_maps_triggered()
 {
-  if(!periodMaps) periodMaps = new PeriodMapWindow(this);
+  if(!periodMaps) periodMaps = new PeriodMapWindow(this, [this] { updatePlots(); refreshAnalysisWindows(); });
   periodMaps->setData(mtSurvey, mtResponses);
   periodMaps->show();
   periodMaps->raise();

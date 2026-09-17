@@ -9,11 +9,15 @@
 #include <QDialog>
 #include <QDoubleSpinBox>
 #include <memory>
+#include <functional>
+#include <set>
+
+class QPushButton;
 
 class PeriodMapWindow : public QDialog
 {
 public:
-  explicit PeriodMapWindow(QWidget *parent);
+  explicit PeriodMapWindow(QWidget *parent, std::function<void()> observationsChanged = {});
   void setData(const std::shared_ptr<MTSurveyData> &survey,
                const std::map<std::string, MTSurveyData> &responses);
 
@@ -33,6 +37,10 @@ private:
                    QCPColorGradient &colors, const QCPRange &range);
   void drawArrow(const Site &site, const std::array<double, 2> &vector, bool imaginary, double period);
   void extendBounds(const QPointF &point);
+  void selectStations(const QRect &rectangle, bool multiple, bool drag);
+  void updateSelection(bool replot = true);
+  void setSelectedMasks(bool enabled);
+  int observedIndex(const std::string &name) const;
 
   std::shared_ptr<MTSurveyData> survey;
   std::map<QString, const MTSurveyData *> responses;
@@ -48,5 +56,14 @@ private:
   QCPRange boundsX, boundsY;
   bool haveBounds = false, geometryChanged = true;
   QCPItemLine *referenceArrow = nullptr;
+  std::function<void()> observationsChanged;
+  std::set<std::string> selectedStations;
+  QCheckBox *selectMode;
+  QComboBox *maskGroup;
+  QPushButton *maskButton, *unmaskButton, *clearSelection;
+  QLabel *selectionSummary;
+  QCPGraph *selectionGraph = nullptr;
+  QPoint selectionStart;
+  bool selectionStarted = false, selectionDragged = false;
 };
 #endif
