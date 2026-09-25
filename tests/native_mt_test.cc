@@ -380,6 +380,20 @@ void response_rms()
   observed.set_active(false);
   check(std::isnan(observed.rms(responses.at("S01"))), "RMS included disabled station");
 }
+
+void station_initialization()
+{
+  auto s = station();
+  double value, error;
+  rejects([&] { s.set_data(1., {RealZxy, ImagZxy}, {.3}, {.01, .01}); }, "same length");
+  check(s.scalar_value(RealZxy, 0, value, error), "Rejected update changed station"); near(value, .002);
+  s.set_active(false); s.set_data_mask(RealTzx, 1., false);
+  s.set_size(3, true); s.set_frequencies({1., 2., 3.});
+  check(s.active() && s.tipper_mask()[0].size() == 3 && s.tipper_mask()[0][2], "Reinitialization left stale masks or sizes");
+  check(!s.scalar_value(RealZxy, 0, value, error), "Reinitialization retained old values");
+  s.set_data(3., {RealZxy, ImagZxy}, {.3, .4}, {.01, .01});
+  check(s.scalar_value(ImagZxy, 2, value, error), "Reinitialized rows were not resized"); near(value, .4);
+}
 }
 
 int main(int argc, char **argv)
@@ -388,7 +402,7 @@ int main(int argc, char **argv)
     format_roundtrip(); invalid_format(); precision_and_comments(); coordinates();
     frequencies_and_distortion(); station_export(); masks_and_missing(); halfspace_and_selection_validation();
     resistivity_phase_contract();
-    response_import(); response_rms();
+    response_import(); response_rms(); station_initialization();
     if(argc == 2) {
       const auto output = encode(example(), receivers, "Specification example in local Cartesian model coordinates");
       std::ofstream(std::string(argv[1]) + ".data") << output.data_text;

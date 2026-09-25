@@ -9,40 +9,20 @@
 #include <set>
 #include <limits>
 
-#include <boost/archive/binary_oarchive.hpp>
-#include <boost/archive/binary_iarchive.hpp>
+#include <boost/serialization/access.hpp>
+#include <boost/serialization/array.hpp>
+#include <boost/serialization/complex.hpp>
+#include <boost/serialization/string.hpp>
+#include <boost/serialization/vector.hpp>
 
 #include "include/datum.h"
 
 using dvector = std::vector<double>;
 using cvector = std::vector<std::complex<double>>;
 
-class weak_compare : public std::binary_function<double,double,bool>
-{
-public:
-  weak_compare( double arg_ = 1e-6 ) : epsilon(arg_) {}
-  bool operator()( const double &left, const double &right  ) const
-  {
-    return (fabs(left - right) > epsilon) && (left < right);
-  }
-  double epsilon;
-};
+// Shared, read-only mapping from supported scalar types to tensor/vector columns.
+extern const std::map<RealDataType, unsigned> type_to_column_table;
 
-static std::map<RealDataType, unsigned> type_to_column_table =
-{
-  {RhoZxx, 0}, {PhsZxx, 0},
-  {RhoZxy, 1}, {PhsZxy, 1},
-  {RhoZyx, 2}, {PhsZyx, 2},
-  {RhoZyy, 3}, {PhsZyy, 3},
-  {RealZxx, 0}, {ImagZxx, 0},
-  {RealZxy, 1}, {ImagZxy, 1},
-  {RealZyx, 2}, {ImagZyx, 2},
-  {RealZyy, 3}, {ImagZyy, 3},
-  {RealTzy, 1}, {ImagTzy, 1},
-  {RealTzx, 0}, {ImagTzx, 0},
-  {PTxx, 0}, {PTxy, 1},
-  {PTyx, 2}, {PTyy, 3}
-};
 
 class MTStationData
 {
@@ -50,6 +30,7 @@ class MTStationData
   friend class EDIFileReader;
   friend struct NativeMTStationAccess;
   friend struct PeriodResamplingAccess;
+  friend struct EDIPeriodMergeAccess;
 
 private:
   std::string station_name;
@@ -71,14 +52,12 @@ private:
 
   std::vector<std::vector<bool>> Z_mask, T_mask, PT_mask;
 
-  double error_floor;
+  double error_floor = 0.;
 
-  bool is_active;
+  bool is_active = true;
 
 public:
-  MTStationData():
-    error_floor(0)
-  {}
+  MTStationData() = default;
 
   std::string name() const;
   void set_name(std::string new_name);
@@ -105,6 +84,7 @@ public:
   std::vector<std::vector<bool>> tipper_mask() const;
   std::vector<std::vector<bool>> phase_tensor_mask() const;
 
+  // Initialize all arrays and masks, replacing any previously loaded samples.
   void set_size(const unsigned n_frequencies, bool missing_values = false);
 
   void decimate();
@@ -128,8 +108,12 @@ public:
 
   void set_error_floor(double val);
 
-  void mask_type(RealDataType type, bool on);
-  void set_data_mask(RealDataType type, double frequency, bool on);
+  // Optional UI linkage follows Phi = Re(Z)^-1 Im(Z): a complex Z component
+  // relates to every PT entry, and any PT entry to all complex Z components.
+  // Apply only to the opposite tensor, without recursive propagation.
+  void mask_type(RealDataType type, bool on, bool linkTensorMasks = false);
+  void set_data_mask(RealDataType type, double frequency, bool on, bool linkTensorMasks = false);
+  static const std::vector<RealDataType> &linked_mask_types(RealDataType type);
 
   std::set<RealDataType> active_types() const;
 
@@ -145,11 +129,8 @@ private:
   template<class U>
   std::vector<U> decimate_vector(const std::vector<U> &vec);
 
-  std::complex<double> sgn(const std::complex<double> &val) const
-  {
-    return val / std::abs(val);
-  }
 
+  std::vector<bool> &mask_for(RealDataType type);
   void apply_error_floor();
   void propagate_rho_phase_error();
   void propagate_phase_tensor_error();

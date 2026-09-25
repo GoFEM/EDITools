@@ -30,7 +30,7 @@
 #include <boost/serialization/version.hpp>
 #include <boost/serialization/vector.hpp>
 
-#include "EDIFileReader.h"
+#include "MTStationData.h"
 #include "SurveyCoordinates.h"
 #include "MTResponseData.h"
 #include "PeriodResamplingInfo.h"
@@ -38,8 +38,8 @@
 class MTSurveyData
 {
 public:
-  MTSurveyData();
-  MTSurveyData(const std::string survey_name);
+  MTSurveyData() = default;
+  explicit MTSurveyData(const std::string &survey_name);
 
   std::string get_survey_name() const;
   const PeriodResampling::Info &resampling_info() const { return m_resampling_info; }
@@ -48,9 +48,9 @@ public:
   bool is_station_present(const std::string &name) const;
 
   // Returns stations names which have duplicates (and therefore were ignored)
-  std::vector<std::string> load_from_edi(std::vector<std::string> &file_list);
+  std::vector<std::string> load_from_edi(const std::vector<std::string> &file_list);
   void load_responses(const std::string &file_path, MTResponseData::Format format = MTResponseData::Format::Auto);
-  void load_from_gofem(std::string file_path);
+  void load_from_gofem(const std::string &file_path);
   void load_from_native_responses(const std::string &file_path);
 
   std::vector<std::string> get_stations_names() const;

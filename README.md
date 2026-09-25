@@ -6,18 +6,19 @@ A simple GUI tool to work with large collections of [Magnetitelluric](https://en
 
 ## Features
 
-- Visualize all transfer functions 
-- Assign error floors (with a proper error propagation from impedances to derived quantities such as apparent resitivity, phase or phase tensor)
+- Visualize all transfer functions
+- Assign error floors (with a proper error propagation from impedances to derived quantities such as apparent resistivity, phase or phase tensor)
 - Decimate data
 - Save a PDF graphic of all plots
 - Mask any data
 - Save/Load a project with all masking and settings preserved
-- Export a subset of data to a [GoFEM](https://github.com/GoFEM/pyGoFEM) format for the subsequent inversion.
-- Visualize responses calculated by GoFEM or MT inversion (Tellurion3D) as lines over the observed data.
+- Export selected data in supported inversion formats.
+- Overlay computed inversion responses on observed data.
 
 ## Dependencies
 
-- Qt >= 5.0
+- A C++14 compiler
+- Qt >= 5.12 (Widgets, PrintSupport and Network)
 - Eigen >= 3
 - CMake >= 3.10
 - Boost >= 1.84
@@ -26,27 +27,63 @@ A simple GUI tool to work with large collections of [Magnetitelluric](https://en
 
 ## Building
 
-The code was tested for linux using GNU Toolchain. Provided dependencies above are installed (for instance using conda) and CMake knows where to find them, the configuring and building is rather simple
+The app has been tested on Linux with the GNU toolchain. Install the dependencies
+above and configure their locations before building:
 
-> mkdir build; cd build
+```sh
+mkdir -p build/Release
+cd build/Release
+cmake -DQCUSTOMPLOT_PATH:PATH=/path/to/qcustomplot \
+  -DEIGEN_PATH:PATH=/path/to/eigen ../..
+cmake --build .
+cd ../..
+```
 
-> cmake -DQCUSTOMPLOT_PATH:PATH=/path/to/qcustomplot -DEIGEN_PATH:PATH=/path/to/eigen ../
-
-> make
+The build shares the data and plotting libraries between the app and tests.
+Run checks with `ctest --test-dir build/Release --output-on-failure`.
 
 ## Usage
+
+### EDI import and nearby periods
+
+Both impedance (`MTSECT`) and seven-channel remote-reference spectra
+(`SPECTRASECT`) are processed natively in C++. No Fortran compiler or runtime is
+required. Spectral matrices use the channel order Hx, Hy, Hz, Ex, Ey, Rx, Ry.
+The estimator calculates impedance, tipper and their standard errors from the
+packed spectral powers and `AVGT`; derived quantities use the same routines as
+other input formats. Invalid reference powers, nonpositive averaging counts,
+singular systems and truncated matrices are rejected. Missing output channels
+remain missing without discarding valid outputs from other channels.
+
+After selecting EDI files, the import preview shows station/sample counts, the
+period range, the distinct-period count before and after merging, and a table
+of nearby-period groups. **Merge close periods** is optional and off by default.
+The initial **Tolerance (%)** is **0.1**. Changing it updates the preview.
+
+A group must satisfy `(maximum period - minimum period) / minimum period <
+tolerance / 100`; adjacent matches cannot form a chain spanning a wider range.
+New stations receive the group's lower median distinct period, or an existing
+survey period when there is exactly one. Existing stations remain unchanged.
+Groups containing multiple samples from one station or multiple distinct
+existing periods are left unchanged and identified in the table.
+
+Merging assigns common frequencies without averaging or interpolation. It
+preserves impedance, tipper, phase tensor, their errors and masks. Apparent
+resistivity and its error are adjusted for the assigned frequency. Original EDI
+files remain unchanged. Duplicate station names are skipped and listed in the
+preview help. Canceling the preview or a file-read failure leaves the current
+survey and project association unchanged.
 
 ### Computed responses
 
 Load the observed EDI data or an existing project, then use **File → Load
 responses…**. Select any mix of GoFEM and native MT inversion response files;
-the format is detected from their contents. For Tellurion3D, select one or more
-`inversion_predicted_iterNNNN.txt` files in the run's `output` folder. Select a
-file in **Calculated responses** to overlay its curves on the selected station.
+the format is detected from their contents. Select a file in **Calculated
+responses** to overlay its curves on the selected station.
 The last selected filename in sorted order is displayed immediately.
 
-Only the input readers differ. Both formats use the same response model, curves,
-visibility controls, fit statistics, RMS maps, period maps and project storage.
+Both formats support the same plots, visibility controls, fit statistics, RMS
+maps, period maps and project storage.
 Reloading a file replaces its data and updates every open analysis window.
 
 | Input format | Six columns |
@@ -107,6 +144,11 @@ matched counts mean the responses cover different subsets of the observations.
 
 ### Component visibility
 
+Component colors use two families: **XX / XY** are light / dark blue, and
+**YX / YY** are dark / light orange. Tippers retain their blue/light-blue **Tzx**
+and orange/yellow **Tzy** palette for real/imaginary parts. The same colors identify observed
+points, error bars, response lines, legends and survey PDF plots.
+
 Each plot's legend has one checkbox per component. Uncheck **XX** and **YY**
 to keep only off-diagonal impedances, or leave just one component checked.
 Tipper legends offer **Re / Im Tzx / Tzy** in scalar mode and **Real / Imaginary**
@@ -117,6 +159,27 @@ Each checkbox controls that plot's observed points, error bars and computed
 curves. Plots have independent visibility settings, saved with the project;
 data masks and fit statistics are unchanged. Partial tipper arrows are labeled
 with their selected direction, and toggling them preserves that projection.
+
+### Linked impedance and phase-tensor masks
+
+**Data → Link Z / PT masks** is on by default and saved with the project.
+It links mask/unmask operations from plots (including inverted masking),
+station component controls, and period maps. Turning it off restores independent
+editing; toggling the option does not change existing masks. Tippers are independent.
+
+The link follows the general phase tensor definition `Phi = Re(Z)^-1 Im(Z)`.
+Each PT entry depends on all four real impedance entries, so there is no general
+one-to-one mapping between Z and PT components. For example, only in the special
+2D case do `Zxy` and `Zyx` correspond to `PTyy` and `PTxx`, respectively.
+See [Caldwell et al. (2004), equations 13–15](https://doi.org/10.1111/j.1365-246X.2004.02281.X).
+
+Because each complex impedance component shares a real/imaginary mask, masking
+one Z component (or its apparent resistivity/phase) also masks **all four PT
+entries at that period**. Masking one PT entry also masks **all four Z components
+at that period**. This applies only to the opposite tensor: it does not recursively
+change the other entries in the starting tensor. Unmasking applies the same links.
+For inverted selections, a mask takes precedence if multiple selected components
+give conflicting instructions for a shared dependent entry.
 
 ### Station, induction-vector and phase-tensor maps
 
@@ -173,13 +236,126 @@ while the window is open.
 The tensor geometry follows
 [Caldwell et al. (2004)](https://doi.org/10.1111/j.1365-246X.2004.02281.X).
 
+### Geographic map layers
+
+**Map layers…** adds optional coastlines, country boundaries, state/province
+boundaries, and rivers/lakes to station maps, RMS maps and period maps. Each layer
+has one checkbox. Report export has the same menu and applies its choices to all
+maps in the PDF. Its initial selection follows the main station map.
+
+Natural Earth data are **not bundled in this repository or embedded in the app**.
+They are optional external files. Without them, geographic layer checkboxes are
+disabled; station plots, maps and report export continue to work normally. No map
+data are downloaded automatically.
+
+#### Optional data setup
+
+Download these Natural Earth **1:10-million** ZIP files into a directory outside
+the repository, retaining their filenames:
+
+| Layer | Download |
+| --- | --- |
+| Coastlines | [ne_10m_coastline.zip](https://naturalearth.s3.amazonaws.com/10m_physical/ne_10m_coastline.zip) |
+| Country boundaries | [ne_10m_admin_0_boundary_lines_land.zip](https://naturalearth.s3.amazonaws.com/10m_cultural/ne_10m_admin_0_boundary_lines_land.zip) |
+| State/province boundaries | [ne_10m_admin_1_states_provinces_lines.zip](https://naturalearth.s3.amazonaws.com/10m_cultural/ne_10m_admin_1_states_provinces_lines.zip) |
+| Rivers | [ne_10m_rivers_lake_centerlines.zip](https://naturalearth.s3.amazonaws.com/10m_physical/ne_10m_rivers_lake_centerlines.zip) |
+| Lakes | [ne_10m_lakes.zip](https://naturalearth.s3.amazonaws.com/10m_physical/ne_10m_lakes.zip) |
+
+Convert them with the provided helper (Python standard library only). The app
+automatically looks in the user's data directory:
+
+- Linux: `~/.local/share/EDITools/natural-earth` (or under `XDG_DATA_HOME`).
+- Windows: `%LOCALAPPDATA%\EDITools\natural-earth`.
+- macOS: `~/Library/Application Support/EDITools/natural-earth`.
+
+For another location, set `EDITOOLS_MAP_DATA_DIR` before starting the app:
+
+```sh
+python3 tools/pack_natural_earth.py /path/to/downloads /path/to/map-data
+export EDITOOLS_MAP_DATA_DIR=/path/to/map-data
+./build/Release/main
+```
+
+On Windows, set `$env:EDITOOLS_MAP_DATA_DIR = 'D:\Maps\natural-earth'` in
+PowerShell before launching the executable. Restart the app after installing or
+changing data. The helper produces five compressed `.bin` files (about 8 MB) plus
+`manifest.json` recording source URLs, versions and checksums. Keep these files
+outside the repository. It retains line parts and lake shoreline rings without
+additional simplification, converts longitude/latitude to float32, and uses
+Qt-compatible compression.
+
+Once installed, layers work offline and export as vector lines. They use the
+same latitude/longitude or WGS84/UTM projection, origin and units as the survey
+map. Layers do not alter station selection, masking or automatic axis extents.
+Zoom out when the survey is far from a regional boundary or coastline. UTM
+context is limited to ±30° of the zone's central meridian and latitudes −80° to 84°.
+
+Natural Earth is **public domain**, permitting use, modification and redistribution,
+including commercial use; attribution is optional. See the
+[Natural Earth terms](https://www.naturalearthdata.com/about/terms-of-use/).
+These are generalized regional reference features; small rivers and lakes may
+be absent, and political boundaries follow Natural Earth's de facto representation.
+
+#### OpenStreetMap online basemap
+
+Enable **Map layers… → OpenStreetMap (online)** on a station, RMS or period map.
+It starts off. **OSM opacity** adjusts the background in all maps and exports.
+Tiles are aligned with the current geographic or UTM coordinates, including the
+survey origin. Station symbols, arrows and ellipses remain on top.
+
+Only the visible map in the active window requests tiles, after panning or zooming
+settles. Hidden windows, background windows and exports do not download tiles.
+The app shares its cache between maps, identifies itself to the server, respects
+HTTP cache lifetimes, and revalidates expired tiles with server validators. If
+expiry information is absent, tiles are cached for seven days. At most two
+requests run together; rate limits and access-denied responses stop further
+requests. There is no area-download, prefetch or offline-download feature.
+
+**PDF and image exports use available tiles only**, including in survey reports.
+View the desired area online before exporting. Higher-resolution export does not
+fetch extra tiles; incomplete exports carry a short “Partial basemap” note.
+On screen, a compact **© OpenStreetMap contributors** link opens the licence;
+hover over it for tile availability and connection details. Exports include the
+printed licence URL. **OSM attribution / licence…** also opens the licence information.
+
+The default service is `https://tile.openstreetmap.org/{z}/{x}/{y}.png`, used under
+the [tile policy](https://operations.osmfoundation.org/policies/tiles/).
+Map credits follow the [attribution guidelines](https://osmfoundation.org/wiki/Licence/Attribution_Guidelines).
+Tile requests disclose the viewed map area to the service; station names and
+measurements are not transmitted. Availability depends on the service and the
+network. Natural Earth layers remain independent of the online basemap.
+
+The cache is stored outside the repository, under the user's cache directory
+(`~/.cache/EDITools/osm` on Linux, respecting `XDG_CACHE_HOME`). It targets 512 MB
+by removing old, expired entries while preserving fresh tiles and at least seven
+days of storage. To use another compatible OSM-derived service, set
+`EDITOOLS_OSM_TILE_URL` to its HTTPS `{z}/{x}/{y}` template before launching.
+Additional provider credits can be supplied in `EDITOOLS_OSM_ATTRIBUTION`;
+use the provider's required attribution and access terms. Restart after changes.
+
 ### Survey PDF report
 
 Use **File → Export survey report…** to create a landscape PDF with a survey
-overview followed by one page per station. The overview includes a station map,
-period coverage, full/partial/masked/missing period counts and, when selected,
+overview, station pages, phase-tensor ellipse maps, and/or induction-vector maps.
+Each section can be selected independently. The overview includes a station map
+with station names, period coverage, full/partial/masked/missing period counts and, when selected,
 response fit statistics. Each station page places resistivity, phase, tipper and
-phase-tensor plots beside a map highlighting that station.
+phase-tensor plots beside a map highlighting that station. Station tippers can
+be exported as lines or arrows; masked samples interrupt observation lines.
+
+Local project paths are omitted from the report. Response labels use only the
+filename, without directories or machine names.
+
+Map pages use a comma-separated list of periods in seconds (**All** selects all
+survey periods), with one page per period and dataset. Selected phase-tensor
+ellipses and induction vectors appear together on the same map. Choose
+observations, the selected response, or both; choose real and/or imaginary
+induction vectors. The dialog previews the total page count. Nearest-period
+matching, tolerance, vector convention, sizes, colors and station labels follow
+the period map window when open; maps never interpolate or extrapolate. Only
+valid, enabled data appear. Map extents fit each exported page. The UTM zone and
+**origin easting/northing in metres** accompany the overview, station and period
+maps so plotted offsets can be converted back to absolute coordinates.
 
 Each stored period counts once for each data type (impedance, tipper, phase
 tensor). **Full** means all components are finite and enabled: four complex
@@ -204,7 +380,7 @@ observed errors and all matched, enabled scalar data, independently of plot
 visibility. Fixed Y ranges from **Plot → Axis ranges** are retained on every
 station page, including response overlays and empty panels. Y axes set to
 autoscale and period axes scale to each station. Phase wrapping follows the
-main window. Maps include all valid survey locations. Missing coordinates are
+main window. Station locator maps include all valid survey locations. Missing coordinates are
 noted on the station page. The **?** button explains the options.
 
 Export leaves the survey and current plots unchanged. Canceling or a failed
@@ -271,21 +447,6 @@ Reopen the tool to **Open source** or **Saved audit…**; **Preview CSV…**
 exports the current preview before applying. The saved audit
 describes the resampling operation, before subsequent edits or masking.
 
-#### MTPy-v2 review
-
-The implementation was reviewed against MTPy-v2 revision
-[`c57f20e`](https://github.com/MTgeophysics/mtpy-v2/tree/c57f20ee8d77fe5c6e979a747eb5f52b50f2bdcc).
-Its [transfer-function accessor](https://github.com/MTgeophysics/mtpy-v2/blob/c57f20ee8d77fe5c6e979a747eb5f52b50f2bdcc/mtpy/core/transfer_function/accessor.py)
-interpolates real and imaginary parts separately, handles each channel pair's
-finite data range and disables extrapolation by default. It removes non-finite
-samples before interpolation; its interpolation routine has no bounding-gap
-limit or mask-barrier control. The default method is `slinear` against period
-itself. Its [survey interpolation](https://github.com/MTgeophysics/mtpy-v2/blob/c57f20ee8d77fe5c6e979a747eb5f52b50f2bdcc/mtpy/core/mt_data.py)
-supports a shared target grid and clips it to station ranges when requested.
-EDITools adopts the component-level range checks and separate real/imaginary
-treatment, with log-period weighting, explicit gap limits, mask barriers,
-retention of exact isolated samples, and an auditable source copy.
-
 ### Coordinates and export
 
 Use **Coordinates → Convert latitude/longitude to UTM…** to project the loaded
@@ -310,11 +471,9 @@ Show latitude/longitude on map** is a shortcut to the geographic view.
 Elevations and response tensors are unchanged by this
 coordinate operation. Projection uses [PROJ](https://proj.org/en/stable/development/quickstart.html).
 
-**File → Export to MT Inversion…** writes the format described in
-[MT_DATA_EXPORT_SPEC.md](MT_DATA_EXPORT_SPEC.md). Select the observations and
-periods, then export; no coordinate file or convention confirmations are
-required. It uses the survey's UTM coordinates, automatically choosing an
-uncentered WGS84/UTM projection if none has been applied. The native receiver
+**File → Export to MT Inversion…** exports selected observations and periods
+to native data, receiver and frequency files. It uses the survey's UTM coordinates,
+automatically choosing an uncentered WGS84/UTM projection if none has been applied. The native receiver
 file uses `x = northing`, `y = easting`, `z = -elevation` (metres).
 Optional sign changes and a distortion-compatibility check are under **Advanced**.
 
@@ -331,8 +490,6 @@ companion naming, `<output>.recvs` and `<output>.freqs`.
 
 Run the format, coordinate and GUI workflow tests after building with
 `ctest --test-dir build/Release --output-on-failure`.
-
-The animation above illustrating main features. 
 
 The following hotkeys are also useful when you click on a transfer function plot:
 

@@ -115,6 +115,7 @@ PeriodLayoutWindow::PeriodLayoutWindow(QWidget *parent, std::function<void(std::
   counts->setEditTriggers(QAbstractItemView::NoEditTriggers); counts->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
   tabs->addTab(counts, tr("Station summary")); layout->addWidget(tabs, 1);
   sourceSummary = new QLabel(this); sourceSummary->setObjectName("layoutSourceSummary"); sourceSummary->setWordWrap(true); layout->addWidget(sourceSummary);
+  sourceSummary->setToolTip(tr("Unique periods are distinct, finite, positive periods across all stations in the loaded survey, including masked samples and disabled stations. Each exact period is counted once; nearby periods are not merged. This count does not depend on the selected component. Source samples and large gaps refer to that component."));
   summary = new QLabel(this); summary->setObjectName("layoutSummary"); summary->setWordWrap(true); layout->addWidget(summary);
   history = new QLabel(this); history->setObjectName("layoutHistory"); history->setWordWrap(true);
   auto *actions = new QHBoxLayout;
@@ -244,7 +245,7 @@ void PeriodLayoutWindow::preview()
       else if(available(r.status)) ++interpolated;
       else ++unavailable;
     }
-    summary->setText(tr("Preview: %4 periods · %1 original · %2 estimated / derived · %3 missing")
+    summary->setText(tr("Preview: %4 target periods · %1 original · %2 estimated / derived · %3 missing")
                      .arg(existing).arg(interpolated).arg(unavailable).arg(periods.size()));
     bool hasValues = existing + interpolated > 0;
     if(!hasValues) for(const auto &name: result->get_stations_names()) {
@@ -302,7 +303,7 @@ void PeriodLayoutWindow::updatePlots()
   if(!component->currentData().isValid()) return;
   drawLayout(sourcePlot, false); drawLayout(targetPlot, true);
   counts->setRowCount(0); coverage->clearGraphs();
-  if(!survey) { coverage->replot(); return; }
+  if(!survey) { sourceSummary->clear(); coverage->replot(); return; }
   const auto names = survey->get_stations_names(); const unsigned c = component->currentData().toUInt();
   std::map<double, unsigned> sourceCoverage, existingCoverage, addedCoverage;
   std::map<std::string, std::array<unsigned, 3>> targets;
@@ -333,8 +334,10 @@ void PeriodLayoutWindow::updatePlots()
       survey->is_active(names[row]) ? tr("Yes") : tr("No")};
     for(int col = 0; col < cells.size(); ++col) counts->setItem(row, col, new QTableWidgetItem(cells[col]));
   }
-  sourceSummary->setText(tr("%1: %2 source samples · %3 stations · %4 large gaps (ratio > %5)")
-                         .arg(component->currentText()).arg(total).arg(names.size()).arg(largeGaps).arg(gap->value()));
+  const auto periods = survey->get_unique_periods();
+  const auto unique = std::count_if(periods.begin(), periods.end(), [](double p) { return std::isfinite(p) && p > 0.; });
+  sourceSummary->setText(tr("Source: %1 unique periods · %2 stations | %3: %4 samples · %5 large gaps (ratio > %6)")
+                         .arg(unique).arg(names.size()).arg(component->currentText()).arg(total).arg(largeGaps).arg(gap->value()));
   auto graph = [&](const QString &name, const std::map<double, unsigned> &data, const QColor &color) {
     QVector<double> x, y;
     for(const auto &p: data) { x.push_back(p.first); y.push_back(p.second); }

@@ -93,43 +93,33 @@ namespace
 {
 const QColor &componentXX()
 {
-  static const QColor color("#2563EB");
+  static const QColor color("#579BC9");
   return color;
 }
 
 const QColor &componentXY()
 {
-  static const QColor color("#E24A33");
+  static const QColor color("#1D5FA2");
   return color;
 }
 
 const QColor &componentYX()
 {
-  static const QColor color("#059669");
+  static const QColor color("#B45309");
   return color;
 }
 
 const QColor &componentYY()
 {
-  static const QColor color("#D97706");
-  return color;
-}
-
-const QColor &tipperTzxImaginary()
-{
-  static const QColor color("#60A5FA");
-  return color;
-}
-
-const QColor &tipperTzyImaginary()
-{
-  static const QColor color("#FBBF24");
+  static const QColor color("#D08738");
   return color;
 }
 }
 
 const std::vector<QColor> &componentColors()
 {
+  // Tensor rows form two hue families: XX/XY blue, YX/YY orange.
+  // Keep the off-diagonal components darker than their diagonal partners.
   static const std::vector<QColor> colors = {
     componentXX(),
     componentXY(),
@@ -141,11 +131,12 @@ const std::vector<QColor> &componentColors()
 
 const std::vector<QColor> &tipperScalarColors()
 {
+  // Preserve the established tipper palette independently of impedance colors.
   static const std::vector<QColor> colors = {
-    componentXX(),
-    componentYY(),
-    tipperTzxImaginary(),
-    tipperTzyImaginary()
+    QColor("#2563EB"),
+    QColor("#D97706"),
+    QColor("#60A5FA"),
+    QColor("#FBBF24")
   };
   return colors;
 }
@@ -179,7 +170,7 @@ MTDataPlot::MTDataPlot(QCustomPlot *plot):
   m_plot(plot), m_associated_plot(nullptr),
   m_yAxisAutoscale(true), m_fixedYRange(plot->yAxis->range())
 {
-  m_contextMenu = new QMenu;
+  m_contextMenu = new QMenu(m_plot);
   m_contextMenu->addAction(tr("Mask"), this, &MTDataPlot::maskSelectedData);
   m_contextMenu->addAction(tr("Inverted Mask"), this, &MTDataPlot::invMaskSelectedData);
   m_contextMenu->addAction(tr("Unmask"), this, &MTDataPlot::unmaskSelectedData);
@@ -189,8 +180,7 @@ MTDataPlot::MTDataPlot(QCustomPlot *plot):
   connect(m_plot, SIGNAL(mouseMove(QMouseEvent*)), this, SLOT(showPointToolTip(QMouseEvent*)));
 }
 
-MTDataPlot::~MTDataPlot()
-{}
+MTDataPlot::~MTDataPlot() = default;
 
 void MTDataPlot::set_associated_plot(MTDataPlot &plot)
 {
@@ -498,7 +488,7 @@ void MTDataPlot::mask_selected_data(bool on)
       for (auto it = begin; it != end; ++it)
       {
         for(const auto type: types)
-          m_data->set_data_mask(type, 1. / it->key, on);
+          m_data->set_data_mask(type, 1. / it->key, on, m_linkTensorMasks);
       }
     }
   }
@@ -516,40 +506,35 @@ void MTDataPlot::maskSelectedData()
 
 void MTDataPlot::invMaskSelectedData()
 {
-  auto frequencies = m_data->frequencies();
-
-  QList<QCPGraph*> selectedGraphs = m_plot->selectedGraphs();
-  for(auto &graph: selectedGraphs)
-  {
-    QCPDataSelection selection = graph->selection();
-    const std::vector<RealDataType> types = get_graph_data_types(graph);
-    if(types.empty())
-      continue;
-
-    dvector selected_freqs;
-
-    for (QCPDataRange dataRange: selection.dataRanges())
-    {
-      auto begin = graph->data()->at(dataRange.begin());
-      auto end = graph->data()->at(dataRange.end());
-      for (auto it = begin; it != end; ++it)
-        selected_freqs.push_back(1. / it->key);
-    }
-
-    for(unsigned i = 0; i < frequencies.size(); ++i)
-    {
-      bool found = false;
-      for(unsigned j = 0; j < selected_freqs.size(); ++j)
-        if(fabs(selected_freqs[j] - frequencies[i]) / frequencies[i] < 1e-3)
-        {
-          found = true;
-          break;
+  const auto &frequencies = m_data->frequencies();
+  std::map<RealDataType, std::vector<bool>> selected;
+  for(auto *graph: m_plot->selectedGraphs()) {
+    const auto types = get_graph_data_types(graph);
+    for(auto type: types) if(!selected.count(type)) selected[type].assign(frequencies.size(), false);
+    for(const auto &range: graph->selection().dataRanges()) {
+      for(auto point = graph->data()->at(range.begin()); point != graph->data()->at(range.end()); ++point) {
+        const double frequency = 1. / point->key;
+        int closestIndex = -1; double closest = 1e-3;
+        for(unsigned i = 0; i < frequencies.size(); ++i) {
+          const double distance = std::abs(frequency - frequencies[i]) / frequencies[i];
+          if(distance < closest) { closest = distance; closestIndex = i; }
         }
-
-      for(const auto type: types)
-        m_data->set_data_mask(type, frequencies[i], found);
+        if(closestIndex >= 0) for(auto type: types) selected[type][closestIndex] = true;
+      }
     }
   }
+  // A masked input wins over an unmask when several selected components share
+  // a dependent PT/Z entry. Compute the whole operation before modifying data.
+  std::map<RealDataType, std::vector<bool>> related;
+  for(const auto &entry: selected) {
+    for(unsigned i = 0; i < frequencies.size(); ++i) m_data->set_data_mask(entry.first, frequencies[i], entry.second[i]);
+    if(m_linkTensorMasks) for(auto type: MTStationData::linked_mask_types(entry.first)) {
+      if(!related.count(type)) related[type].assign(frequencies.size(), true);
+      for(unsigned i = 0; i < frequencies.size(); ++i) related[type][i] = related[type][i] && entry.second[i];
+    }
+  }
+  for(const auto &entry: related)
+    for(unsigned i = 0; i < frequencies.size(); ++i) m_data->set_data_mask(entry.first, frequencies[i], entry.second[i]);
 
   set_observed_data(*m_data, false);
 

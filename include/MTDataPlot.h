@@ -80,6 +80,7 @@ public:
   void set_component_visibility(const std::array<bool, 4> &visible);
   const std::array<bool, 4> &component_visibility() const { return m_componentVisible; }
   void set_masking_mode(bool on);
+  void set_link_tensor_masks(bool on) { m_linkTensorMasks = on; }
   void set_y_axis_autoscale(bool on);
   bool y_axis_autoscale() const;
   void set_y_axis_range(double lower, double upper);
@@ -138,6 +139,7 @@ protected:
   QCPRange m_fixedYRange;
   std::array<bool, 4> m_componentVisible{{true, true, true, true}};
   bool m_errorBarsVisible = true;
+  bool m_linkTensorMasks = true;
 };
 
 #endif

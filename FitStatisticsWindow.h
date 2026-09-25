@@ -11,6 +11,8 @@
 #include <functional>
 #include <memory>
 
+class MapBackground;
+
 class FitStatisticsWindow : public QDialog
 {
 public:
@@ -56,6 +58,7 @@ private:
   QLabel *summary;
   QCustomPlot *overall, *periods, *histogram, *components, *stations;
   QCustomPlot *mapA, *mapB, *heatA, *heatB;
+  MapBackground *backgroundA, *backgroundB;
   QCPColorScale *mapScaleA, *mapScaleB, *heatScaleA, *heatScaleB;
   std::vector<std::string> stationOrder;
   std::map<std::string, std::array<double, 3>> positions;

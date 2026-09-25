@@ -1,7 +1,9 @@
+#include "include/MapBackground.h"
+#include "include/PlotColorMaps.h"
+#include "include/FileLabels.h"
 #include "PeriodMapWindow.h"
 #include "include/HelpButton.h"
 #include <QFileDialog>
-#include <QFileInfo>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QMessageBox>
@@ -12,20 +14,6 @@
 #include <cmath>
 
 namespace {
-QCPColorGradient mapGradient(const QString &name)
-{
-  if(name == "Thermal") return QCPColorGradient(QCPColorGradient::gpThermal);
-  if(name == "Jet") return QCPColorGradient(QCPColorGradient::gpJet);
-  if(name == "Grayscale") return QCPColorGradient(QCPColorGradient::gpGrayscale);
-  if(name == "Polar") return QCPColorGradient(QCPColorGradient::gpPolar);
-  QCPColorGradient colors;
-  colors.setColorStopAt(0., QColor("#440154"));
-  colors.setColorStopAt(.25, QColor("#3b528b"));
-  colors.setColorStopAt(.5, QColor("#21918c"));
-  colors.setColorStopAt(.75, QColor("#5ec962"));
-  colors.setColorStopAt(1., QColor("#fde725"));
-  return colors;
-}
 QColor arrowColor(bool imaginary) { return imaginary ? QColor("#c2410c") : QColor("#111827"); }
 }
 
@@ -96,7 +84,7 @@ PeriodMapWindow::PeriodMapWindow(QWidget *parent, std::function<void()> changed)
   controls->addWidget(colorBy, 1, 1);
   controls->addWidget(new QLabel(tr("Colormap:"), this), 1, 2);
   colorMap = new QComboBox(this); colorMap->setObjectName("mapColorMap");
-  colorMap->addItems({"Viridis", "Thermal", "Jet", "Grayscale", "Polar"});
+  colorMap->addItems(PlotColorMaps::names());
   controls->addWidget(colorMap, 1, 3);
   reverseColors = new QCheckBox(tr("Reverse"), this); reverseColors->setObjectName("mapReverseColors");
   controls->addWidget(reverseColors, 1, 4);
@@ -117,10 +105,10 @@ PeriodMapWindow::PeriodMapWindow(QWidget *parent, std::function<void()> changed)
   selectMode->setToolTip(tr("Click a station, arrow or ellipse; drag a box to select several stations. Ctrl-click toggles a station; Ctrl-drag adds stations. Turn off to pan."));
   maskControls->addWidget(selectMode);
   maskControls->addWidget(UiHelp::button(this, tr("Station selection"), selectMode->toolTip(), "mapSelectionHelp"));
-  maskControls->addWidget(UiHelp::label(this, tr("Mask group:"), tr("Mask / Unmask edits observed data at the displayed period, within the tolerance, even while viewing a computed response. Computed responses are unchanged. Disabled stations and unmatched observed periods are skipped. Masked stations keep selectable center dots so they can be unmasked.\nTippers affects both directions and real/imaginary parts. Phase tensor affects all four tensor components. Impedance + tensor also affects all impedance components and derived resistivity and phase."), "mapMaskHelp"));
+  maskControls->addWidget(UiHelp::label(this, tr("Mask group:"), tr("Mask / Unmask edits observed data at the displayed period, within the tolerance, even while viewing a computed response. Computed responses are unchanged. Disabled stations and unmatched observed periods are skipped. Masked stations keep selectable center dots so they can be unmasked.\nTippers affects both directions and real/imaginary parts. Phase tensor affects all four tensor components and, when Data → Link Z / PT masks is on, all impedance components too. Impedance + tensor always affects both tensors and derived resistivity and phase."), "mapMaskHelp"));
   maskGroup = new QComboBox(this); maskGroup->setObjectName("mapMaskGroup");
   maskGroup->addItems({tr("Tippers"), tr("Phase tensor"), tr("Impedance + tensor")});
-  maskGroup->setToolTip(tr("Tippers: both directions, real and imaginary. Phase tensor: all four tensor components. Impedance + phase tensor: all impedance and tensor components, including derived resistivity and phase."));
+  maskGroup->setToolTip(tr("Tippers: both directions, real and imaginary. Phase tensor: all four tensor components, plus impedance when Link Z / PT masks is on. Impedance + phase tensor: all impedance and tensor components, including derived resistivity and phase."));
   maskControls->addWidget(maskGroup);
   maskButton = new QPushButton(tr("Mask"), this); maskButton->setObjectName("mapMask");
   unmaskButton = new QPushButton(tr("Unmask"), this); unmaskButton->setObjectName("mapUnmask");
@@ -132,6 +120,8 @@ PeriodMapWindow::PeriodMapWindow(QWidget *parent, std::function<void()> changed)
   selectionSummary->setWordWrap(false); maskControls->addWidget(selectionSummary);
 
   plot = new QCustomPlot(this); plot->setObjectName("periodMapPlot");
+  background = new MapBackground(plot);
+  layers->insertWidget(4, MapBackground::button(this, 0, [this](int mask) { background->setLayers(mask); plot->replot(); }));
   plot->setMinimumSize(650, 450);
   plot->setInteractions(QCP::iRangeDrag | QCP::iRangeZoom);
   plot->plotLayout()->insertRow(0);
@@ -227,14 +217,14 @@ void PeriodMapWindow::setData(const std::shared_ptr<MTSurveyData> &data,
   const auto selected = dataset->currentData().toString();
   const auto previousSites = sites;
   if(survey != data) selectedStations.clear();
-  survey = data; responses.clear(); sites.clear(); locationError.clear(); coordinatesDescription.clear();
+  survey = data; responses.clear(); sites.clear(); locationError.clear(); coordinatesDescription.clear(); originDescription.clear();
   {
     const QSignalBlocker block(dataset);
     dataset->clear(); dataset->addItem(tr("Observed data"), QString());
     for(const auto &entry: loaded) {
       const auto key = QString::fromStdString(entry.first);
       responses[key] = &entry.second;
-      dataset->addItem(QFileInfo(key).fileName(), key);
+      dataset->addItem(FileLabels::fileName(key), key);
       dataset->setItemData(dataset->count() - 1, key, Qt::ToolTipRole);
     }
     dataset->setCurrentIndex(std::max(0, dataset->findData(selected)));
@@ -269,8 +259,11 @@ void PeriodMapWindow::setData(const std::shared_ptr<MTSurveyData> &data,
           sites[i].north = north / length;
           sites[i].east = QPointF(sites[i].north.y(), -sites[i].north.x());
         }
+        background->setCoordinates(coordinates, .001);
         coordinatesDescription = tr("WGS84 / UTM %1%2%3").arg(coordinates.zone)
           .arg(coordinates.north ? "N" : "S").arg(coordinates.centered ? tr("; survey-centered offsets") : QString());
+        originDescription = tr("UTM origin: E = %1 m, N = %2 m")
+          .arg(coordinates.origin_easting, 0, 'f', 2).arg(coordinates.origin_northing, 0, 'f', 2);
         plot->xAxis->setLabel(coordinates.centered ? tr("East offset (km)") : tr("Easting (km)"));
         plot->yAxis->setLabel(coordinates.centered ? tr("North offset (km)") : tr("Northing (km)"));
       }
@@ -385,7 +378,7 @@ void PeriodMapWindow::updateMap(bool fit)
   referenceArrow = nullptr;
   selectionGraph = nullptr;
   plot->clearPlottables(); plot->clearItems(); haveBounds = false;
-  auto colors = mapGradient(colorMap->currentText());
+  auto colors = PlotColorMaps::gradient(colorMap->currentText());
   if(reverseColors->isChecked()) colors = colors.inverted();
   const QCPRange range(colorMin->value(), colorMax->value());
   colorScale->setGradient(colors); colorScale->setDataRange(range);
@@ -453,7 +446,7 @@ void PeriodMapWindow::updateMap(bool fit)
   }
   title->setText(tr("%1 — T = %2 s").arg(dataset->currentText()).arg(requested, 0, 'g', 8));
   note->setText(tr("%1   |   %2")
-                .arg(coordinatesDescription).arg(convention->currentText()));
+                .arg(coordinatesDescription + "\n" + originDescription).arg(convention->currentText()));
   summary->setText(!locationError.isEmpty() ? tr("Cannot project station locations: %1").arg(locationError) :
     (sites.empty() ? tr("Load stations with geographic locations.") :
      tr("%1/%2 stations · %3 tensors · %4 real / %5 imaginary vectors")
@@ -530,7 +523,7 @@ void PeriodMapWindow::setSelectedMasks(bool enabled)
     std::vector<RealDataType> types = maskGroup->currentIndex() == 0 ?
       std::vector<RealDataType>{RealTzx, RealTzy} : std::vector<RealDataType>{PTxx, PTxy, PTyx, PTyy};
     if(maskGroup->currentIndex() == 2) types.insert(types.end(), {RealZxx, RealZxy, RealZyx, RealZyy});
-    for(auto type: types) station.set_data_mask(type, frequency, enabled);
+    for(auto type: types) station.set_data_mask(type, frequency, enabled, linkTensorMasks);
     changed = true;
   }
   if(!changed) return;
@@ -548,6 +541,60 @@ void PeriodMapWindow::fitView()
     plot->xAxis->setRange(-1., 1.); plot->yAxis->setRange(-1., 1.);
   }
   plot->replot();
+}
+
+PeriodMapWindow::DisplaySettings PeriodMapWindow::displaySettings() const
+{
+  DisplaySettings s;
+  s.period = period->currentData().isValid() ? period->currentData().toDouble() : 1.;
+  s.tolerancePercent = tolerance->value(); s.ellipseKm = ellipseSize->value(); s.arrowKm = arrowSize->value();
+  s.colorMin = colorMin->value(); s.colorMax = colorMax->value(); s.convention = convention->currentIndex();
+  s.mapLayers = background->layers();
+  s.colorBy = colorBy->currentIndex(); s.colormap = colorMap->currentText(); s.names = names->isChecked();
+  s.real = realArrows->isChecked(); s.imaginary = imagArrows->isChecked(); s.reverse = reverseColors->isChecked();
+  return s;
+}
+
+void PeriodMapWindow::setDisplaySettings(const DisplaySettings &s)
+{
+  const QList<QObject *> controls{tolerance, ellipseSize, arrowSize, colorMin, colorMax, convention, colorBy, colorMap, names, realArrows, imagArrows, reverseColors};
+  std::vector<std::unique_ptr<QSignalBlocker>> blockers;
+  for(auto *control: controls) blockers.emplace_back(new QSignalBlocker(control));
+  background->setLayers(s.mapLayers);
+  for(auto *action: findChild<QToolButton *>("mapLayers")->menu()->actions()) if(action->isCheckable()) {
+    const QSignalBlocker block(action); action->setChecked(s.mapLayers & action->data().toInt());
+  }
+  tolerance->setValue(s.tolerancePercent); ellipseSize->setValue(s.ellipseKm); arrowSize->setValue(s.arrowKm);
+  colorMin->setValue(s.colorMin); colorMax->setValue(s.colorMax); convention->setCurrentIndex(s.convention);
+  colorBy->setCurrentIndex(s.colorBy); colorMap->setCurrentText(s.colormap); names->setChecked(s.names);
+  realArrows->setChecked(s.real); imagArrows->setChecked(s.imaginary); reverseColors->setChecked(s.reverse);
+  updateMap(true);
+}
+
+QString PeriodMapWindow::renderReport(QCPPainter &painter, const QRect &rect, double seconds,
+                                    bool phaseTensors, bool induction, const QString &responseKey)
+{
+  const auto s = displaySettings();
+  {
+    const QSignalBlocker dataBlock(dataset), periodBlock(period), tensorBlock(tensors), realBlock(realArrows), imagBlock(imagArrows);
+    dataset->setCurrentIndex(std::max(0, dataset->findData(responseKey)));
+    int index = period->findData(seconds);
+    if(index < 0) { period->addItem(QString::number(seconds, 'g', 12), seconds); index = period->count() - 1; }
+    period->setCurrentIndex(index); tensors->setChecked(phaseTensors);
+    realArrows->setChecked(induction && s.real); imagArrows->setChecked(induction && s.imaginary);
+  }
+  updateMap(true);
+  auto reportFont = [](int size) { QFont f("Sans Serif"); f.setPixelSize(size); return f; };
+  note->setText(coordinatesDescription + "\n" + originDescription + (induction ? " | " + convention->currentText() : QString()));
+  for(auto *axis: {plot->xAxis, plot->yAxis, colorScale->axis()}) {
+    axis->setLabelFont(reportFont(16)); axis->setTickLabelFont(reportFont(14));
+  }
+  plot->legend->setFont(reportFont(14)); title->setFont(reportFont(18)); note->setFont(reportFont(13));
+  painter.save(); painter.translate(rect.topLeft()); plot->toPainter(&painter, rect.width(), rect.height()); painter.restore();
+  // Layer selection is per report page; retain real/imaginary choices for the next page.
+  const QSignalBlocker realBlock(realArrows), imagBlock(imagArrows);
+  realArrows->setChecked(s.real); imagArrows->setChecked(s.imaginary);
+  return summary->text();
 }
 
 void PeriodMapWindow::savePdf()

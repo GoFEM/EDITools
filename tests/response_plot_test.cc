@@ -1,9 +1,14 @@
+#include "include/MapBackground.h"
+#include <QDataStream>
 #include "mainwindow.h"
 #include "include/NativeMT.h"
 #include "include/FitStatistics.h"
 #include "PeriodMapWindow.h"
 #include "PeriodLayoutWindow.h"
 #include "include/SurveyReport.h"
+#include "include/EDIPeriodMerge.h"
+#include "EDIImportDialog.h"
+#include "include/ApparentResistivityPlot.h"
 #include <QApplication>
 #include <QFileDialog>
 #include <QCheckBox>
@@ -17,8 +22,12 @@
 #include <QSettings>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QInputDialog>
 #include <QRegularExpression>
+#include <QProcess>
+#include <QStandardPaths>
 #include <boost/archive/binary_oarchive.hpp>
+#include <boost/archive/binary_iarchive.hpp>
 #include <boost/serialization/array.hpp>
 #include <boost/serialization/complex.hpp>
 #include <boost/serialization/shared_ptr.hpp>
@@ -86,6 +95,91 @@ void write(const QString &path, const std::string &contents)
   output << contents;
   check(bool(output), "Failed writing fixture");
 }
+void write_edi(const QString &path, const std::vector<double> &frequencies)
+{
+  std::ostringstream edi; edi << std::setprecision(17);
+  edi << ">HEAD\nDATAID=fixture\nLAT=55\nLONG=9\nELEV=100\nEMPTY=1e32\n>=MTSECT\n>FREQ // " << frequencies.size() << '\n';
+  for(double f: frequencies) edi << f << ' ';
+  edi << '\n';
+  unsigned component = 0;
+  for(const auto *name: {"ZXXR", "ZXXI", "ZXYR", "ZXYI", "ZYXR", "ZYXI", "ZYYR", "ZYYI"}) {
+    edi << '>' << name << " // " << frequencies.size() << '\n';
+    for(unsigned i = 0; i < frequencies.size(); ++i) edi << ++component << ' ';
+    edi << '\n';
+  }
+  for(const auto *name: {"ZXX.VAR", "ZXY.VAR", "ZYX.VAR", "ZYY.VAR", "TXR.EXP", "TXI.EXP", "TYR.EXP", "TYI.EXP", "TXVAR.EXP", "TYVAR.EXP"}) {
+    edi << '>' << name << " // " << frequencies.size() << '\n';
+    for(unsigned i = 0; i < frequencies.size(); ++i) edi << ".01 ";
+    edi << '\n';
+  }
+  edi << ">END\n"; write(path, edi.str());
+}
+void edi_import_tests(const QString &directory)
+{
+  const auto a = directory + "/EDI_A.edi", b = directory + "/EDI_B.edi", c = directory + "/EDI_C.edi";
+  write_edi(a, {1., .1}); write_edi(b, {1. / 1.0005, .1}); write_edi(c, {1. / 1.0013});
+  std::vector<std::string> paths{a.toStdString(), b.toStdString(), c.toStdString()};
+  MTSurveyData source("Import test"); source.load_from_edi(paths);
+  const auto names = source.get_stations_names(); const std::set<std::string> all(names.begin(), names.end());
+  auto plan = EDIPeriodMerge::analyze(source, all, .001);
+  check(plan.before == 4 && plan.after == 3 && plan.mergeable == 1 && plan.changes.size() == 1,
+        "EDI clustering must use the full group span, not chained nearest neighbours");
+  auto merged = source;
+  merged.get_station_data("EDI_B").set_data_mask(RealZxx, 1. / 1.0005, false);
+  const auto masks = merged.get_station_data("EDI_B").impedance_mask();
+  double z, error, rho, rhoError, result, resultError;
+  source.get_station_data("EDI_B").scalar_value(RealZxy, 0, z, error);
+  source.get_station_data("EDI_B").scalar_value(RhoZxy, 0, rho, rhoError);
+  EDIPeriodMerge::apply(merged, plan);
+  const auto &m = merged.get_station_data("EDI_B");
+  check(m.frequencies()[0] == 1. && m.frequencies().size() == 2 && m.impedance_mask() == masks, "Merging changed samples or masks");
+  check(m.scalar_value(RealZxy, 0, result, resultError) && result == z && resultError == error, "Merging averaged impedance or errors");
+  check(m.scalar_value(RhoZxy, 0, result, resultError) && std::abs(result / rho - 1. / 1.0005) < 1e-12, "Resistivity did not follow the assigned period");
+  check(source.get_station_data("EDI_B").frequencies()[0] != 1., "Merge mutated the original import");
+  check(EDIPeriodMerge::analyze(source, all, 0.).changes.empty(), "Zero tolerance must preserve nearby periods");
+  const auto anchored = EDIPeriodMerge::analyze(source, {"EDI_A", "EDI_C"}, .001);
+  check(anchored.changes.size() == 1 && anchored.changes[0].station == "EDI_A" && anchored.changes[0].after == 1. / 1.0005, "Existing survey period was not retained as anchor");
+  const auto conflict = EDIPeriodMerge::analyze(source, {"EDI_C"}, .005);
+  check(conflict.blocked == 1 && conflict.changes.empty(), "Conflicting existing periods were merged");
+  const auto collisionPath = directory + "/EDI_collision.edi";
+  write_edi(collisionPath, {1., 1. / 1.0004}); paths = {collisionPath.toStdString()}; merged = source; merged.load_from_edi(paths);
+  const auto collision = EDIPeriodMerge::analyze(merged, {"EDI_collision"}, .001);
+  check(collision.blocked == 1 && collision.changes.empty(), "Two samples from the same station were collapsed");
+  // The threshold is strict, including at a binary-exact boundary.
+  const auto edgePath = directory + "/EDI_edge.edi";
+  write_edi(edgePath, {1., 1. / 1.03125}); paths = {edgePath.toStdString()}; MTSurveyData edge; edge.load_from_edi(paths);
+  check(EDIPeriodMerge::analyze(edge, {"EDI_edge"}, .03125).groups.empty(), "Exact tolerance boundary was included");
+
+  MainWindow window;
+  auto import = [&](const QStringList &files, bool accept, bool mergePeriods) {
+    QTimer timer; bool reviewed = false;
+    QObject::connect(&timer, &QTimer::timeout, [&] {
+      for(auto *top: QApplication::topLevelWidgets()) if(auto *name = qobject_cast<QInputDialog *>(top)) {
+        if(name->isVisible()) name->accept();
+      }
+      auto *dialog = window.findChild<QDialog *>("ediImportDialog");
+      if(!dialog || !dialog->isVisible()) return;
+      check(!widget<QCheckBox>(*dialog, "ediMergePeriods")->isChecked(), "EDI merging must be opt-in");
+      check(widget<QDoubleSpinBox>(*dialog, "ediPeriodTolerance")->value() == .1, "Default EDI tolerance must be 0.1%");
+      check(widget<QLabel>(*dialog, "ediImportSummary")->text().contains("distinct periods"), "Import period statistics missing");
+      widget<QCheckBox>(*dialog, "ediMergePeriods")->setChecked(mergePeriods);
+      reviewed = true; timer.stop(); if(accept) dialog->accept(); else dialog->reject();
+    });
+    timer.start(0); file_action(window, "actionLoad_EDI", files); check(reviewed, "EDI import did not show review dialog");
+  };
+  import({a, b}, false, true);
+  check(widget<QListWidget>(window, "stationList")->count() == 0, "Canceled import changed the survey");
+  import({a, b}, true, true);
+  check(widget<QListWidget>(window, "stationList")->count() == 2, "Accepted EDI stations missing");
+  auto *list = widget<QListWidget>(window, "stationList"); list->setCurrentRow(1);
+  const auto graph = widget<QCustomPlot>(window, "plot11")->graph(1)->data();
+  check(graph->size() == 2 && graph->constBegin()->key == 1., "GUI import did not apply the period merge");
+  const auto title = window.windowTitle(); import({c}, false, true);
+  check(list->count() == 2 && window.windowTitle() == title && list->currentRow() == 1, "Canceled append changed the open survey");
+  import({c}, true, false); list->setCurrentRow(2);
+  check(list->count() == 3 && widget<QCustomPlot>(window, "plot11")->graph(1)->data()->constBegin()->key == 1.0013,
+        "Keep-original import changed a period");
+}
 QByteArray read_report(const QString &path)
 {
   QFile file(path); check(file.open(QIODevice::ReadOnly), "Report missing"); return file.readAll();
@@ -113,7 +207,8 @@ void check_report_axes(const std::array<SurveyReport::Options::Axis, 4> &axes)
   check(found == 4, "Could not inspect all rendered report panels");
 }
 void export_report(MainWindow &window, const QString &path,
-                   const std::array<SurveyReport::Options::Axis, 4> *expectedAxes = nullptr)
+                   const std::array<SurveyReport::Options::Axis, 4> *expectedAxes = nullptr,
+                   const std::function<void(QDialog &)> &configure = {}, int expectedPages = -1)
 {
   auto *stations = widget<QListWidget>(window, "stationList");
   auto *responses = widget<QListWidget>(window, "responsesList");
@@ -134,6 +229,22 @@ void export_report(MainWindow &window, const QString &path,
     check(widget<QComboBox>(*dialog, "reportResponse")->currentData().toString() ==
           (responses->currentItem() ? responses->currentItem()->toolTip() : QString()), "Report should select current response");
     check(widget<QToolButton>(*dialog, "reportHelp")->toolTip().contains("overview"), "Report help missing");
+    auto *save = widget<QDialogButtonBox>(*dialog, "")->button(QDialogButtonBox::Save);
+    widget<QCheckBox>(*dialog, "reportOverview")->setChecked(false);
+    widget<QCheckBox>(*dialog, "reportStationPages")->setChecked(false);
+    check(!save->isEnabled(), "Empty report sections accepted");
+    widget<QCheckBox>(*dialog, "reportPTMaps")->setChecked(true);
+    widget<QLineEdit>(*dialog, "reportMapPeriods")->setText("bad");
+    check(!save->isEnabled(), "Invalid map period accepted");
+    widget<QLineEdit>(*dialog, "reportMapPeriods")->setText("1, 10, 1");
+    check(save->isEnabled() && widget<QLabel>(*dialog, "reportPageCount")->text() == "2 pages", "Map page count did not deduplicate periods");
+    widget<QCheckBox>(*dialog, "reportInductionMaps")->setChecked(true);
+    check(widget<QLabel>(*dialog, "reportPageCount")->text() == "2 pages", "Combined map layers added separate pages");
+    widget<QCheckBox>(*dialog, "reportInductionMaps")->setChecked(false);
+    widget<QCheckBox>(*dialog, "reportPTMaps")->setChecked(false);
+    widget<QCheckBox>(*dialog, "reportOverview")->setChecked(true);
+    widget<QCheckBox>(*dialog, "reportStationPages")->setChecked(true);
+    if(configure) configure(*dialog);
     handled = true; timer.stop(); dialog->accept();
   });
   // Exercise the default suffix when the remaining filename has no other dots.
@@ -141,7 +252,7 @@ void export_report(MainWindow &window, const QString &path,
   timer.start(10); file_action(window, "actionExport_survey_report", {enteredPath});
   check(handled, "Report options did not open");
   check(!expectedAxes || inspected > 0, "GUI fixed ranges were not checked during export");
-  report_pages(path, stations->count() + 1);
+  report_pages(path, expectedPages < 0 ? stations->count() + 1 : expectedPages);
   check(stations->currentRow() == stationRow && responses->currentRow() == responseRow, "Report changed current selection");
 }
 void main_axis_ranges(MainWindow &window, bool autoscale, const std::array<SurveyReport::Options::Axis, 4> &axes)
@@ -163,6 +274,81 @@ void main_axis_ranges(MainWindow &window, bool autoscale, const std::array<Surve
   timer.start(0); widget<QAction>(window, "actionPlot_axis_ranges")->trigger();
   check(handled, "Main axis dialog did not open");
 }
+void map_backgrounds(const QString &directory)
+{
+  struct EnvironmentGuard {
+    QByteArray previous = qgetenv("EDITOOLS_MAP_DATA_DIR");
+    ~EnvironmentGuard() { if(previous.isNull()) qunsetenv("EDITOOLS_MAP_DATA_DIR"); else qputenv("EDITOOLS_MAP_DATA_DIR", previous); }
+  } restoreEnvironment;
+  qputenv("EDITOOLS_MAP_DATA_DIR", (directory + "/no-map-data").toUtf8());
+  check(MapBackground::availableLayers() == 0, "Missing external data should disable geography");
+  QWidget parent;
+  auto *menu = MapBackground::button(&parent, 15, [](int) {})->menu();
+  for(auto *action: menu->actions()) if(action->isCheckable() && action->data().toInt() <= 8) check(!action->isEnabled() && !action->isChecked(), "Unavailable layer action enabled");
+  // Synthetic geometry keeps tests independent of optional third-party datasets.
+  const auto maps = directory + "/external-maps"; check(QDir().mkpath(maps), "Cannot create test maps");
+  QByteArray raw; QDataStream output(&raw, QIODevice::WriteOnly);
+  output.setByteOrder(QDataStream::LittleEndian); output.setFloatingPointPrecision(QDataStream::SinglePrecision);
+  output << quint32(1) << quint32(3) << float(-113.1) << float(37.9) << float(-113.) << float(38.) << float(-112.9) << float(38.1);
+  for(const auto *name: {"coast", "countries", "states", "rivers", "lakes"}) {
+    QFile file(maps + "/" + name + ".bin"); check(file.open(QIODevice::WriteOnly), "Cannot write test map"); file.write(qCompress(raw));
+  }
+  const auto corrupt = directory + "/corrupt-maps"; check(QDir().mkpath(corrupt), "Cannot create corrupt fixture");
+  QFile broken(corrupt + "/coast.bin"); check(broken.open(QIODevice::WriteOnly), "Cannot create broken geometry");
+  broken.write(qCompress(raw.left(8))); broken.close();
+  qputenv("EDITOOLS_MAP_DATA_DIR", corrupt.toUtf8());
+  check(MapBackground::availableLayers() == 0, "Truncated external data accepted");
+  qputenv("EDITOOLS_MAP_DATA_DIR", maps.toUtf8());
+  check(MapBackground::availableLayers() == 15, "External geometry not detected");
+
+  QCustomPlot plot; plot.resize(800, 600);
+  auto *background = new MapBackground(&plot);
+  plot.xAxis->setRange(-125., -65.); plot.yAxis->setRange(25., 55.);
+  auto render = [&] { return plot.toPixmap(800, 600).toImage(); };
+  const auto empty = render(); const auto x = plot.xAxis->range(), y = plot.yAxis->range();
+  for(int layer: {1, 2, 4, 8}) {
+    background->setLayers(layer);
+    check(render() != empty, "External geography layer rendered no lines");
+    check(plot.xAxis->range() == x && plot.yAxis->range() == y && plot.graphCount() == 0 && plot.itemCount() == 0,
+          "Geography changed plot ranges or data items");
+  }
+  background->setLayers(0); check(render() == empty, "Disabling layers left geography behind");
+  // A known state-boundary vertex must align with the station projection in
+  // degrees, UTM metres, and centred UTM kilometres, including a southern zone.
+  QFile file(maps + "/states.bin"); check(file.open(QIODevice::ReadOnly), "Missing test states");
+  QDataStream input(qUncompress(file.readAll())); input.setByteOrder(QDataStream::LittleEndian); input.setFloatingPointPrecision(QDataStream::SinglePrecision);
+  quint32 count; input >> count; std::array<double, 3> location{{NAN, NAN, 0.}};
+  for(quint32 i = 0; i < count && !std::isfinite(location[0]); ++i) {
+    quint32 size; input >> size;
+    for(quint32 j = 0; j < size; ++j) {
+      float lon, lat; input >> lon >> lat;
+      if(lat > 36. && lat < 40. && lon > -115. && lon < -111.) location = {{lat, lon, 0.}};
+    }
+  }
+  check(std::isfinite(location[0]), "No test boundary vertex");
+  for(int mode = 0; mode < 4; ++mode) {
+    SurveyCoordinates coordinates;
+    if(mode) coordinates = SurveyCoordinates::calculate({location}, 12, mode != 3, mode >= 2);
+    const double scale = mode >= 2 ? .001 : 1.;
+    const auto point = coordinates.transform({location}).front();
+    const double extent = mode == 0 ? .015 : (mode >= 2 ? 1. : 1000.);
+    plot.xAxis->setRange(point[1] * scale - extent, point[1] * scale + extent);
+    plot.yAxis->setRange(point[0] * scale - extent, point[0] * scale + extent);
+    background->setCoordinates(coordinates, scale); background->setLayers(MapBackground::States);
+    plot.clearPlottables(); plot.clearItems(); const auto image = render();
+    const int px = qRound(plot.xAxis->coordToPixel(point[1] * scale)), py = qRound(plot.yAxis->coordToPixel(point[0] * scale));
+    bool hit = false;
+    for(int dx = -3; dx <= 3; ++dx) for(int dy = -3; dy <= 3; ++dy) {
+      const auto color = image.pixelColor(px + dx, py + dy);
+      hit |= color.blue() > color.red() + 3 && color.red() < 230;
+    }
+    check(hit, "Boundary vertex misaligned with coordinate frame/origin/units");
+  }
+  check(plot.savePdf(directory + "/geography.pdf"), "Geography PDF failed");
+}
+
+void near(double actual, double expected);
+
 void survey_reports(const QString &directory)
 {
   // Period counts distinguish complete tensors, partial components, masks, and
@@ -221,6 +407,74 @@ void survey_reports(const QString &directory)
   check(!SurveyReport::write_pdf(enabled, survey, nullptr, options, [](unsigned done, unsigned) { return done < 1; }), "Report cancellation ignored");
   check(read_report(enabled) == original, "Cancellation replaced existing report");
   check(!survey.is_active("NO_LOCATION") && survey.get_station_data("MAP").impedance_mask() == masks, "Report changed source masks");
+  auto selected = options; selected.overview = false; selected.stationPages = false;
+  selected.phaseTensorMaps = true; selected.inductionMaps = true; selected.mapPeriods = {1., .5, 1.};
+  selected.mapData = SurveyReport::Options::MapData::Both; selected.mapSettings.imaginary = true;
+  unsigned mapPages = 0;
+  check(SurveyReport::write_pdf(directory + "/report-maps.pdf", survey, &response, selected, [&](unsigned done, unsigned total) {
+    check(total == 4, "Map periods should deduplicate and combine layers for each dataset");
+    if(done) {
+      ++mapPages; QCustomPlot *plot = nullptr;
+      for(auto *top: QApplication::topLevelWidgets()) if(top->objectName() == "periodMapWindow") plot = top->findChild<QCustomPlot *>("periodMapPlot");
+      check(plot, "Map renderer missing");
+      check(plot->findChild<QCPItemLine *>("mapReferenceArrow"), "Combined map omitted the induction reference");
+    }
+    return true;
+  }), "Map-only export failed");
+  check(mapPages == 4, "Map-only progress missing pages"); report_pages(directory + "/report-maps.pdf", 4);
+  // Inspect actual PDF text and metadata when Poppler tools are available.
+  // Include all page types and paths from both platforms, regardless of host OS.
+  const auto pdfText = QStandardPaths::findExecutable("pdftotext"), pdfInfo = QStandardPaths::findExecutable("pdfinfo");
+  if(!pdfText.isEmpty() && !pdfInfo.isEmpty()) {
+    auto privacy = selected; privacy.overview = true; privacy.stationPages = true; privacy.mapPeriods = {1.};
+    for(const auto &label: QStringList{"/home/private-report-user/results/response.dat",
+        "C:\\Users\\private-report-user\\results\\response.dat", "\\\\private-report-host\\results\\response.dat"}) {
+      privacy.responseName = label;
+      const auto path = directory + "/private-report-output.pdf";
+      check(SurveyReport::write_pdf(path, survey, &response, privacy), "Privacy report export failed");
+      for(const auto &tool: {pdfText, pdfInfo}) {
+        QProcess process;
+        process.start(tool, tool == pdfText ? QStringList{path, "-"} : QStringList{path});
+        check(process.waitForFinished(10000) && process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0, "Cannot inspect PDF privacy");
+        const auto content = process.readAllStandardOutput();
+        check(!content.contains("private-report-") && !content.contains("Source:") && !content.contains(directory.toUtf8()) &&
+              !content.contains("/home/") && !content.contains("C:\\Users") && !content.contains("/mnt/"), "Local path or machine details leaked into PDF");
+        if(tool == pdfText) check(content.contains("response.dat"), "Public response label missing from PDF");
+      }
+    }
+  }
+  selected.mapPeriods = {0.}; bool invalid = false;
+  try { SurveyReport::write_pdf(enabled, survey, &response, selected); } catch(const std::invalid_argument &) { invalid = true; }
+  check(invalid && read_report(enabled) == original, "Invalid map selection replaced destination");
+  selected.mapPeriods = {1.}; invalid = false;
+  try { SurveyReport::write_pdf(enabled, survey, nullptr, selected); } catch(const std::invalid_argument &) { invalid = true; }
+  check(invalid, "Response maps accepted absent response");
+  auto arrows = fixedOptions; arrows.overview = false; arrows.tipperArrows = true;
+  arrows.components[2][1] = false; arrows.components[2][3] = false;
+  check(SurveyReport::write_pdf(directory + "/report-arrows.pdf", survey, &response, arrows), "Repeated arrow station pages failed");
+  report_pages(directory + "/report-arrows.pdf", 2);
+  auto lines = options; lines.overview = false;
+  check(SurveyReport::write_pdf(directory + "/report-lines.pdf", survey, nullptr, lines), "Station-only line export failed");
+  report_pages(directory + "/report-lines.pdf", 1);
+  const auto gapsPath = directory + "/tipper-gaps.gofem";
+  write(gapsPath, "RealTzx 1 Plane_wave GAP .1 .01\nRealTzx 2 Plane_wave GAP .2 .02\nRealTzx 4 Plane_wave GAP .3 .03\n");
+  MTSurveyData gaps; gaps.load_from_gofem(gapsPath.toStdString()); gaps.get_station_data("GAP").set_data_mask(RealTzx, 2., false);
+  bool checkedGaps = false;
+  check(SurveyReport::write_pdf(directory + "/tipper-gaps.pdf", gaps, nullptr, lines, [&](unsigned done, unsigned) {
+    if(!done) return true;
+    for(auto *top: QApplication::topLevelWidgets()) if(top->objectName() == "surveyReportPlot2") {
+      auto *plot = dynamic_cast<QCustomPlot *>(top); const auto data = plot->graph(0)->data();
+      check(data->size() == 3 && std::isnan(data->at(1)->value), "Masked tipper period did not break its line");
+      for(int i = 0; i < plot->plottableCount(); ++i) {
+        auto *bars = dynamic_cast<QCPErrorBars *>(plot->plottable(i));
+        if(bars && bars->dataPlottable() == plot->graph(0)) {
+          check(bars->data()->size() == 3 && std::isnan(bars->data()->at(1).errorPlus), "Mask gap shifted error bars");
+          near(bars->data()->at(0).errorPlus, .03); near(bars->data()->at(2).errorPlus, .01); checkedGaps = true;
+        }
+      }
+    }
+    return true;
+  }), "Tipper gap export failed"); check(checkedGaps, "Tipper line uncertainties were not inspected");
   survey.set_active_flag("MAP", false);
   bool rejected = false;
   try { SurveyReport::write_pdf(enabled, survey, nullptr, options); } catch(const std::runtime_error &) { rejected = true; }
@@ -557,6 +811,87 @@ void gofem_responses(const QString &directory)
   }
 }
 
+void linked_mask_tests(const QString &directory)
+{
+  const auto path = directory + "/linked.edi"; write_edi(path, {1., .1});
+  auto survey = std::make_shared<MTSurveyData>(); std::vector<std::string> paths{path.toStdString()}; survey->load_from_edi(paths);
+  const auto original = survey->get_station_data("linked");
+  const std::array<RealDataType, 4> zTypes{{RealZxx, RealZxy, RealZyx, RealZyy}}, ptTypes{{PTxx, PTxy, PTyx, PTyy}};
+  // Z/PT edits must preserve both enabled and already-masked tipper samples.
+  for(bool linked: {false, true}) for(auto type: {RealZxx, RealZxy, RealZyx, RealZyy,
+      ImagZxx, ImagZxy, ImagZyx, ImagZyy, RhoZxx, RhoZxy, RhoZyx, RhoZyy,
+      PhsZxx, PhsZxy, PhsZyx, PhsZyy, PTxx, PTxy, PTyx, PTyy}) {
+    auto edited = original;
+    edited.set_data_mask(RealTzx, .1, false);
+    const auto before = edited.tipper_mask();
+    for(bool enabled: {false, true}) {
+      edited.set_data_mask(type, 1., enabled, linked);
+      check(edited.tipper_mask() == before, "Point Z/PT edit changed tipper masks");
+      edited.mask_type(type, enabled, linked);
+      check(edited.tipper_mask() == before, "Whole-component Z/PT edit changed tipper masks");
+    }
+  }
+  // Numerically check the dependency: perturb each real Z entry independently
+  // in a nonsingular, non-2D tensor. Every PT entry must respond.
+  for(auto zType: zTypes) {
+    auto perturbed = original; double value, error; original.scalar_value(zType, 0, value, error);
+    perturbed.set_data(1., {zType}, {value + 1e-6 * std::abs(value)}, {error}); perturbed.calculate_phase_tensor();
+    for(auto ptType: ptTypes) {
+      double before, after; original.scalar_value(ptType, 0, before, error); perturbed.scalar_value(ptType, 0, after, error);
+      check(std::abs(after - before) > 1e-9, "Expected general 3D PT dependency on every real Z entry");
+    }
+  }
+  auto station = original;
+  station.set_data_mask(PhsZxy, 1., false, true);
+  check(!station.impedance_mask()[1][0] && station.impedance_mask()[0][0] && station.impedance_mask()[2][0], "Linking recursively changed other Z components");
+  for(unsigned c = 0; c < 4; ++c) check(!station.phase_tensor_mask()[c][0] && station.phase_tensor_mask()[c][1] && station.tipper_mask()[c][0], "Z mask affected wrong PT period or tippers");
+  station.set_data_mask(RhoZxy, 1., true, true);
+  station.set_data_mask(PTyx, 1., false, true);
+  check(!station.phase_tensor_mask()[2][0] && station.phase_tensor_mask()[0][0] && station.phase_tensor_mask()[3][0], "PT linkage was recursive");
+  for(unsigned c = 0; c < 4; ++c) check(!station.impedance_mask()[c][0] && station.impedance_mask()[c][1], "PT entry did not link to all real-Z dependencies");
+  station.set_data_mask(PTyx, 1., true, true);
+  station.mask_type(PhsZxy, false, true);
+  for(unsigned c = 0; c < 4; ++c) for(unsigned f = 0; f < 2; ++f) check(!station.phase_tensor_mask()[c][f], "Whole-component mask did not link PT");
+  station = original; station.set_data_mask(ImagTzx, 1., false, true);
+  check(station.impedance_mask() == original.impedance_mask() && station.phase_tensor_mask() == original.phase_tensor_mask(), "Tipper masks must remain independent");
+  station = original;
+  QCustomPlot inversePlot; ApparentResistivityPlot inverse(&inversePlot); inverse.set_observed_data(station);
+  inversePlot.graph(1)->setSelection(QCPDataSelection(QCPDataRange(0, 1)));
+  inversePlot.graph(2)->setSelection(QCPDataSelection(QCPDataRange(1, 2))); inverse.invMaskSelectedData();
+  for(unsigned c = 0; c < 4; ++c) check(!station.phase_tensor_mask()[c][0] && !station.phase_tensor_mask()[c][1], "Inverted linked mask depends on component iteration order");
+  check(station.tipper_mask() == original.tipper_mask(), "Inverted Z selection changed tipper masks");
+
+  const auto project = directory + "/linked.mtd";
+  { std::ofstream file(project.toStdString(), std::ios::binary); boost::archive::binary_oarchive archive(file); archive << survey << std::map<std::string, MTSurveyData>{}; }
+  MainWindow window; file_action(window, "actionLoad_project", {project}); select_station(window, "linked");
+  auto *setting = widget<QAction>(window, "actionLink_tensor_masks"); check(setting->isChecked(), "Linking should be enabled by default");
+  auto &rho = *widget<QCustomPlot>(window, "plot11"), &phase = *widget<QCustomPlot>(window, "plot12"), &pt = *widget<QCustomPlot>(window, "plot22");
+  auto &tipper = *widget<QCustomPlot>(window, "plot21");
+  auto checkTippers = [&] {
+    for(unsigned c = 0; c < 4; ++c)
+      check(tipper.graph(c + 4)->data()->isEmpty() && tipper.graph(c)->data()->size() == 2,
+            "Z/PT plot masking changed displayed tipper samples");
+  };
+  auto action = [&](QCustomPlot &plot, int graph, const QString &name) {
+    plot.deselectAll(); plot.graph(graph)->setSelection(QCPDataSelection(QCPDataRange(0, 1)));
+    QMetaObject::invokeMethod(&plot, "customContextMenuRequested", Qt::DirectConnection, Q_ARG(QPoint, QPoint(100, 100)));
+    auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget()); check(menu, "Mask menu did not open");
+    QAction *chosen = nullptr; for(auto *item: menu->actions()) if(item->text() == name) chosen = item;
+    check(chosen, "Mask action missing"); menu->hide(); chosen->trigger(); plot.deselectAll();
+  };
+  const auto periodRange = rho.xAxis->range(); action(phase, 1, "Mask");
+  checkTippers();
+  check(rho.graph(5)->data()->size() == 1 && rho.graph(4)->data()->isEmpty(), "Phase masking changed unrelated Z plots");
+  for(unsigned c = 0; c < 4; ++c) check(pt.graph(c + 4)->data()->size() == 1, "Linked PT plots did not refresh immediately");
+  check(rho.xAxis->range() == periodRange, "Masking changed zoom limits");
+  action(phase, 5, "Unmask"); action(pt, 2, "Mask");
+  checkTippers();
+  for(unsigned c = 0; c < 4; ++c) check(rho.graph(c + 4)->data()->size() == 1 && phase.graph(c + 4)->data()->size() == 1, "PT masking did not refresh all related Z plots");
+  check(pt.graph(4)->data()->isEmpty(), "Linking masked unselected PT entries"); action(pt, 6, "Unmask");
+  setting->setChecked(false); action(rho, 1, "Mask");
+  for(unsigned c = 0; c < 4; ++c) check(pt.graph(c + 4)->data()->isEmpty(), "Disabling linked masks still changed PT");
+}
+
 void period_maps(const QString &directory)
 {
   MTMapData::PhaseTensor tensor;
@@ -599,6 +934,22 @@ void period_maps(const QString &directory)
   survey->get_station_data("C").set_position({{55., 9.02, 100.}});
   std::map<std::string, MTSurveyData> responses;
   responses[responsePath.toStdString()].load_from_gofem(responsePath.toStdString());
+
+  SurveyReport::Options reportOptions;
+  reportOptions.overview = false; reportOptions.stationPages = false;
+  reportOptions.phaseTensorMaps = true; reportOptions.inductionMaps = true;
+  reportOptions.mapData = SurveyReport::Options::MapData::Both; reportOptions.mapPeriods = {1., 10.};
+  reportOptions.mapSettings.imaginary = true; reportOptions.responseName = "GoFEM";
+  check(SurveyReport::write_pdf(directory + "/report-map-values.pdf", *survey, &responses.begin()->second, reportOptions, [&](unsigned done, unsigned total) {
+    check(total == 4, "Wrong combined map page count"); if(!done) return true;
+    QCustomPlot *page = nullptr;
+    for(auto *top: QApplication::topLevelWidgets()) if(top->objectName() == "periodMapWindow") page = top->findChild<QCustomPlot *>("periodMapPlot");
+    check(page, "Missing report map");
+    const unsigned tensors[]{2, 1, 1, 0}, vectors[]{2, 1, 1, 0};
+    check(page->property("phaseTensorCount").toUInt() == tensors[done - 1] && page->property("realVectorCount").toUInt() == vectors[done - 1] &&
+          page->property("imagVectorCount").toUInt() == vectors[done - 1], "Report map changed data, period or selected layers");
+    return true;
+  }), "Map data report failed");
 
   auto station = survey->get_station_data("A");
   const auto index = MTMapData::nearest_period(station.frequencies(), 1., 0.);
@@ -700,6 +1051,10 @@ void period_maps(const QString &directory)
   check(FitStatistics::compare(*survey, responses.begin()->second, FitStatistics::ErrorSource::Response).total.count == 8,
         "Tipper masking did not exclude all four scalars from statistics");
   group->setCurrentIndex(1); mask->click();
+  check(!observedA.impedance_mask()[0][index] && !observedA.phase_tensor_mask()[0][index] && observedA.impedance_mask()[0][otherIndex],
+        "Default linked PT map masking did not affect Z at the same period");
+  unmask->click();
+  window.setLinkTensorMasks(false); mask->click();
   check(!observedA.phase_tensor_mask()[0][index] && observedA.impedance_mask()[0][index] &&
         !plot->findChild<QCPCurve *>("phaseTensor_A"), "Tensor-only mask changed impedance or retained the ellipse");
   // Round-trip the same station masks that projects serialize.
@@ -714,7 +1069,10 @@ void period_maps(const QString &directory)
   check(selectedCount() == 1, "Masked station center could not be selected");
   unmask->click();
   group->setCurrentIndex(0); unmask->click();
+  widget<QCheckBox>(window, "mapRealArrows")->setChecked(true);
   group->setCurrentIndex(2); mask->click();
+  check(plot->findChild<QCPItemLine *>("inductionReal_A") && plot->findChild<QCPItemLine *>("inductionImag_A"),
+        "Z/PT map masking removed independent induction vectors");
   check(!observedA.impedance_mask()[3][index] && !observedA.phase_tensor_mask()[3][index] &&
         observedA.impedance_mask()[3][otherIndex] && observedA.tipper_mask()[0][index],
         "Impedance + tensor masking changed the wrong components or period");
@@ -862,6 +1220,15 @@ struct LegacyOptionsV5 {
   std::array<bool, 4> impedance{{false, true, true, false}}, tipper{{true, false, true, false}};
   template<class Archive> void serialize(Archive &ar, const unsigned int) {
     ar & phaseWrap & showStationNames & tipperArrows & axes & impedance & tipper;
+  }
+};
+struct LegacyOptionsV6 {
+  bool phaseWrap = true, showStationNames = false, tipperArrows = false;
+  std::vector<LegacyAxisV5> axes = std::vector<LegacyAxisV5>(4);
+  std::array<std::array<bool, 4>, 4> visible{{{{false, true, true, false}}, {{true, false, false, true}},
+                                            {{true, false, true, false}}, {{false, true, false, true}}}};
+  template<class Archive> void serialize(Archive &ar, const unsigned int) {
+    ar & phaseWrap & showStationNames & tipperArrows & axes & visible;
   }
 };
 
@@ -1082,10 +1449,12 @@ void workflow(const QString &directory)
   near(value(rho, 9, 1.), 99.);
 
   // The response table is stored in the project, independently of source files.
+  widget<QAction>(window, "actionLink_tensor_masks")->setChecked(false);
   widget<QAction>(window, "actionSave_project")->trigger();
   write(first, "invalid source file\n");
   MainWindow restored;
   file_action(restored, "actionLoad_project", {project});
+  check(!widget<QAction>(restored, "actionLink_tensor_masks")->isChecked(), "Project lost independent masking option");
   check(widget<QCheckBox>(restored, "stationMapNames")->isChecked() &&
         widget<QCustomPlot>(restored, "mapPlot")->itemCount() == 2, "Project lost station-name visibility");
   auto *restoredList = widget<QListWidget>(restored, "responsesList");
@@ -1137,10 +1506,23 @@ void workflow(const QString &directory)
     archive << magic << version << survey << std::map<std::string, MTSurveyData>{} << LegacyOptionsV5{};
   }
   file_action(restored, "actionLoad_project", {legacyProject});
+  check(widget<QAction>(restored, "actionLink_tensor_masks")->isChecked(), "Older projects should default to linked masking");
   select_station(restored, "S01");
   for(const auto *name: {"plot11", "plot12", "plot22"})
     check_visibility(*widget<QCustomPlot>(restored, name), 6);
   check_visibility(*widget<QCustomPlot>(restored, "plot21"), 5);
+  const auto version6Project = directory + "/independent-legends-v6.mtd";
+  {
+    std::ofstream output(version6Project.toStdString(), std::ios::binary);
+    boost::archive::binary_oarchive archive(output);
+    const std::uint32_t magic = 0x45444954, version = 6;
+    archive << magic << version << survey << std::map<std::string, MTSurveyData>{} << LegacyOptionsV6{};
+  }
+  widget<QAction>(restored, "actionLink_tensor_masks")->setChecked(false);
+  file_action(restored, "actionLoad_project", {version6Project}); select_station(restored, "S01");
+  check(widget<QAction>(restored, "actionLink_tensor_masks")->isChecked(), "Version 6 projects should default to linked masks");
+  check_visibility(*widget<QCustomPlot>(restored, "plot11"), 6); check_visibility(*widget<QCustomPlot>(restored, "plot12"), 9);
+  check_visibility(*widget<QCustomPlot>(restored, "plot21"), 5); check_visibility(*widget<QCustomPlot>(restored, "plot22"), 10);
 }
 
 void real_run(const QString &project, const QString &directory, const QString &screenshot, bool mixed)
@@ -1280,7 +1662,22 @@ void real_run(const QString &project, const QString &directory, const QString &s
     check(maps->grab().save(screenshot + ".response-map.png"), "Could not save response period map");
   }
   std::cout << paths.size() << " real iterations loaded; " << plotted << " stations plotted.\n";
-  if(!screenshot.isEmpty()) export_report(window, screenshot + ".survey.pdf");
+  if(!screenshot.isEmpty()) {
+    export_report(window, screenshot + ".survey.pdf", nullptr, [](QDialog &dialog) {
+      widget<QComboBox>(dialog, "reportTipperStyle")->setCurrentIndex(1);
+      for(int mask: {1, 2, 4, 8}) widget<QAction>(dialog, QString("mapLayer%1").arg(mask).toUtf8().constData())->setChecked(true);
+    });
+    export_report(window, screenshot + ".selected-maps.pdf", nullptr, [](QDialog &dialog) {
+      widget<QCheckBox>(dialog, "reportStationPages")->setChecked(false);
+      widget<QCheckBox>(dialog, "reportPTMaps")->setChecked(true);
+      widget<QCheckBox>(dialog, "reportInductionMaps")->setChecked(true);
+      widget<QCheckBox>(dialog, "reportRealArrows")->setChecked(true);
+      widget<QCheckBox>(dialog, "reportImagArrows")->setChecked(true);
+      widget<QComboBox>(dialog, "reportMapData")->setCurrentIndex(2);
+      widget<QLineEdit>(dialog, "reportMapPeriods")->setText("1, 10");
+      for(int mask: {1, 2, 4, 8}) widget<QAction>(dialog, QString("mapLayer%1").arg(mask).toUtf8().constData())->setChecked(true);
+    }, 5);
+  }
   widget<QAction>(window, "actionPeriod_layout")->trigger();
   auto *layout = widget<QDialog>(window, "periodLayoutWindow");
   widget<QPushButton>(*layout, "layoutPreview")->click();
@@ -1309,7 +1706,7 @@ int main(int argc, char **argv)
   try {
     check(directory.isValid(), "No temporary directory");
     if(argc >= 3) real_run(argv[1], argv[2], argc >= 4 ? argv[3] : QString(), argc >= 5 && QString(argv[4]) == "mixed");
-    else { statistics(directory.path()); gofem_responses(directory.path()); period_maps(directory.path()); period_resampling_tests(directory.path()); resampling_project_workflow(directory.path()); survey_reports(directory.path()); workflow(directory.path()); }
+    else { map_backgrounds(directory.path()); linked_mask_tests(directory.path()); edi_import_tests(directory.path()); statistics(directory.path()); gofem_responses(directory.path()); period_maps(directory.path()); period_resampling_tests(directory.path()); resampling_project_workflow(directory.path()); survey_reports(directory.path()); workflow(directory.path()); }
     std::cout << "Response import, curves and project workflow checks passed.\n";
   } catch(const std::exception &e) {
     std::cerr << e.what() << '\n';

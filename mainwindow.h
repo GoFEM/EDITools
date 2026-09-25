@@ -37,6 +37,7 @@
 namespace Ui {
 class MainWindow;
 }
+class MapBackground;
 class FitStatisticsWindow;
 class PeriodMapWindow;
 class PeriodLayoutWindow;
@@ -52,7 +53,7 @@ public:
 private slots:
   void createStationsList();
   void updateMap();
-  void updatePlots();
+  void updatePlots(bool rescaleAxes = true);
   void stationSelected(const QCPDataSelection &selection);
 
   void maskDataType(bool on);
@@ -90,7 +91,8 @@ private slots:
 
   void on_actionAbout_EDI_Tools_triggered();
 
-  private:
+private:
+  MapBackground *mapBackground;
   struct PlotAxisOptions
   {
     bool autoscale = true;
@@ -106,7 +108,7 @@ private slots:
     }
   };
 
-  struct PlotOptions
+  struct PlotOptionsV6
   {
     bool phaseWrap = true;
     bool showStationNames = false;
@@ -121,6 +123,16 @@ private slots:
     void serialize(Archive &ar, const unsigned int)
     {
       ar & phaseWrap & showStationNames & tipperArrows & axes & componentVisible;
+    }
+  };
+
+  struct PlotOptions : PlotOptionsV6
+  {
+    bool linkTensorMasks = true;
+    template<class Archive> void serialize(Archive &ar, const unsigned int version)
+    {
+      PlotOptionsV6::serialize(ar, version);
+      ar & linkTensorMasks;
     }
   };
 
@@ -206,7 +218,7 @@ private:
   QMenu* listContextMenu;
   QVector<QAction*> listContextActions;
 
-  QListWidgetItem* pointedItem;
+  QListWidgetItem* pointedItem = nullptr;
 
   QCustomPlot *plot11;
   QCustomPlot *plot12;
@@ -215,10 +227,10 @@ private:
 
   QString projectFile, lastDirectory;
 
-  QLabel *stationInfoLabel;
   QLabel *coordinateInfoLabel;
   QComboBox *mapCoordinateSwitch;
   QCheckBox *mapStationNames;
+  QAction *linkTensorMasksAction;
   SurveyCoordinates mapCoordinates;
   FitStatisticsWindow *fitStatistics = nullptr;
   PeriodMapWindow *periodMaps = nullptr;

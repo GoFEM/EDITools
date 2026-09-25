@@ -32,6 +32,22 @@ using dcomplex = std::complex<double>;
 
 const double mu0 = 4.*M_PI*1e-7;
 
+const std::map<RealDataType, unsigned> type_to_column_table =
+{
+  {RhoZxx, 0}, {PhsZxx, 0},
+  {RhoZxy, 1}, {PhsZxy, 1},
+  {RhoZyx, 2}, {PhsZyx, 2},
+  {RhoZyy, 3}, {PhsZyy, 3},
+  {RealZxx, 0}, {ImagZxx, 0},
+  {RealZxy, 1}, {ImagZxy, 1},
+  {RealZyx, 2}, {ImagZyx, 2},
+  {RealZyy, 3}, {ImagZyy, 3},
+  {RealTzy, 1}, {ImagTzy, 1},
+  {RealTzx, 0}, {ImagTzx, 0},
+  {PTxx, 0}, {PTxy, 1},
+  {PTyx, 2}, {PTyy, 3}
+};
+
 std::string MTStationData::name() const
 {
   return station_name;
@@ -116,6 +132,9 @@ void MTStationData::set_data(double frequency,
                              const std::vector<double> &values,
                              const std::vector<double> &errors)
 {
+  if(types.size() != values.size() || types.size() != errors.size())
+    throw std::invalid_argument("Data types, values and errors must have the same length.");
+
   // Prefer the exact key so distinct, closely spaced response frequencies do
   // not overwrite one another. Keep the legacy tolerance for other callers.
   auto it = std::find(freqs.begin(), freqs.end(), frequency);
@@ -129,94 +148,31 @@ void MTStationData::set_data(double frequency,
 
   for(unsigned i = 0; i < types.size(); ++i)
   {
-    switch (types[i])
-    {
-    case RealZxx:
-      Z[0][fidx].real(values[i]);
-      Z_err[0][fidx] = errors[i];
-      break;
-    case RealZxy:
-      Z[1][fidx].real(values[i]);
-      Z_err[1][fidx] = errors[i];
-      break;
-    case RealZyx:
-      Z[2][fidx].real(values[i]);
-      Z_err[2][fidx] = errors[i];
-      break;
-    case RealZyy:
-      Z[3][fidx].real(values[i]);
-      Z_err[3][fidx] = errors[i];
-      break;
-    case ImagZxx:
-      Z[0][fidx].imag(values[i]);
-      Z_err[0][fidx] = errors[i];
-      break;
-    case ImagZxy:
-      Z[1][fidx].imag(values[i]);
-      Z_err[1][fidx] = errors[i];
-      break;
-    case ImagZyx:
-      Z[2][fidx].imag(values[i]);
-      Z_err[2][fidx] = errors[i];
-      break;
-    case ImagZyy:
-      Z[3][fidx].imag(values[i]);
-      Z_err[3][fidx] = errors[i];
-      break;
-    case PTxx:
-      PT[0][fidx] = values[i];
-      PT_err[0][fidx] = errors[i];
-      break;
-    case PTxy:
-      PT[1][fidx] = values[i];
-      PT_err[1][fidx] = errors[i];
-      break;
-    case PTyx:
-      PT[2][fidx] = values[i];
-      PT_err[2][fidx] = errors[i];
-      break;
-    case PTyy:
-      PT[3][fidx] = values[i];
-      PT_err[3][fidx] = errors[i];
-      break;
-    case RealTzx:
-      T[0][fidx].real(values[i]);
-      T_err[0][fidx] = errors[i];
-      break;
-    case RealTzy:
-      T[1][fidx].real(values[i]);
-      T_err[1][fidx] = errors[i];
-      break;
-    case ImagTzx:
-      T[0][fidx].imag(values[i]);
-      T_err[0][fidx] = errors[i];
-      break;
-    case ImagTzy:
-      T[1][fidx].imag(values[i]);
-      T_err[1][fidx] = errors[i];
-      break;
-    case RhoZxx:
-    case RhoZxy:
-    case RhoZyx:
-    case RhoZyy:
-      Rho[type_to_column_table.at(types[i])][fidx] = values[i];
-      Rho_err[type_to_column_table.at(types[i])][fidx] = errors[i];
-      break;
-    case PhsZxx:
-    case PhsZxy:
-    case PhsZyx:
-    case PhsZyy:
-      Phs[type_to_column_table.at(types[i])][fidx] = values[i];
-      Phs_err[type_to_column_table.at(types[i])][fidx] = errors[i];
-      break;
-    default:
-      break;
+    const auto type = types[i];
+    const auto column = type_to_column_table.find(type);
+    if(column == type_to_column_table.end()) continue;
+    const unsigned c = column->second;
+    switch(type) {
+    case RealZxx: case RealZxy: case RealZyx: case RealZyy:
+      Z[c][fidx].real(values[i]); Z_err[c][fidx] = errors[i]; break;
+    case ImagZxx: case ImagZxy: case ImagZyx: case ImagZyy:
+      Z[c][fidx].imag(values[i]); Z_err[c][fidx] = errors[i]; break;
+    case RealTzx: case RealTzy:
+      T[c][fidx].real(values[i]); T_err[c][fidx] = errors[i]; break;
+    case ImagTzx: case ImagTzy:
+      T[c][fidx].imag(values[i]); T_err[c][fidx] = errors[i]; break;
+    case PTxx: case PTxy: case PTyx: case PTyy:
+      PT[c][fidx] = values[i]; PT_err[c][fidx] = errors[i]; break;
+    case RhoZxx: case RhoZxy: case RhoZyx: case RhoZyy:
+      Rho[c][fidx] = values[i]; Rho_err[c][fidx] = errors[i]; break;
+    case PhsZxx: case PhsZxy: case PhsZyx: case PhsZyy:
+      Phs[c][fidx] = values[i]; Phs_err[c][fidx] = errors[i]; break;
+    default: break;
     }
   }
 
   T_err_floor = T_err;
   Z_err_floor = Z_err;
-  PT_err = PT_err;
 }
 
 std::vector<std::vector<bool>> MTStationData::impedance_mask() const
@@ -266,26 +222,26 @@ std::vector<std::vector<bool> > MTStationData::phase_tensor_mask() const
 
 void MTStationData::set_size(const unsigned n_frequencies, bool missing_values)
 {
-  freqs.resize(n_frequencies);
+  freqs.assign(n_frequencies, 0.);
 
   const double initial = missing_values ? std::numeric_limits<double>::quiet_NaN() : 0.;
-  Z.resize(4, cvector(n_frequencies, dcomplex(initial, initial)));
-  T.resize(2, cvector(n_frequencies, dcomplex(initial, initial)));
-  Rho.resize(4, dvector(n_frequencies, initial));
-  Phs.resize(4, dvector(n_frequencies, initial));
-  PT.resize(4, dvector(n_frequencies, initial));
+  Z.assign(4, cvector(n_frequencies, dcomplex(initial, initial)));
+  T.assign(2, cvector(n_frequencies, dcomplex(initial, initial)));
+  Rho.assign(4, dvector(n_frequencies, initial));
+  Phs.assign(4, dvector(n_frequencies, initial));
+  PT.assign(4, dvector(n_frequencies, initial));
 
-  Z_err.resize(4, dvector(n_frequencies));
-  T_err.resize(2, dvector(n_frequencies));
-  Rho_err.resize(4, dvector(n_frequencies));
-  Phs_err.resize(4, dvector(n_frequencies));
-  PT_err.resize(4, dvector(n_frequencies));
+  Z_err.assign(4, dvector(n_frequencies));
+  T_err.assign(2, dvector(n_frequencies));
+  Rho_err.assign(4, dvector(n_frequencies));
+  Phs_err.assign(4, dvector(n_frequencies));
+  PT_err.assign(4, dvector(n_frequencies));
   T_err_floor = T_err;
   Z_err_floor = Z_err;
 
-  Z_mask.resize(4, std::vector<bool>(n_frequencies, true));
-  T_mask.resize(2, std::vector<bool>(n_frequencies, true));
-  PT_mask.resize(4, std::vector<bool>(n_frequencies, true));
+  Z_mask.assign(4, std::vector<bool>(n_frequencies, true));
+  T_mask.assign(2, std::vector<bool>(n_frequencies, true));
+  PT_mask.assign(4, std::vector<bool>(n_frequencies, true));
 
   is_active = true;
 }
@@ -435,73 +391,55 @@ void MTStationData::apply_error_floor()
   }
 }
 
-void MTStationData::mask_type(RealDataType type, bool on)
+const std::vector<RealDataType> &MTStationData::linked_mask_types(RealDataType type)
 {
-  auto it = type_to_column_table.find(type);
-  if(it == type_to_column_table.end())
-    throw std::runtime_error("Unsupported type.");
-
-  unsigned column = it->second;
-
-  std::vector<bool>* v;
-  switch (type) {
-  case RealTzx:
-  case RealTzy:
-    v = &T_mask[column];
-    break;
-  case PTxx:
-  case PTxy:
-  case PTyx:
-  case PTyy:
-    v = &PT_mask[column];
-    break;
-  default:
-    v = &Z_mask[column];
-    break;
+  static const std::vector<RealDataType> none;
+  static const std::vector<RealDataType> impedance{RealZxx, RealZxy, RealZyx, RealZyy};
+  static const std::vector<RealDataType> tensor{PTxx, PTxy, PTyx, PTyy};
+  switch(type) {
+  case PTxx: case PTxy: case PTyx: case PTyy: return impedance;
+  case RealZxx: case RealZxy: case RealZyx: case RealZyy:
+  case ImagZxx: case ImagZxy: case ImagZyx: case ImagZyy:
+  case RhoZxx: case RhoZxy: case RhoZyx: case RhoZyy:
+  case PhsZxx: case PhsZxy: case PhsZyx: case PhsZyy: return tensor;
+  default: return none;
   }
-
-  std::fill(v->begin(), v->end(), on);
 }
 
-void MTStationData::set_data_mask(RealDataType type, double frequency, bool on)
+std::vector<bool> &MTStationData::mask_for(RealDataType type)
 {
-  auto it = type_to_column_table.find(type);
-  if(it == type_to_column_table.end())
-    throw std::runtime_error("Unsupported type.");
-
-  unsigned column = it->second;
-
-  std::vector<bool>* v;
-  switch (type) {
-  case RealTzx:
-  case RealTzy:
-  case ImagTzx:
-  case ImagTzy:
-    v = &T_mask[column];
-    break;
-  case PTxx:
-  case PTxy:
-  case PTyx:
-  case PTyy:
-    v = &PT_mask[column];
-    break;
-  default:
-    v = &Z_mask[column];
-    break;
+  const auto it = type_to_column_table.find(type);
+  if(it == type_to_column_table.end()) throw std::invalid_argument("Unsupported data type.");
+  const unsigned column = it->second;
+  switch(type) {
+  case RealTzx: case RealTzy: case ImagTzx: case ImagTzy: return T_mask[column];
+  case PTxx: case PTxy: case PTyx: case PTyy: return PT_mask[column];
+  default: return Z_mask[column];
   }
+}
 
-  // A selected stored frequency must win over nearby frequencies within the legacy tolerance.
-  const auto exact = std::find(freqs.begin(), freqs.end(), frequency);
-  if(exact != freqs.end()) {
-    (*v)[std::distance(freqs.begin(), exact)] = on;
-    return;
-  }
-  for(unsigned i = 0; i < freqs.size(); ++i)
-    if(fabs(frequency - freqs[i]) / freqs[i] < 1e-3)
-    {
-      (*v)[i] = on;
-      break;
+void MTStationData::mask_type(RealDataType type, bool on, bool linkTensorMasks)
+{
+  auto &mask = mask_for(type);
+  std::fill(mask.begin(), mask.end(), on);
+  if(linkTensorMasks) for(auto related: linked_mask_types(type)) mask_type(related, on, false);
+}
+
+void MTStationData::set_data_mask(RealDataType type, double frequency, bool on, bool linkTensorMasks)
+{
+  auto &mask = mask_for(type);
+  auto match = std::find(freqs.begin(), freqs.end(), frequency);
+  if(match == freqs.end()) {
+    double closest = 1e-3;
+    for(auto it = freqs.begin(); it != freqs.end(); ++it) {
+      const double distance = std::abs(frequency - *it) / *it;
+      if(distance < closest) { closest = distance; match = it; }
     }
+  }
+  if(match == freqs.end()) return;
+  const auto index = std::distance(freqs.begin(), match);
+  mask[index] = on;
+  if(linkTensorMasks) for(auto related: linked_mask_types(type)) set_data_mask(related, freqs[index], on, false);
 }
 
 std::set<RealDataType> MTStationData::active_types() const

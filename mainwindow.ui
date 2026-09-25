@@ -24,7 +24,7 @@
        <property name="orientation">
         <enum>Qt::Vertical</enum>
        </property>
-       <widget class="QWidget" name="layoutWidget">
+       <widget class="QWidget" name="stationsPanel">
         <layout class="QVBoxLayout" name="verticalLayout">
          <item>
           <widget class="QLabel" name="label">
@@ -54,12 +54,27 @@
          </item>
         </layout>
        </widget>
-       <widget class="QWidget" name="layoutWidget">
+       <widget class="QWidget" name="responsesPanel">
         <layout class="QVBoxLayout" name="verticalLayout_2">
          <item>
-          <widget class="QLabel" name="label_2">
+          <widget class="QToolButton" name="responsesToggle">
            <property name="text">
-            <string>Calculated responses:</string>
+            <string>Calculated responses</string>
+           </property>
+           <property name="toolTip">
+            <string>Expand or collapse calculated responses. Load responses from the File menu.</string>
+           </property>
+           <property name="checkable">
+            <bool>true</bool>
+           </property>
+           <property name="toolButtonStyle">
+            <enum>Qt::ToolButtonTextBesideIcon</enum>
+           </property>
+           <property name="autoRaise">
+            <bool>true</bool>
+           </property>
+           <property name="arrowType">
+            <enum>Qt::RightArrow</enum>
            </property>
           </widget>
          </item>
