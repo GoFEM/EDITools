@@ -1,4 +1,5 @@
 #include "FitStatisticsWindow.h"
+#include "include/HelpButton.h"
 #include <QDialogButtonBox>
 #include <QDoubleValidator>
 #include <QLineEdit>
@@ -76,17 +77,17 @@ FitStatisticsWindow::FitStatisticsWindow(QWidget *parent, std::function<void()> 
   resize(1450, 940);
   auto *layout = new QVBoxLayout(this);
   auto *controls = new QHBoxLayout;
-  controls->addWidget(new QLabel(tr("Normalize by:"), this));
+  controls->addWidget(UiHelp::label(this, tr("Errors:"), tr("nRMS = √mean(((predicted − observed) / error)²). Choose inversion/response errors or current observation errors, including error floors. Only matching, unmasked data are compared. N is matched / available response scalars; the dotted line marks nRMS = 1."), "fitErrorsHelp"));
   errorSource = new QComboBox(this);
   errorSource->setObjectName("fitErrorSource");
-  errorSource->addItems({tr("Inversion / response errors"), tr("Current observation errors")});
+  errorSource->addItems({tr("Response"), tr("Observed")});
   controls->addWidget(errorSource);
   auto *refreshButton = new QPushButton(tr("Refresh"), this);
   controls->addWidget(refreshButton);
   auto *rangesButton = new QPushButton(tr("Plot ranges…"), this);
   rangesButton->setObjectName("fitPlotRanges");
   controls->addWidget(rangesButton);
-  controls->addWidget(new QLabel(tr("Curve colors:"), this));
+  controls->addWidget(new QLabel(tr("Colors:"), this));
   curveColors = new QComboBox(this);
   curveColors->setObjectName("fitCurveColors");
   curveColors->addItems({tr("Distinct"), "Viridis", "Thermal", "Jet", "Grayscale", "Polar"});
@@ -96,10 +97,6 @@ FitStatisticsWindow::FitStatisticsWindow(QWidget *parent, std::function<void()> 
   pdf->setObjectName("fitSavePdf");
   controls->addWidget(pdf);
   layout->addLayout(controls);
-  auto *description = new QLabel(tr("nRMS = √mean(((predicted − observed) / error)²). Only matching, unmasked data are compared. "
-                                   "N shows matched / available response scalars; the dotted line marks nRMS = 1."), this);
-  description->setWordWrap(true);
-  layout->addWidget(description);
   auto *splitter = new QSplitter(this);
   layout->addWidget(splitter, 1);
   auto *left = new QWidget(splitter);
@@ -108,6 +105,8 @@ FitStatisticsWindow::FitStatisticsWindow(QWidget *parent, std::function<void()> 
   responseList = new QTreeWidget(left);
   responseList->setObjectName("fitResponses");
   responseList->setHeaderLabels({tr("Response"), tr("nRMS"), tr("N")});
+  responseList->headerItem()->setToolTip(1, tr("Root mean square of residuals divided by the selected errors."));
+  responseList->headerItem()->setToolTip(2, tr("Matched / available response scalars. Counts may differ between responses because their coverage differs."));
   responseList->setRootIsDecorated(false);
   responseList->header()->setSectionResizeMode(QHeaderView::ResizeToContents);
   leftLayout->addWidget(responseList);
@@ -151,7 +150,7 @@ FitStatisticsWindow::FitStatisticsWindow(QWidget *parent, std::function<void()> 
   auto *colorControls = new QWidget(spatial);
   auto *colorLayout = new QGridLayout(colorControls);
   colorLayout->setContentsMargins(0, 0, 0, 0);
-  colorLayout->addWidget(new QLabel(tr("Colormap:"), colorControls), 0, 0);
+  colorLayout->addWidget(UiHelp::label(colorControls, tr("Colormap:"), tr("Choose two checked responses above to compare. Both panels share color limits. Auto fits the checked responses; manual limits clip to the endpoint colors. Grey means no matching observations."), "fitSpatialHelp"), 0, 0);
   colorMap = new QComboBox(colorControls);
   colorMap->setObjectName("fitColorMap");
   colorMap->addItems({"Viridis", "Thermal", "Jet", "Grayscale", "Polar"});
@@ -207,8 +206,8 @@ FitStatisticsWindow::FitStatisticsWindow(QWidget *parent, std::function<void()> 
       updateDetails();
     });
   };
-  addLimits(1, tr("Map nRMS range:"), "fitMapRange", mapLimits);
-  addLimits(2, tr("Heatmap nRMS range:"), "fitHeatRange", heatLimits);
+  addLimits(1, tr("Map nRMS:"), "fitMapRange", mapLimits);
+  addLimits(2, tr("Heatmap nRMS:"), "fitHeatRange", heatLimits);
   colorLayout->setColumnStretch(6, 1);
   spatialGrid->addWidget(colorControls, 1, 0, 1, 2);
   mapA = makePlot("fitMapA", tr("Station nRMS"), "", "");
@@ -239,9 +238,6 @@ FitStatisticsWindow::FitStatisticsWindow(QWidget *parent, std::function<void()> 
   heatLayout->addWidget(heatA); heatLayout->addWidget(heatB);
   spatialTabs->addTab(heatmaps, tr("Station / period heatmaps"));
   spatialGrid->addWidget(spatialTabs, 2, 0, 1, 2);
-  auto *spatialNote = new QLabel(tr("Select two checked responses to compare. Both panels share color limits. Values outside the limits use the endpoint colors; grey means no matching observations."), spatial);
-  spatialNote->setWordWrap(true);
-  spatialGrid->addWidget(spatialNote, 3, 0, 1, 2);
   spatialGrid->setRowStretch(2, 1);
   tabs->addTab(spatial, tr("Maps and heatmaps"));
   splitter->setSizes({340, 1100});
@@ -441,8 +437,8 @@ void FitStatisticsWindow::updatePlots()
     combo->setCurrentIndex(index >= 0 ? index : (combo == detailA ? 0 : combo->count() - 1));
   }
   updateDetails();
-  summary->setText(!survey || responses.empty() ? tr("Load observed data and computed responses to compare their fit.") :
-    tr("%1 of %2 responses checked. %3 observed stations. Refresh after editing observations; counts can differ when response coverage differs.")
+  summary->setText(!survey || responses.empty() ? tr("Load observations and responses.") :
+    tr("%1/%2 responses checked · %3 stations")
       .arg(active.size()).arg(responses.size()).arg(stationOrder.size()));
 }
 
@@ -480,15 +476,12 @@ void FitStatisticsWindow::editRanges()
   dialog.setObjectName("fitAxisRangesDialog");
   dialog.setWindowTitle(tr("Statistics plot ranges"));
   auto *layout = new QVBoxLayout(&dialog);
-  auto *description = new QLabel(tr("Set the visible range of each axis, or use Auto to fit the checked responses. "
-                                    "These settings also apply to the PDF export."), &dialog);
-  description->setWordWrap(true);
-  layout->addWidget(description);
   auto *grid = new QGridLayout;
   layout->addLayout(grid);
   const QStringList headers{tr("Plot"), tr("Axis"), tr("Auto"), tr("Minimum"), tr("Maximum")};
   for(int column = 0; column < headers.size(); ++column)
-    grid->addWidget(new QLabel(headers[column], &dialog), 0, column);
+    if(column == 2) grid->addWidget(UiHelp::label(&dialog, headers[column], tr("Auto fits the checked responses. Turn it off to set the visible axis limits. These settings also apply to PDF export."), "fitRangesHelp"), 0, column);
+    else grid->addWidget(new QLabel(headers[column], &dialog), 0, column);
   struct Fields {
     QCustomPlot *plot;
     unsigned axis;

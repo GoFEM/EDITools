@@ -49,6 +49,7 @@ class MTStationData
   friend class boost::serialization::access;
   friend class EDIFileReader;
   friend struct NativeMTStationAccess;
+  friend struct PeriodResamplingAccess;
 
 private:
   std::string station_name;

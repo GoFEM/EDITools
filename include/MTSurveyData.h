@@ -23,6 +23,8 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <memory>
+#include <boost/serialization/shared_ptr.hpp>
 
 #include <boost/serialization/map.hpp>
 #include <boost/serialization/version.hpp>
@@ -31,6 +33,7 @@
 #include "EDIFileReader.h"
 #include "SurveyCoordinates.h"
 #include "MTResponseData.h"
+#include "PeriodResamplingInfo.h"
 
 class MTSurveyData
 {
@@ -39,6 +42,8 @@ public:
   MTSurveyData(const std::string survey_name);
 
   std::string get_survey_name() const;
+  const PeriodResampling::Info &resampling_info() const { return m_resampling_info; }
+  const MTSurveyData *resampling_source() const { return m_resampling_source.get(); }
 
   bool is_station_present(const std::string &name) const;
 
@@ -87,6 +92,7 @@ public:
 
 private:
   friend class boost::serialization::access;
+  friend struct PeriodResamplingAccess;
 
   template<class Archive>
   void serialize(Archive & ar, const unsigned int version)
@@ -97,6 +103,8 @@ private:
       else if(Archive::is_loading::value) m_coordinates = SurveyCoordinates{};
       if(version >= 2) ar & m_response_observations;
       else if(Archive::is_loading::value) m_response_observations.clear();
+      if(version >= 3) ar & m_resampling_info & m_resampling_source;
+      else if(Archive::is_loading::value) { m_resampling_info = {}; m_resampling_source.reset(); }
   }
 
 private:
@@ -104,8 +112,10 @@ private:
   std::map<std::string, MTStationData> m_stations_data;
   SurveyCoordinates m_coordinates;
   std::vector<MTResponseData::Scalar> m_response_observations;
+  PeriodResampling::Info m_resampling_info;
+  std::shared_ptr<MTSurveyData> m_resampling_source;
 };
 
-BOOST_CLASS_VERSION(MTSurveyData, 2)
+BOOST_CLASS_VERSION(MTSurveyData, 3)
 
 #endif // MT_SURVEY_DATA_H

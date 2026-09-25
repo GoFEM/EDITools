@@ -74,6 +74,8 @@
 #include "SurveyCoordinatesDialog.h"
 #include "FitStatisticsWindow.h"
 #include "PeriodMapWindow.h"
+#include "PeriodLayoutWindow.h"
+#include "include/SurveyReport.h"
 
 namespace
 {
@@ -142,6 +144,12 @@ MainWindow::MainWindow(QWidget *parent) :
   mapControlsLayout->addLayout(mapActions);
   connect(mapStationNames, &QCheckBox::toggled, ui->actionShow_station_names, &QAction::setChecked);
   connect(mapsButton, &QPushButton::clicked, this, &MainWindow::on_actionPeriod_maps_triggered);
+  auto *periodLayoutAction = ui->menuData->addAction(tr("Period layout / Resampling…"));
+  periodLayoutAction->setObjectName("actionPeriod_layout");
+  connect(periodLayoutAction, &QAction::triggered, this, &MainWindow::openPeriodLayout);
+  auto *reportAction = ui->menuFile->addAction(tr("Export survey report…"));
+  reportAction->setObjectName("actionExport_survey_report");
+  connect(reportAction, &QAction::triggered, this, &MainWindow::exportSurveyReport);
   mapCoordinateSwitch = new QComboBox(mapControls);
   mapCoordinateSwitch->setObjectName("mapCoordinateSwitch");
   mapCoordinateSwitch->addItems({tr("Lat/Lon"), tr("UTM")});
@@ -174,6 +182,22 @@ MainWindow::MainWindow(QWidget *parent) :
   lastDirectory = QSettings().value("lastDirectory", QDir::homePath()).toString();
 
   this->showMaximized();
+}
+
+void MainWindow::exportSurveyReport()
+{
+  if(!mtSurvey) { QMessageBox::information(this, tr("Survey report"), tr("Load a survey first.")); return; }
+  SurveyReport::Options options;
+  options.source = projectFile;
+  options.errorBars = ui->actionShow_error_bars->isChecked();
+  const auto plots = currentPlotOptions();
+  options.phaseWrap = plots.phaseWrap;
+  options.components = plots.componentVisible;
+  for(unsigned i = 0; i < options.axes.size() && i < plots.axes.size(); ++i)
+    options.axes[i] = {plots.axes[i].autoscale, plots.axes[i].lower, plots.axes[i].upper};
+  const auto *selected = ui->responsesList->currentItem();
+  SurveyReport::show_dialog(this, *mtSurvey, mtResponses, selected ? selected->toolTip() : QString(), options, lastDirectory);
+  QSettings().setValue("lastDirectory", lastDirectory);
 }
 
 void MainWindow::rememberDirectory(const QString &path)
@@ -1012,6 +1036,31 @@ void MainWindow::refreshAnalysisWindows()
 {
   if(fitStatistics) fitStatistics->setData(mtSurvey, mtResponses);
   if(periodMaps) periodMaps->setData(mtSurvey, mtResponses);
+  if(periodLayout) periodLayout->setData(mtSurvey);
+}
+
+void MainWindow::openPeriodLayout()
+{
+  if(!periodLayout) periodLayout = new PeriodLayoutWindow(this, [this](std::shared_ptr<MTSurveyData> data) { openSurveyCopy(std::move(data)); });
+  periodLayout->setData(mtSurvey);
+  periodLayout->show(); periodLayout->raise(); periodLayout->activateWindow();
+}
+
+void MainWindow::openSurveyCopy(std::shared_ptr<MTSurveyData> data)
+{
+  auto *window = new MainWindow;
+  window->setAttribute(Qt::WA_DeleteOnClose);
+  window->setObjectName("resampledSurveyWindow");
+  window->mtSurvey = std::move(data);
+  window->mtResponses = mtResponses;
+  window->lastDirectory = lastDirectory;
+  window->projectFile.clear();
+  window->applyPlotOptions(currentPlotOptions());
+  window->createStationsList(); window->createResponsesList(); window->updateMap();
+  if(window->ui->stationList->count()) window->ui->stationList->setCurrentRow(0);
+  const auto name = QString::fromStdString(window->mtSurvey->get_survey_name()).trimmed();
+  window->setWindowTitle(tr("EDITools — %1").arg(name.isEmpty() ? tr("Survey copy") : name));
+  window->show();
 }
 
 void MainWindow::on_actionPeriod_maps_triggered()

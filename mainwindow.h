@@ -39,6 +39,7 @@ class MainWindow;
 }
 class FitStatisticsWindow;
 class PeriodMapWindow;
+class PeriodLayoutWindow;
 
 class MainWindow : public QMainWindow
 {
@@ -221,6 +222,10 @@ private:
   SurveyCoordinates mapCoordinates;
   FitStatisticsWindow *fitStatistics = nullptr;
   PeriodMapWindow *periodMaps = nullptr;
+  PeriodLayoutWindow *periodLayout = nullptr;
+  void openPeriodLayout();
+  void exportSurveyReport();
+  void openSurveyCopy(std::shared_ptr<MTSurveyData> survey);
 };
 
 #endif // MAINWINDOW_H

@@ -222,7 +222,9 @@ void MTSurveyData::decimate()
 
 std::vector<double> MTSurveyData::get_unique_periods() const
 {
-  std::set<double, weak_compare> periods_set;
+  // Preserve distinct samples even at short periods; absolute-tolerance ordering
+  // can collapse neighboring points on a common logarithmic grid.
+  std::set<double> periods_set;
 
   for(auto &station: m_stations_data)
   {
