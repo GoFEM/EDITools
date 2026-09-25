@@ -1,6 +1,8 @@
 #include "ExportNativeMTDialog.h"
 #include "SurveyCoordinatesDialog.h"
 #include "include/MTSurveyData.h"
+#include <boost/archive/binary_iarchive.hpp>
+#include <boost/archive/binary_oarchive.hpp>
 #include <QApplication>
 #include <QClipboard>
 #include <QSpinBox>

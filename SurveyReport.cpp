@@ -1,4 +1,7 @@
+#include "include/MapBackground.h"
+#include "include/FileLabels.h"
 #include "include/SurveyReport.h"
+#include "PeriodMapWindow.h"
 #include "include/ApparentResistivityPlot.h"
 #include "include/PhasePlot.h"
 #include "include/TipperPlot.h"
@@ -14,20 +17,38 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPdfWriter>
 #include <QProgressDialog>
 #include <QPushButton>
 #include <QSaveFile>
+#include <QRegularExpression>
 #include <algorithm>
 #include <cmath>
+#include <set>
+#include <stdexcept>
 
 namespace {
 using namespace SurveyReport;
 QString tr(const char *text) { return QObject::tr(text); }
 QFont font(int pixels, bool bold = false) { QFont f("Sans Serif"); f.setPixelSize(pixels); f.setBold(bold); return f; }
 QString number(double value, int precision = 6) { return std::isfinite(value) ? QString::number(value, 'g', precision) : tr("N/A"); }
+std::vector<double> validatedMapPeriods(std::vector<double> periods) {
+  if(periods.empty()) throw std::invalid_argument("Choose at least one map period.");
+  for(double p: periods) if(!std::isfinite(p) || p <= 0.) throw std::invalid_argument("Map periods must be positive numbers in seconds.");
+  std::sort(periods.begin(), periods.end()); periods.erase(std::unique(periods.begin(), periods.end()), periods.end()); return periods;
+}
+std::vector<double> parseMapPeriods(const QString &text) {
+  std::vector<double> result;
+  for(const auto &token: text.split(QRegularExpression("[,;\\s]+"), Qt::SkipEmptyParts)) {
+    bool ok = false; const double value = token.toDouble(&ok);
+    if(!ok) throw std::invalid_argument("Map periods must be positive numbers in seconds.");
+    result.push_back(value);
+  }
+  return validatedMapPeriods(result);
+}
 void text(QCPPainter &p, const QRectF &rect, const QString &value, int pixels = 16, bool bold = false) {
   p.setPen(QColor("#172033")); p.setFont(font(pixels, bold));
   p.drawText(rect, Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap, value);
@@ -60,7 +81,8 @@ public:
   std::map<std::string, QPointF> positions;
   QString description;
   QCPRange x{-1., 1.}, y{-1., 1.};
-  LocationMap(const MTSurveyData &survey) {
+  LocationMap(const MTSurveyData &survey, int layers) {
+    auto *background = new MapBackground(&plot); background->setLayers(layers);
     style(plot); title(plot, tr("Station map"));
     std::vector<std::string> names;
     std::vector<std::array<double, 3>> locations;
@@ -77,7 +99,10 @@ public:
           const auto suggestion = SurveyCoordinates::suggested(locations);
           coordinates = SurveyCoordinates::calculate(locations, suggestion.zone, suggestion.north, true);
         }
+        background->setCoordinates(coordinates, .001);
         description = tr("WGS84 / UTM %1%2").arg(coordinates.zone).arg(coordinates.north ? "N" : "S");
+        description += tr("\nUTM origin E: %1 m\nUTM origin N: %2 m")
+          .arg(coordinates.origin_easting, 0, 'f', 2).arg(coordinates.origin_northing, 0, 'f', 2);
         plot.xAxis->setLabel(coordinates.centered ? tr("East offset (km)") : tr("Easting (km)"));
         plot.yAxis->setLabel(coordinates.centered ? tr("North offset (km)") : tr("Northing (km)"));
         for(unsigned i = 0; i < locations.size(); ++i) {
@@ -111,12 +136,22 @@ public:
       else plot.xAxis->setScaleRatio(plot.yAxis);
     });
   }
-  void render(QCPPainter &p, const QRect &rect, const std::string &station = {}) {
+  void render(QCPPainter &p, const QRect &rect, const std::string &station = {}, bool showNames = false) {
     plot.clearItems(); plot.graph(2)->data()->clear();
     const auto found = positions.find(station);
     plot.legend->setVisible(true);
     plot.legend->item(2)->setVisible(found != positions.end());
     if(found != positions.end()) plot.graph(2)->addData(found->second.x(), found->second.y());
+    if(showNames) for(const auto &entry: positions) {
+      auto *label = new QCPItemText(&plot);
+      label->position->setType(QCPItemPosition::ptPlotCoords);
+      label->position->setCoords(entry.second);
+      label->setPositionAlignment(Qt::AlignLeft | Qt::AlignBottom);
+      label->setPadding(QMargins(5, 2, 2, 3));
+      label->setText(QString::fromStdString(entry.first));
+      label->setFont(font(12)); label->setColor(QColor("#334155"));
+      label->setBrush(QColor(255, 255, 255, 210));
+    }
     if(positions.empty()) {
       auto *label = new QCPItemText(&plot); label->position->setType(QCPItemPosition::ptAxisRectRatio);
       label->position->setCoords(.5, .5); label->setText(tr("No usable coordinates")); label->setFont(font(15));
@@ -168,8 +203,18 @@ bool write_pdf(const QString &path, const MTSurveyData &survey, const MTSurveyDa
   std::vector<std::string> included;
   for(const auto &name: survey.get_stations_names()) if(options.includeDisabled || survey.is_active(name)) included.push_back(name);
   if(included.empty()) throw std::runtime_error("No stations match the report selection.");
-  const unsigned pageCount = included.size() + 1;
+  const bool maps = options.phaseTensorMaps || options.inductionMaps;
+  const auto mapPeriods = maps ? validatedMapPeriods(options.mapPeriods) : std::vector<double>{};
+  if(maps && options.mapData != Options::MapData::Observed && !response) throw std::invalid_argument("Select a response for response maps.");
+  if(options.inductionMaps && !options.mapSettings.real && !options.mapSettings.imaginary) throw std::invalid_argument("Choose real or imaginary induction vectors.");
+  const unsigned pageCount = unsigned(options.overview) + (options.stationPages ? included.size() : 0) +
+    mapPeriods.size() * (options.mapData == Options::MapData::Both ? 2 : 1);
+  if(!pageCount) throw std::invalid_argument("Select at least one report section.");
   if(progress && !progress(0, pageCount)) return false;
+  // Response labels may come from projects saved on another platform. Never
+  // print directories, drive letters or network host names in the report.
+  auto responseName = FileLabels::fileName(options.responseName);
+  if(responseName.isEmpty()) responseName = tr("Computed response");
   std::map<std::string, PeriodSummary> information;
   std::map<double, std::array<unsigned, 3>> coverage;
   std::array<std::array<unsigned, 4>, 3> totals{};
@@ -188,7 +233,7 @@ bool write_pdf(const QString &path, const MTSurveyData &survey, const MTSurveyDa
   }
   FitStatistics::Result fit;
   if(response) fit = FitStatistics::compare(survey, *response, FitStatistics::ErrorSource::Observed);
-  LocationMap map(survey);
+  LocationMap map(survey, options.mapLayers);
   QSaveFile file(path);
   if(!file.open(QIODevice::WriteOnly)) throw std::runtime_error(file.errorString().toStdString());
   bool canceled = false;
@@ -199,7 +244,10 @@ bool write_pdf(const QString &path, const MTSurveyData &survey, const MTSurveyDa
     QCPPainter painter;
     if(!painter.begin(&pdf)) throw std::runtime_error("Cannot initialize the PDF writer.");
     const int w = 1400, h = qRound(double(w) * pdf.height() / pdf.width());
-    auto beginPage = [&](const QString &heading, const QString &subheading, unsigned page) {
+    unsigned writtenPages = 0;
+    auto beginPage = [&](const QString &heading, const QString &subheading) {
+      if(writtenPages && !pdf.newPage()) throw std::runtime_error("Cannot append a PDF page.");
+      ++writtenPages;
       painter.resetTransform(); painter.scale(double(pdf.width()) / w, double(pdf.width()) / w);
       painter.fillRect(QRect(0, 0, w, h), Qt::white);
       painter.setFont(font(27, true));
@@ -208,9 +256,10 @@ bool write_pdf(const QString &path, const MTSurveyData &survey, const MTSurveyDa
       line(painter, h - 33, w);
       painter.setFont(font(12));
       text(painter, QRectF(0, h - 24, w - 180, 22), painter.fontMetrics().elidedText(options.title, Qt::ElideRight, w - 180), 12);
-      text(painter, QRectF(w - 145, h - 24, 145, 22), tr("Page %1 of %2").arg(page).arg(pageCount), 12);
+      text(painter, QRectF(w - 145, h - 24, 145, 22), tr("Page %1 of %2").arg(writtenPages).arg(pageCount), 12);
     };
-    beginPage(options.title, tr("Survey overview · %1").arg(QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm")), 1);
+    if(options.overview) {
+    beginPage(options.title, tr("Survey overview · %1").arg(QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm")));
     const int left = 690;
     text(painter, QRectF(0, 106, left, 36), tr("%1 stations · %2 enabled · %3 disabled").arg(included.size()).arg(enabled).arg(included.size() - enabled), 21, true);
     text(painter, QRectF(0, 150, left, 66), tr("Period range: %1 – %2 s\nScope: %3 of %4 survey stations · %5 mapped locations")
@@ -222,7 +271,7 @@ bool write_pdf(const QString &path, const MTSurveyData &survey, const MTSurveyDa
     if(response) {
       painter.setFont(font(16));
       text(painter, QRectF(0, noteY, left, 55), tr("Response: %1\nnRMS: %2 · %3 matched scalars (observed errors)")
-           .arg(painter.fontMetrics().elidedText(options.responseName, Qt::ElideMiddle, left - 100))
+           .arg(painter.fontMetrics().elidedText(responseName, Qt::ElideMiddle, left - 100))
            .arg(fit.total.count ? number(fit.total.rms()) : tr("N/A")).arg(fit.total.count), 16);
       text(painter, QRectF(0, noteY + 48, left, 24), tr("Fit uses all enabled components, independent of plot visibility."), 13);
       noteY += 80;
@@ -248,12 +297,12 @@ bool write_pdf(const QString &path, const MTSurveyData &survey, const MTSurveyDa
     else coveragePlot.xAxis->setRange(.1, 10.);
     coveragePlot.yAxis->setRange(0., std::max(1., enabled * 1.05));
     plotAt(painter, coveragePlot, QRect(0, noteY, left, h - noteY - 55));
-    map.render(painter, QRect(735, 108, w - 735, h - 295));
-    text(painter, QRectF(755, h - 175, w - 755, 60), map.description + tr("\nAll survey locations shown; missing coordinates are omitted."), 15);
-    painter.setFont(font(14));
-    text(painter, QRectF(755, h - 100, w - 755, 45), tr("Source: %1").arg(painter.fontMetrics().elidedText(options.source.isEmpty() ? tr("Unsaved survey") : options.source, Qt::ElideMiddle, w - 805)), 14);
-    if(progress && !progress(1, pageCount)) canceled = true;
+    map.render(painter, QRect(735, 108, w - 735, h - 315), {}, true);
+    text(painter, QRectF(755, h - 190, w - 755, 85), map.description + tr("\nAll survey locations shown; missing coordinates are omitted."), 15);
+    if(progress && !progress(writtenPages, pageCount)) canceled = true;
+    }
 
+    if(options.stationPages && !canceled) {
     std::array<std::unique_ptr<QCustomPlot>, 4> plots;
     std::array<std::unique_ptr<MTDataPlot>, 4> handlers;
     const QStringList plotNames{tr("Apparent resistivity"), tr("Phase"), tr("Tipper"), tr("Phase tensor")};
@@ -262,45 +311,101 @@ bool write_pdf(const QString &path, const MTSurveyData &survey, const MTSurveyDa
       plots[i]->setObjectName(QString("surveyReportPlot%1").arg(i));
       if(i == 0) handlers[i].reset(new ApparentResistivityPlot(plots[i].get()));
       if(i == 1) { auto *phase = new PhasePlot(plots[i].get()); phase->set_phase_wrap(options.phaseWrap); handlers[i].reset(phase); }
-      if(i == 2) handlers[i].reset(new TipperPlot(plots[i].get()));
+      if(i == 2) { auto *tipper = new TipperPlot(plots[i].get()); tipper->set_arrow_mode(options.tipperArrows); handlers[i].reset(tipper); }
       if(i == 3) handlers[i].reset(new PhaseTensorPlot(plots[i].get()));
       handlers[i]->set_error_bars_visible(options.errorBars); handlers[i]->set_component_visibility(options.components[i]);
       handlers[i]->set_y_axis_range(options.axes[i].lower, options.axes[i].upper);
       handlers[i]->set_y_axis_autoscale(options.axes[i].autoscale);
       // Static paper legends omit interactive controls while using the same data/curve rendering.
       plots[i]->legend->clearItems();
-      for(unsigned c = 0; c < 4; ++c) if(options.components[i][c]) plots[i]->legend->addItem(new QCPPlottableLegendItem(plots[i]->legend, plots[i]->graph(c)));
-      style(*plots[i]); title(*plots[i], plotNames[i]);
+      for(unsigned c = 0; c < 4; ++c) {
+        const bool shown = i == 2 && options.tipperArrows ? (c % 2 == 0 && (options.components[i][c] || options.components[i][c + 1])) : options.components[i][c];
+        if(shown) plots[i]->legend->addItem(new QCPPlottableLegendItem(plots[i]->legend, plots[i]->graph(c)));
+      }
+      style(*plots[i]); title(*plots[i], i == 2 && options.tipperArrows ? tr("Tipper arrows") : plotNames[i]);
     }
     for(unsigned page = 0; page < included.size() && !canceled; ++page) {
-      if(!pdf.newPage()) throw std::runtime_error("Cannot append a PDF page.");
       const auto &name = included[page]; auto station = survey.get_station_data(name);
       const auto &info = information.at(name);
       beginPage(QString::fromStdString(name), tr("%1 · %2 periods · %3 – %4 s")
-                .arg(station.active() ? tr("Enabled") : tr("Disabled")).arg(station.frequencies().size()).arg(number(info.minimum)).arg(info.maximum > 0. ? number(info.maximum) : tr("N/A")), page + 2);
+                .arg(station.active() ? tr("Enabled") : tr("Disabled")).arg(station.frequencies().size()).arg(number(info.minimum)).arg(info.maximum > 0. ? number(info.maximum) : tr("N/A")));
       const MTStationData *prediction = response && response->is_station_present(name) ? &response->get_station_data(name) : nullptr;
       const int plotWidth = 510, plotHeight = (h - 155) / 2;
       for(unsigned i = 0; i < 4; ++i) {
-        auto &plot = *plots[i]; plot.clearItems(); handlers[i]->clear_predicted_data();
+        auto &plot = *plots[i];
+        for(int item = plot.itemCount() - 1; item >= 0; --item) if(plot.item(item)->objectName() == "reportNoData") plot.removeItem(item);
+        handlers[i]->clear_predicted_data();
         // Reset empty panels so a previous station's scales cannot leak into this page.
         plot.xAxis->setRange(std::isfinite(info.minimum) ? info.minimum / 1.5 : .1, info.maximum > 0. ? info.maximum * 1.5 : 10.);
         plot.yAxis->setRange(i == 0 ? QCPRange(.1, 1000.) : (i == 1 ? QCPRange(-180., 180.) : QCPRange(-1., 1.)));
         handlers[i]->set_observed_data(station);
         if(prediction) handlers[i]->set_predicted_data(*prediction, true);
+        if(i == 2 && !options.tipperArrows) {
+          const auto mask = station.tipper_mask();
+          std::vector<dvector> values, errors; station.get_tipper(values, errors);
+          for(unsigned c = 0; c < 4; ++c) {
+            // Include gaps in both the line and its error vector, so inserting
+            // a masked period cannot shift subsequent uncertainty bars.
+            std::map<double, std::pair<double, double>> samples;
+            for(unsigned f = 0; f < station.frequencies().size(); ++f)
+              samples[1. / station.frequencies()[f]] = mask[c][f] ? std::make_pair(values[c][f], errors[c][f]) : std::make_pair(std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN());
+            QVector<double> x, y, uncertainty;
+            for(const auto &sample: samples) { x << sample.first; y << sample.second.first; uncertainty << sample.second.second; }
+            plot.graph(c)->setData(x, y, true); plot.graph(c)->setLineStyle(QCPGraph::lsLine);
+            for(int index = 0; index < plot.plottableCount(); ++index) {
+              auto *bars = dynamic_cast<QCPErrorBars *>(plot.plottable(index));
+              if(bars && bars->dataPlottable() == plot.graph(c)) bars->setData(uncertainty);
+            }
+          }
+        }
         bool hasData = false;
         for(int g = 0; g < plot.graphCount(); ++g) if(plot.graph(g)->visible())
           for(const auto &value: *plot.graph(g)->data()) if(std::isfinite(value.value) && (i != 0 || value.value > 0.)) { hasData = true; break; }
+        if(i == 2 && options.tipperArrows) {
+          hasData = false;
+          for(const MTStationData *data: std::array<const MTStationData *, 2>{{&station, prediction}}) if(data) {
+            std::vector<dvector> values, errors; data->get_tipper(values, errors);
+            for(unsigned offset: {0u, 2u}) if(options.components[i][offset] || options.components[i][offset + 1])
+              for(unsigned f = 0; f < data->frequencies().size(); ++f)
+                hasData |= (!options.components[i][offset] || std::isfinite(values[offset][f])) &&
+                           (!options.components[i][offset + 1] || std::isfinite(values[offset + 1][f]));
+          }
+        }
         if(!hasData) {
-          auto *label = new QCPItemText(&plot); label->position->setType(QCPItemPosition::ptAxisRectRatio); label->position->setCoords(.5, .5);
+          auto *label = new QCPItemText(&plot); label->setObjectName("reportNoData"); label->position->setType(QCPItemPosition::ptAxisRectRatio); label->position->setCoords(.5, .5);
           label->setText(tr("No displayed data")); label->setFont(font(16)); label->setColor(QColor("#64748b"));
         }
+        QMetaObject::Connection arrowLayout;
+        if(i == 2 && options.tipperArrows) {
+          for(int item = 0; item < plot.itemCount(); ++item) {
+            if(auto *label = dynamic_cast<QCPItemText *>(plot.item(item))) if(label->text().startsWith("|T|")) label->setFont(font(13));
+            if(auto *arrow = dynamic_cast<QCPItemLine *>(plot.item(item)))
+              if(arrow->start->type() == QCPItemPosition::ptAxisRectRatio) arrow->start->setCoords(.6, .12);
+          }
+          arrowLayout = QObject::connect(&plot, &QCustomPlot::afterLayout, &plot, [&plot] {
+            // Scale all vectors and their reference together to fit the printed
+            // panel. PDF panels can be much narrower than the interactive plot.
+            double scale = 1.; const auto bounds = plot.axisRect()->rect().adjusted(5, 5, -5, -5);
+            for(int item = 0; item < plot.itemCount(); ++item) if(auto *arrow = dynamic_cast<QCPItemLine *>(plot.item(item))) {
+              if(arrow->start->type() != QCPItemPosition::ptPlotCoords) continue;
+              const auto start = arrow->start->pixelPosition(), delta = arrow->end->coords();
+              if(delta.x() > 0.) scale = std::min(scale, (bounds.right() - start.x()) / delta.x());
+              if(delta.x() < 0.) scale = std::min(scale, (bounds.left() - start.x()) / delta.x());
+              if(delta.y() > 0.) scale = std::min(scale, (bounds.bottom() - start.y()) / delta.y());
+              if(delta.y() < 0.) scale = std::min(scale, (bounds.top() - start.y()) / delta.y());
+            }
+            if(scale > 0. && scale < 1.) for(int item = 0; item < plot.itemCount(); ++item)
+              if(auto *arrow = dynamic_cast<QCPItemLine *>(plot.item(item))) arrow->end->setCoords(arrow->end->coords() * scale);
+          });
+        }
         plotAt(painter, plot, QRect((i % 2) * (plotWidth + 12), 100 + (i / 2) * (plotHeight + 8), plotWidth, plotHeight));
+        if(arrowLayout) QObject::disconnect(arrowLayout);
       }
       const int sideX = 1060, sideW = w - sideX;
       map.render(painter, QRect(sideX, 100, sideW, 330), name);
-      text(painter, QRectF(sideX, 440, sideW, 50), map.positions.count(name) ? map.description : tr("Station location unavailable"), 14);
+      text(painter, QRectF(sideX, 435, sideW, 66), map.description + (map.positions.count(name) ? QString() : tr("\nStation location unavailable")), 14);
       const auto pos = station.position();
-      text(painter, QRectF(sideX, 492, sideW, 86), tr("Latitude: %1°\nLongitude: %2°\nElevation: %3 m")
+      text(painter, QRectF(sideX, 510, sideW, 72), tr("Latitude: %1°\nLongitude: %2°\nElevation: %3 m")
            .arg(number(pos[0], 9)).arg(number(pos[1], 9)).arg(number(pos[2], 7)), 16);
       countTable(painter, sideX, 596, sideW, info.counts);
       text(painter, QRectF(sideX, 706, sideW, 34), tr("Full / partial / masked / missing periods\nEach row sums to this station's stored periods."), 11);
@@ -311,9 +416,39 @@ bool write_pdf(const QString &path, const MTSurveyData &survey, const MTSurveyDa
              .arg(match != fit.stations.end() ? match->second.count : 0) : tr("No response for this station"), 16);
       }
       const bool fixed = std::any_of(options.axes.begin(), options.axes.end(), [](const Options::Axis &axis) { return !axis.autoscale; });
-      text(painter, QRectF(sideX, h - 126, sideW, 80), tr("Points: observations\nGrey points: masked / disabled\nLines: computed response\n") +
+      text(painter, QRectF(sideX, h - 126, sideW, 80), (options.tipperArrows ? tr("Points / solid arrows: observations\nGrey: masked / disabled\nCurves / dashed arrows: response\n") : tr("Points / tipper lines: observations\nGrey points: masked / disabled\nCurves: computed response\n")) +
            (fixed ? tr("Y: GUI fixed ranges where set\nOther axes: auto per station") : tr("Axes auto-scaled per station")), 13);
-      if(progress && !progress(page + 2, pageCount)) canceled = true;
+      if(progress && !progress(writtenPages, pageCount)) canceled = true;
+    }
+    }
+    if(maps && !canceled) {
+      auto mapSurvey = std::make_shared<MTSurveyData>(survey);
+      if(!options.includeDisabled) for(const auto &name: survey.get_stations_names()) if(!survey.is_active(name)) mapSurvey->remove_station(name);
+      const auto responseKey = responseName;
+      std::map<std::string, MTSurveyData> mapResponses;
+      if(response) mapResponses.emplace(responseKey.toStdString(), *response);
+      PeriodMapWindow mapWindow(nullptr);
+      mapWindow.setData(mapSurvey, mapResponses);
+      auto settings = options.useMapSettings ? options.mapSettings : mapWindow.displaySettings();
+      settings.mapLayers = options.mapLayers;
+      settings.real = options.mapSettings.real; settings.imaginary = options.mapSettings.imaginary;
+      mapWindow.setDisplaySettings(settings);
+      QStringList datasets;
+      if(options.mapData != Options::MapData::Response) datasets.push_back(QString());
+      if(options.mapData != Options::MapData::Observed) datasets.push_back(responseKey);
+      for(double seconds: mapPeriods) {
+        if(canceled) break;
+        for(const auto &key: datasets) {
+          if(canceled) break;
+          const auto heading = options.phaseTensorMaps && options.inductionMaps ? tr("Phase tensors and induction vectors") :
+                               (options.phaseTensorMaps ? tr("Phase-tensor ellipses") : tr("Induction vectors"));
+          beginPage(heading, tr("T = %1 s · %2 · Tolerance: %3%")
+                    .arg(number(seconds, 12)).arg(key.isEmpty() ? tr("Observed data") : key).arg(settings.tolerancePercent));
+          const auto summary = mapWindow.renderReport(painter, QRect(0, 100, w, h - 215), seconds, options.phaseTensorMaps, options.inductionMaps, key);
+          text(painter, QRectF(0, h - 105, w, 55), summary + tr("\nMasked, disabled, missing and unmatched values are omitted. Map extent is fitted to this page."), 14);
+          if(progress && !progress(writtenPages, pageCount)) canceled = true;
+        }
+      }
     }
     if(!painter.end()) throw std::runtime_error("Cannot finish the PDF report.");
   }
@@ -331,20 +466,70 @@ void show_dialog(QWidget *parent, const MTSurveyData &survey, const std::map<std
   auto *title = new QLineEdit(defaults.title, &dialog); title->setObjectName("reportTitle"); form->addRow(tr("Title:"), title);
   auto *scope = new QComboBox(&dialog); scope->setObjectName("reportStations"); scope->addItems({tr("All stations"), tr("Enabled only")}); form->addRow(tr("Stations:"), scope);
   auto *response = new QComboBox(&dialog); response->setObjectName("reportResponse"); response->addItem(tr("None"), QString());
-  for(const auto &entry: responses) { const QString path = QString::fromStdString(entry.first); response->addItem(QFileInfo(path).fileName(), path); response->setItemData(response->count() - 1, path, Qt::ToolTipRole); }
+  for(const auto &entry: responses) { const QString path = QString::fromStdString(entry.first); response->addItem(FileLabels::fileName(path), path); response->setItemData(response->count() - 1, path, Qt::ToolTipRole); }
   response->setCurrentIndex(std::max(0, response->findData(selectedResponse))); form->addRow(tr("Response:"), response);
   auto *errors = new QCheckBox(tr("Error bars"), &dialog); errors->setObjectName("reportErrorBars"); errors->setChecked(defaults.errorBars); form->addRow(errors);
   auto *visible = new QCheckBox(tr("Visible components only"), &dialog); visible->setObjectName("reportVisibleOnly"); form->addRow(visible);
-  layout->addLayout(form);
-  layout->addWidget(UiHelp::label(&dialog, tr("Report"), tr("A landscape PDF with a survey overview and one page per included station. Each station has resistivity, phase, tipper and phase-tensor plots beside a location map. All components are included unless Visible components only is checked. Current phase wrapping and fixed GUI Y ranges are retained. Y axes set to autoscale and period axes scale to each station. Optional response curves use observed errors for nRMS. Maps show all valid survey locations and highlight the station; missing locations are noted. Period tables count each stored period once per data type: Full = all components usable; Part. = some usable; Mask = finite data but none enabled; Miss. = no finite data. Impedance needs four complex components, tipper two, and phase tensor four entries for Full. Counts ignore error quality and plot visibility. Coverage shows stations with full or partial data at each exact period. Export does not change your survey or current plots."), "reportHelp"));
-  auto *pages = new QLabel(&dialog); pages->setObjectName("reportPageCount"); layout->addWidget(pages);
-  auto updatePages = [&] {
-    unsigned count = 0; for(const auto &name: survey.get_stations_names()) if(scope->currentIndex() == 0 || survey.is_active(name)) ++count;
-    pages->setText(tr("%1 station pages + 1 overview").arg(count));
+  auto checkbox = [&](const QString &label, const char *name, bool checked) {
+    auto *box = new QCheckBox(label, &dialog); box->setObjectName(name); box->setChecked(checked); return box;
   };
-  QObject::connect(scope, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, updatePages); updatePages();
+  auto *overview = checkbox(tr("Survey overview"), "reportOverview", defaults.overview);
+  auto *stations = checkbox(tr("Station plots"), "reportStationPages", defaults.stationPages);
+  auto *ptMaps = checkbox(tr("PT ellipse maps"), "reportPTMaps", defaults.phaseTensorMaps);
+  auto *induction = checkbox(tr("Induction maps"), "reportInductionMaps", defaults.inductionMaps);
+  auto *sections = new QGridLayout;
+  sections->addWidget(overview, 0, 0); sections->addWidget(stations, 0, 1);
+  sections->addWidget(ptMaps, 1, 0); sections->addWidget(induction, 1, 1);
+  form->addRow(tr("Include:"), sections);
+  auto *tipper = new QComboBox(&dialog); tipper->setObjectName("reportTipperStyle");
+  tipper->addItems({tr("Lines"), tr("Arrows")}); tipper->setCurrentIndex(defaults.tipperArrows ? 1 : 0);
+  form->addRow(tr("Station tippers:"), tipper);
+  auto *mapData = new QComboBox(&dialog); mapData->setObjectName("reportMapData");
+  mapData->addItems({tr("Observed"), tr("Response"), tr("Both")}); mapData->setCurrentIndex(int(defaults.mapData));
+  form->addRow(tr("Map data:"), mapData);
+  std::set<double> surveyPeriods;
+  for(const auto &name: survey.get_stations_names()) for(double f: survey.get_station_data(name).frequencies())
+    if(std::isfinite(f) && f > 0.) surveyPeriods.insert(1. / f);
+  QStringList allPeriods; for(double p: surveyPeriods) allPeriods << QString::number(p, 'g', 17);
+  double initialPeriod = defaults.mapSettings.period;
+  if(!defaults.useMapSettings && !surveyPeriods.empty()) initialPeriod = *std::min_element(surveyPeriods.begin(), surveyPeriods.end(), [](double a, double b) { return std::abs(std::log(a)) < std::abs(std::log(b)); });
+  QStringList initialPeriods; for(double p: defaults.mapPeriods) initialPeriods << QString::number(p, 'g', 17);
+  auto *periods = new QLineEdit(initialPeriods.isEmpty() ? QString::number(initialPeriod, 'g', 17) : initialPeriods.join(", "), &dialog);
+  periods->setObjectName("reportMapPeriods");
+  auto *all = new QPushButton(tr("All"), &dialog); all->setObjectName("reportAllPeriods");
+  auto *periodRow = new QHBoxLayout; periodRow->addWidget(periods); periodRow->addWidget(all);
+  form->addRow(UiHelp::label(&dialog, tr("Periods (s):"), tr("Comma-separated map periods. One page per period and dataset, with selected phase-tensor ellipses and induction vectors together on the same map. Each station uses its nearest period within the map window's tolerance; no interpolation. All selects the survey's exact periods."), "reportPeriodsHelp"), periodRow);
+  QObject::connect(all, &QPushButton::clicked, &dialog, [&] { periods->setText(allPeriods.join(", ")); });
+  auto *real = checkbox(tr("Real"), "reportRealArrows", defaults.mapSettings.real);
+  auto *imaginary = checkbox(tr("Imaginary"), "reportImagArrows", defaults.mapSettings.imaginary);
+  auto *parts = new QHBoxLayout; parts->addWidget(real); parts->addWidget(imaginary); parts->addStretch();
+  form->addRow(tr("Map vectors:"), parts);
+  int mapLayers = defaults.mapLayers;
+  form->addRow(tr("Geography:"), MapBackground::button(&dialog, mapLayers, [&](int mask) { mapLayers = mask; }, true));
+  layout->addLayout(form);
+  layout->addWidget(UiHelp::label(&dialog, tr("Report"), tr("Choose a survey overview, one page per station, and/or maps at selected periods. Station plots retain current phase wrapping and fixed GUI Y ranges. All components are included unless Visible components only is checked. Tipper lines connect usable observations; arrows use the station plot convention. Map pages inherit the period map window's sizes, colors, tolerance, station labels and vector convention. Maps omit masked, disabled, missing and unmatched values. UTM origin coordinates describe the offsets on each map. Full / Part. / Mask / Miss. count complete, partial, masked and missing periods per data type, independent of plot visibility. Export leaves your survey and current plots unchanged."), "reportHelp"));
+  auto *pages = new QLabel(&dialog); pages->setObjectName("reportPageCount"); layout->addWidget(pages);
   auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog); layout->addWidget(buttons);
   buttons->button(QDialogButtonBox::Save)->setText(tr("Export…"));
+  auto updatePages = [&] {
+    const bool maps = ptMaps->isChecked() || induction->isChecked();
+    for(auto *control: QList<QWidget *>{mapData, periods, all}) control->setEnabled(maps);
+    real->setEnabled(induction->isChecked()); imaginary->setEnabled(induction->isChecked());
+    tipper->setEnabled(stations->isChecked()); errors->setEnabled(stations->isChecked()); visible->setEnabled(stations->isChecked());
+    unsigned count = 0; for(const auto &name: survey.get_stations_names()) if(scope->currentIndex() == 0 || survey.is_active(name)) ++count;
+    try {
+      if(!count) throw std::invalid_argument("No stations match the selection.");
+      if(maps && mapData->currentIndex() != 0 && response->currentData().toString().isEmpty()) throw std::invalid_argument("Select a response for response maps.");
+      if(induction->isChecked() && !real->isChecked() && !imaginary->isChecked()) throw std::invalid_argument("Choose real or imaginary vectors.");
+      unsigned total = unsigned(overview->isChecked()) + (stations->isChecked() ? count : 0);
+      if(maps) total += parseMapPeriods(periods->text()).size() * (mapData->currentIndex() == 2 ? 2 : 1);
+      if(!total) throw std::invalid_argument("Select at least one report section.");
+      pages->setText(tr("%1 pages").arg(total)); buttons->button(QDialogButtonBox::Save)->setEnabled(true);
+    } catch(const std::exception &e) { pages->setText(QString::fromUtf8(e.what())); buttons->button(QDialogButtonBox::Save)->setEnabled(false); }
+  };
+  for(auto *box: {overview, stations, ptMaps, induction, real, imaginary}) QObject::connect(box, &QCheckBox::toggled, &dialog, updatePages);
+  for(auto *combo: {scope, mapData, response}) QObject::connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, updatePages);
+  QObject::connect(periods, &QLineEdit::textChanged, &dialog, updatePages); updatePages();
   QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
   QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
   if(dialog.exec() != QDialog::Accepted) return;
@@ -354,6 +539,12 @@ void show_dialog(QWidget *parent, const MTSurveyData &survey, const std::map<std
   if(destination.exec() != QDialog::Accepted || destination.selectedFiles().isEmpty()) return;
   const auto path = destination.selectedFiles().first();
   Options options = defaults; options.title = title->text().trimmed(); if(options.title.isEmpty()) options.title = tr("Survey data report");
+  options.mapLayers = mapLayers;
+  options.overview = overview->isChecked(); options.stationPages = stations->isChecked(); options.tipperArrows = tipper->currentIndex() == 1;
+  options.phaseTensorMaps = ptMaps->isChecked(); options.inductionMaps = induction->isChecked();
+  options.mapData = Options::MapData(mapData->currentIndex());
+  if(options.phaseTensorMaps || options.inductionMaps) options.mapPeriods = parseMapPeriods(periods->text());
+  options.mapSettings.real = real->isChecked(); options.mapSettings.imaginary = imaginary->isChecked();
   options.includeDisabled = scope->currentIndex() == 0; options.errorBars = errors->isChecked();
   if(!visible->isChecked()) for(auto &group: options.components) group.fill(true);
   const auto found = responses.find(response->currentData().toString().toStdString());

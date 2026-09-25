@@ -21,23 +21,37 @@
 
 #include <fstream>
 #include <sstream>
+#include <cmath>
+#include <Eigen/Dense>
 
 #include <boost/lexical_cast.hpp>
 #include <boost/tokenizer.hpp>
 #include <boost/filesystem.hpp>
 
-// Declaration of procedures from mtcomp_interface.f90
-extern "C"
+namespace {
+using Matrix2cd = Eigen::Matrix<std::complex<double>, 2, 2, Eigen::RowMajor>;
+using Matrix2d = Eigen::Matrix<double, 2, 2, Eigen::RowMajor>;
+
+// Some writers emit KEY= VALUE. Normalize once for both measurement and
+// spectra headers, then extract their inline options.
+StringMap inlineOptions(std::string line)
 {
-void call_mtcomp(const double *spectra, const double frequency,
-                 const double avgt,
-                 std::complex<double> *Z, std::complex<double> *T,
-                 double *rho, double *phase,
-                 double *Ze, double *Te,
-                 double *rho_err, double *phase_err);
+    for(size_t p = 0; (p = line.find('=', p)) != std::string::npos; ++p) {
+        size_t q = p + 1;
+        while(q < line.size() && std::isspace(static_cast<unsigned char>(line[q]))) ++q;
+        line.erase(p + 1, q - p - 1);
+    }
+    std::istringstream tokens(line);
+    StringMap options;
+    for(std::string token; tokens >> token;) {
+        const auto pos = token.find('=');
+        if(pos != std::string::npos) options.emplace(token.substr(0, pos), token.substr(pos + 1));
+    }
+    return options;
+}
 }
 
-EDIFileReader::EDIFileReader(const std::string edi_file_name):
+EDIFileReader::EDIFileReader(const std::string &edi_file_name):
     m_edi_file_name(edi_file_name), empty_value(1.0E+32)
 {
     read_edi();
@@ -61,14 +75,13 @@ void EDIFileReader::read_edi()
     std::string clean_content;
 
     std::string line;
-    while (!ifs.eof())
+    while (std::getline(ifs, line))
     {
-        std::getline (ifs, line);
         // Trim string
         line = trim(line, " \t\r\n");
 
         // Skip empty lines and comments
-        if (line.length() < 1 || (line[0] == '>' && line[1] == '!'))
+        if (line.empty() || line.compare(0, 2, ">!") == 0)
             continue;
 
         clean_content += line + '\n';
@@ -111,7 +124,7 @@ void EDIFileReader::read_edi()
 
 BlockID EDIFileReader::get_block_id(const std::string &line) const
 {
-    if(line[0] != '>')
+    if(line.empty() || line[0] != '>')
         return EDI_INVALID;
 
     for(auto &p: block_names)
@@ -130,7 +143,7 @@ void EDIFileReader::read_head_block(std::istringstream &ss)
         auto pos = ss.tellg();
         std::getline (ss, line);
 
-        if(line[0] == '>')
+        if(!line.empty() && line[0] == '>')
         {
             ss.seekg(pos);
             break;
@@ -145,10 +158,9 @@ void EDIFileReader::read_head_block(std::istringstream &ss)
                              line.substr(pos_token + 1, line.length())});
     }
 
-    empty_value = get_option_value<double>(head_options, "EMPTY");
+    if(head_options.count("EMPTY"))
+        empty_value = get_option_value<double>(head_options, "EMPTY");
     
-    //station_data.station_name = get_option_value<std::string>(head_options, "DATAID");
-    //std::cout << "Station name: " << station_data.station_name << std::endl;
     boost::filesystem::path p(m_edi_file_name);
     station_data.station_name = p.stem().string();
 }
@@ -162,7 +174,7 @@ void EDIFileReader::read_info_block(std::istringstream &ss)
         auto pos = ss.tellg();
         std::getline (ss, line);
 
-        if(line[0] == '>')
+        if(!line.empty() && line[0] == '>')
         {
             ss.seekg(pos);
             break;
@@ -181,40 +193,12 @@ void EDIFileReader::read_definemeas_section(std::istringstream &ss)
         auto pos = ss.tellg();
         std::getline (ss, line);
 
-        if(line[0] == '>')
+        if(!line.empty() && line[0] == '>')
         {
             if(line.find("HMEAS") != std::string::npos ||
                 line.find("EMEAS") != std::string::npos)
             {
-                StringMap meas_options;
-
-                // Some writers emit "KEY= VALUE" with spaces after '='.
-                // Collapse them so the space tokenizer keeps key/value together.
-                std::string normalized = line;
-                for(size_t p = 0; (p = normalized.find('=', p)) != std::string::npos; ++p)
-                {
-                    size_t q = p + 1;
-                    while(q < normalized.size() && normalized[q] == ' ')
-                        ++q;
-                    if(q > p + 1)
-                        normalized.erase(p + 1, q - p - 1);
-                }
-
-                boost::char_separator<char> sep(" ");
-                boost::tokenizer<boost::char_separator<char>> tokens(normalized, sep);
-
-                for(auto &token: tokens)
-                {
-                    auto pos_token = token.find_first_of('=');
-
-                    if(pos_token == std::string::npos)
-                        continue;
-
-                    meas_options.insert({token.substr(0, pos_token),
-                                         token.substr(pos_token + 1, token.length())});
-                }
-
-                definemeas.MEAS.push_back(meas_options);
+                definemeas.MEAS.push_back(inlineOptions(line));
 
                 continue;
             }
@@ -238,103 +222,47 @@ void EDIFileReader::read_definemeas_section(std::istringstream &ss)
 void EDIFileReader::read_spectrasect_section(std::istringstream &ss)
 {
     is_data_spectra = true;
-
-    std::string line;
-    unsigned n_chanells;
-
-    while(ss.good())
-    {
-        auto pos = ss.tellg();
-        std::getline (ss, line);
-
-        if(line[0] == '>')
-        {
-            if(line.find("SPECTRA") != std::string::npos)
-            {
-                SPECTRA_DATA spectra;
-
-                // Some writers emit "KEY= VALUE" with spaces after '='.
-                // Collapse them so the space tokenizer keeps key/value together.
-                std::string normalized = line;
-                for(size_t p = 0; (p = normalized.find('=', p)) != std::string::npos; ++p)
-                {
-                    size_t q = p + 1;
-                    while(q < normalized.size() && normalized[q] == ' ')
-                        ++q;
-                    if(q > p + 1)
-                        normalized.erase(p + 1, q - p - 1);
-                }
-
-                boost::char_separator<char> sep(" ");
-                boost::tokenizer<boost::char_separator<char>> tokens(normalized, sep);
-
-                std::vector<std::string> str_tokens;
-                for(auto &token: tokens)
-                {
-                    str_tokens.push_back(token);
-
-                    auto pos_token = token.find_first_of('=');
-
-                    if(pos_token == std::string::npos)
-                        continue;
-
-                    spectra.options.insert({token.substr(0, pos_token),
-                                            token.substr(pos_token + 1, token.length())});
-
-                }
-
-                unsigned n_data = boost::lexical_cast<unsigned>(str_tokens.back());
-                if(n_data != n_chanells*n_chanells)
-                    throw std::ios_base::failure("Error reading spectral data. Number of channels does not match number of data");
-
-                spectra.data.resize(n_chanells, n_chanells);
-
-                for(unsigned i = 0; i < n_chanells; ++i)
-                {
-                    for(unsigned j = 0; j < n_chanells; ++j)
-                    {
-                        double val;
-                        ss >> val;
-                        spectra.data(i, j) = val;
-                    }
-                }
-
-                spectrasect.spectra_data.push_back(spectra);
-
-                continue;
+    unsigned channels = 0;
+    for(std::string line; ss.good();) {
+        const auto position = ss.tellg();
+        if(!std::getline(ss, line)) break;
+        if(line.empty()) continue;
+        if(line[0] == '>') {
+            if(line.find("SPECTRA") == std::string::npos) { ss.seekg(position); break; }
+            if(channels != 7) throw std::runtime_error("Spectra require seven channels: Hx, Hy, Hz, Ex, Ey, Rx, Ry.");
+            const auto separator = line.find("//");
+            std::istringstream count(separator == std::string::npos ? "" : line.substr(separator + 2));
+            unsigned values = 0;
+            if(!(count >> values) || values != 49) throw std::runtime_error("Spectral matrix must contain 49 values.");
+            SPECTRA_DATA spectra; spectra.options = inlineOptions(line);
+            for(auto &row: spectra.data) for(auto &value: row) {
+                std::string token;
+                if(!(ss >> token)) throw std::runtime_error("Truncated spectral matrix.");
+                std::replace(token.begin(), token.end(), 'D', 'E');
+                std::replace(token.begin(), token.end(), 'd', 'e');
+                size_t consumed = 0;
+                try { value = std::stod(token, &consumed); }
+                catch(const std::exception &) { throw std::runtime_error("Invalid value in spectral matrix."); }
+                if(consumed != token.size()) throw std::runtime_error("Invalid value in spectral matrix.");
+                if(value == empty_value) value = std::numeric_limits<double>::quiet_NaN();
             }
-            else
-            {
-                ss.seekg(pos);
-                break;
+            spectrasect.spectra_data.push_back(std::move(spectra));
+        } else if(line.find('=') != std::string::npos) {
+            const auto separator = line.find('=');
+            const auto key = trim(line.substr(0, separator), " \t");
+            spectrasect.options[key] = trim(line.substr(separator + 1), " \t");
+            if(key == "NCHAN") channels = get_option_value<unsigned>(spectrasect.options, key);
+        } else if(line.find("//") != std::string::npos) {
+            std::istringstream count(line.substr(line.find("//") + 2));
+            if(!(count >> channels) || channels != 7) throw std::runtime_error("Spectra require seven channel identifiers.");
+            for(unsigned i = 0; i < channels; ++i) {
+                std::string id;
+                if(!(ss >> id) || id[0] == '>') throw std::runtime_error("Truncated spectral channel list.");
+                spectrasect.channel_ids.push_back(id);
             }
-        }
-
-        auto pos_token = line.find_first_of('=');
-        if(pos_token != std::string::npos)
-        {
-            spectrasect.options.insert({line.substr(0, pos_token),
-                                        line.substr(pos_token + 1, line.length())});
-
-            continue;
-        }
-
-        pos_token = line.find_first_of("//");
-        if(pos_token != std::string::npos)
-        {
-            const std::string str = trim(line.substr(pos_token + 2, line.length()), " ");
-            n_chanells = boost::lexical_cast<unsigned>(str);
-            for(unsigned i = 0; i < n_chanells; ++i)
-            {
-                std::string ch_id;
-                ss >> ch_id;
-                //        std::getline (ss, line);
-                spectrasect.channel_ids.push_back(ch_id);
-            }
-
-            continue;
         }
     }
+    if(spectrasect.spectra_data.empty()) throw std::runtime_error("No spectral matrices found.");
 }
 
 void EDIFileReader::read_mtsect_section(std::istringstream &ss)
@@ -370,7 +298,7 @@ void EDIFileReader::read_mtsect_section(std::istringstream &ss)
         // if(line.find(">END") != std::string::npos)
         //     break;
 
-        if(line[0] == '>')
+        if(!line.empty() && line[0] == '>')
         {
             if(line.find("FREQ") != std::string::npos &&
                 line.find("NFREQ") == std::string::npos)
@@ -498,64 +426,31 @@ std::string EDIFileReader::trim(const std::string& str, const std::string& white
 
 void EDIFileReader::calculate_data_from_spectra()
 {
-    // factor to convert impedances from field units to S.I.
-    // This is mu0 (to convert from B in nT to H in gamma)
-    // divided by 10^-3 (to convert from mV/km to V/m)
-    const double factor = 4.*M_PI*1.e-4;
-
-    Matrix2cd Z;
-    Matrix2d Ze, Rho, Phs, Rho_e, Phs_e, PT;
-    Eigen::Vector2cd T;
-    Eigen::Vector2d Te;
-
-    station_data.set_size(spectrasect.spectra_data.size());
-
-    for(unsigned fidx = 0; fidx < spectrasect.spectra_data.size(); ++fidx)
-    {
-        auto &spectra = spectrasect.spectra_data[fidx];
-
+    // Convert EDI field impedance (mV/km)/nT to SI E/H; tippers are dimensionless.
+    const double factor = 4. * std::acos(-1.) * 1.e-4;
+    station_data.set_size(spectrasect.spectra_data.size(), true);
+    for(unsigned f = 0; f < spectrasect.spectra_data.size(); ++f) {
+        const auto &spectra = spectrasect.spectra_data[f];
         const double frequency = get_option_value<double>(spectra.options, "FREQ");
-        const double avgt = get_option_value<double>(spectra.options, "AVGT");
-
-        call_mtcomp(spectra.data.data(), frequency, avgt,
-                    Z.data(), T.data(),
-                    Rho.data(), Phs.data(),
-                    Ze.data(), Te.data(),
-                    Rho_e.data(), Phs_e.data());
-
-        Z = factor*Z;
-        Ze = factor*Ze;
-
-        Matrix2d X, Y;
-
-        X(0,0) = Z(0,0).real(); X(0,1) = Z(0,1).real();
-        X(1,0) = Z(1,0).real(); X(1,1) = Z(1,1).real();
-
-        Y(0,0) = Z(0,0).imag(); Y(0,1) = Z(0,1).imag();
-        Y(1,0) = Z(1,0).imag(); Y(1,1) = Z(1,1).imag();
-
-        PT = X.inverse() * Y;
-
-        station_data.freqs[fidx] = frequency;
-        for(unsigned i = 0; i < 2; ++i)
-        {
-            station_data.T[i][fidx] = T(i);
-            station_data.T_err[i][fidx] = Te(i);
-
-            for(unsigned j = 0; j < 2; ++j)
-            {
-                station_data.Z[i*2+j][fidx] = Z(i, j);
-                station_data.PT[i*2+j][fidx] = PT(i, j);
-                station_data.Rho[i*2+j][fidx] = Rho(i, j);
-                station_data.Phs[i*2+j][fidx] = Phs(i, j);
-
-                station_data.Z_err[i*2+j][fidx] = Ze(i, j);
-                station_data.PT_err[i*2+j][fidx] = 0.;
-                station_data.Rho_err[i*2+j][fidx] = Rho_e(i, j);
-                station_data.Phs_err[i*2+j][fidx] = Phs_e(i, j);
-            }
+        if(!std::isfinite(frequency) || frequency <= 0.) throw std::runtime_error("Spectral FREQ must be finite and positive.");
+        const auto transfer = MTSpectra::estimate(spectra.data, get_option_value<double>(spectra.options, "AVGT"));
+        station_data.freqs[f] = frequency;
+        for(unsigned c = 0; c < 4; ++c) {
+            station_data.Z[c][f] = factor * transfer.impedance[c];
+            station_data.Z_err[c][f] = factor * transfer.impedanceError[c];
+        }
+        for(unsigned c = 0; c < 2; ++c) {
+            station_data.T[c][f] = transfer.tipper[c];
+            station_data.T_err[c][f] = transfer.tipperError[c];
         }
     }
+    station_data.Z_err_floor = station_data.Z_err;
+    station_data.T_err_floor = station_data.T_err;
+    station_data.calculate_apparent_resistivity();
+    station_data.calculate_phase();
+    station_data.calculate_phase_tensor();
+    station_data.propagate_rho_phase_error();
+    station_data.propagate_phase_tensor_error();
 }
 
 void EDIFileReader::calculate_data_from_mtsect()

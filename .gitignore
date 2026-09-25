@@ -11,3 +11,11 @@ CTestTestfile.cmake
 _deps
 CMakeUserPresets.json
 build/*
+
+# Local editor settings, packaged dependencies and survey projects.
+/.vscode/
+/dist/
+*.mtd
+
+# Optional geographic datasets are external, not repository assets.
+/data/natural-earth/

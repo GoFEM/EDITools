@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-// Native MT data format. All values here are SI, with phases in degrees.
+// All values here are SI, with phases in degrees.
 namespace NativeMT {
 struct Mapping {
   RealDataType type;

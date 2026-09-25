@@ -25,13 +25,12 @@
 #include <vector>
 #include <set>
 
-#include <Eigen/Dense>
+#include <sstream>
+#include "MTSpectra.h"
 
 #include "include/MTStationData.h"
 
 using StringMap = std::map<std::string, std::string>;
-using Matrix2cd = Eigen::Matrix<std::complex<double>, 2, 2, Eigen::RowMajor>;
-using Matrix2d = Eigen::Matrix<double, 2, 2, Eigen::RowMajor>;
 
 struct DEFINEMEAS_DATA
 {
@@ -42,7 +41,7 @@ struct DEFINEMEAS_DATA
 struct SPECTRA_DATA
 {
   StringMap options;
-  Eigen::Matrix<double, 7, 7, Eigen::RowMajor> data;
+  MTSpectra::PackedMatrix data{};
 };
 
 struct MTSECT_DATA
@@ -79,7 +78,7 @@ const std::map<std::string, BlockID> block_names =
 class EDIFileReader
 {
 public:
-  EDIFileReader(const std::string edi_file_name);
+  explicit EDIFileReader(const std::string &edi_file_name);
 
   const MTStationData &get_mt_data() const;
 
@@ -114,7 +113,7 @@ private:
 
   double empty_value;
 
-  bool is_data_spectra;
+  bool is_data_spectra = false;
 
   MTStationData station_data;
 };

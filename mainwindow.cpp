@@ -1,3 +1,5 @@
+#include "include/MapBackground.h"
+#include "include/FileLabels.h"
 /*
  * The EDI Tools application.
  *
@@ -25,24 +27,6 @@
 #include <cstdint>
 #include <fstream>
 #include <stdexcept>
-/*
- * The EDI Tools application.
- *
- * Copyright (C) 2024 Alexander Grayver <agrayver.geophysics@gmail.com>
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
 
 #include <QMessageBox>
 #include <QSettings>
@@ -75,6 +59,7 @@
 #include "FitStatisticsWindow.h"
 #include "PeriodMapWindow.h"
 #include "PeriodLayoutWindow.h"
+#include "EDIImportDialog.h"
 #include "include/SurveyReport.h"
 
 namespace
@@ -84,7 +69,7 @@ namespace
 // version so the loader can distinguish both layouts and keep old .mtd files
 // readable.
 const std::uint32_t projectFileMagic = 0x45444954; // "EDIT"
-const std::uint32_t projectFileVersion = 6;
+const std::uint32_t projectFileVersion = 7;
 }
 
 MainWindow::MainWindow(QWidget *parent) :
@@ -94,14 +79,23 @@ MainWindow::MainWindow(QWidget *parent) :
   ui->setupUi(this);
   ui->responsesList->setTextElideMode(Qt::ElideLeft);
   ui->responsesList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  auto *responsesPanel = ui->responsesList->parentWidget();
+  ui->splitter_3->setCollapsible(ui->splitter_3->indexOf(responsesPanel), false);
+  const auto setResponsesExpanded = [this, responsesPanel](bool expanded) {
+    ui->responsesToggle->setArrowType(expanded ? Qt::DownArrow : Qt::RightArrow);
+    ui->responsesList->setVisible(expanded);
+    responsesPanel->setMaximumHeight(expanded ? QWIDGETSIZE_MAX : responsesPanel->sizeHint().height());
+    if(expanded) {
+      auto sizes = ui->splitter_3->sizes();
+      const int index = ui->splitter_3->indexOf(responsesPanel);
+      sizes[index] = std::max(sizes[index], 150);
+      ui->splitter_3->setSizes(sizes);
+    }
+  };
+  connect(ui->responsesToggle, &QToolButton::toggled, this, setResponsesExpanded);
+  setResponsesExpanded(false);
   ui->actionShow_error_bars->setChecked(true);
   ui->actionPhase_wrap->setChecked(true);
-
-  QLabel* stationInfoLabel = new QLabel(ui->splitter_4);
-  stationInfoLabel->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
-  stationInfoLabel->setMaximumHeight(20);
-  stationInfoLabel->setAlignment(Qt::AlignHCenter);
-  ui->splitter_4->insertWidget(0, stationInfoLabel);
 
   plot11 = new MyCustomPlot(ui->splitter_2);
   plot11->setObjectName(QStringLiteral("plot11"));
@@ -124,11 +118,12 @@ MainWindow::MainWindow(QWidget *parent) :
   plotHandlers[0]->set_associated_plot(*plotHandlers[1]);
   plotHandlers[1]->set_associated_plot(*plotHandlers[0]);
   for(const auto &plot: plotHandlers) {
-    connect(plot.get(), &MTDataPlot::observationsChanged, this, [this] { refreshAnalysisWindows(); });
+    connect(plot.get(), &MTDataPlot::observationsChanged, this, [this] { updatePlots(false); refreshAnalysisWindows(); });
     connect(plot.get(), &MTDataPlot::componentVisibilityChanged, this, [this] { updatePlots(); });
   }
 
   mapHandler.reset(new MapPlot(ui->mapPlot, this));
+  mapBackground = new MapBackground(ui->mapPlot);
   auto *mapControls = new QWidget(ui->splitter_3);
   auto *mapControlsLayout = new QVBoxLayout(mapControls);
   mapControlsLayout->setContentsMargins(4, 0, 4, 0);
@@ -136,6 +131,7 @@ MainWindow::MainWindow(QWidget *parent) :
   mapStationNames = new QCheckBox(tr("Station names"), mapControls);
   mapStationNames->setObjectName("stationMapNames");
   mapActions->addWidget(mapStationNames);
+  mapActions->addWidget(MapBackground::button(mapControls, 0, [this](int layers) { mapBackground->setLayers(layers); ui->mapPlot->replot(); }));
   mapActions->addStretch();
   auto *mapsButton = new QPushButton(tr("Maps…"), mapControls);
   mapsButton->setObjectName("openPeriodMaps");
@@ -147,6 +143,14 @@ MainWindow::MainWindow(QWidget *parent) :
   auto *periodLayoutAction = ui->menuData->addAction(tr("Period layout / Resampling…"));
   periodLayoutAction->setObjectName("actionPeriod_layout");
   connect(periodLayoutAction, &QAction::triggered, this, &MainWindow::openPeriodLayout);
+  linkTensorMasksAction = ui->menuData->addAction(tr("Link Z / PT masks"));
+  linkTensorMasksAction->setObjectName("actionLink_tensor_masks");
+  linkTensorMasksAction->setCheckable(true); linkTensorMasksAction->setChecked(true);
+  linkTensorMasksAction->setToolTip(tr("Link mask and unmask edits at the same period: a selected Z component affects all PT entries; a selected PT entry affects all Z components. Phi = Re(Z)^-1 Im(Z), so there is no one-to-one mapping in general 3D. Other components in the starting tensor and tippers are unchanged. Toggling this option does not alter existing masks."));
+  connect(linkTensorMasksAction, &QAction::toggled, this, [this](bool on) {
+    for(const auto &plot: plotHandlers) plot->set_link_tensor_masks(on);
+    if(periodMaps) periodMaps->setLinkTensorMasks(on);
+  });
   auto *reportAction = ui->menuFile->addAction(tr("Export survey report…"));
   reportAction->setObjectName("actionExport_survey_report");
   connect(reportAction, &QAction::triggered, this, &MainWindow::exportSurveyReport);
@@ -188,10 +192,12 @@ void MainWindow::exportSurveyReport()
 {
   if(!mtSurvey) { QMessageBox::information(this, tr("Survey report"), tr("Load a survey first.")); return; }
   SurveyReport::Options options;
-  options.source = projectFile;
   options.errorBars = ui->actionShow_error_bars->isChecked();
   const auto plots = currentPlotOptions();
   options.phaseWrap = plots.phaseWrap;
+  options.tipperArrows = plots.tipperArrows;
+  options.mapLayers = mapBackground->layers();
+  if(periodMaps) { options.mapSettings = periodMaps->displaySettings(); options.useMapSettings = true; }
   options.components = plots.componentVisible;
   for(unsigned i = 0; i < options.axes.size() && i < plots.axes.size(); ++i)
     options.axes[i] = {plots.axes[i].autoscale, plots.axes[i].lower, plots.axes[i].upper};
@@ -217,6 +223,7 @@ void MainWindow::rememberDirectory(const QString &path)
 MainWindow::PlotOptions MainWindow::currentPlotOptions() const
 {
   PlotOptions options;
+  options.linkTensorMasks = linkTensorMasksAction->isChecked();
   for(unsigned i = 0; i < plotHandlers.size(); ++i)
     options.componentVisible[i] = plotHandlers[i]->component_visibility();
   options.axes.reserve(plotHandlers.size());
@@ -248,6 +255,7 @@ MainWindow::PlotOptions MainWindow::currentPlotOptions() const
 
 void MainWindow::applyPlotOptions(const PlotOptions &options)
 {
+  linkTensorMasksAction->setChecked(options.linkTensorMasks);
   const QSignalBlocker phaseBlock(ui->actionPhase_wrap);
   const QSignalBlocker namesBlock(ui->actionShow_station_names);
   const QSignalBlocker arrowsBlock(ui->actionTipper_arrows);
@@ -287,62 +295,36 @@ MainWindow::~MainWindow()
 
 void MainWindow::on_actionLoad_EDI_triggered()
 {
-  if(mtSurvey == nullptr)
-  {
-    QString surveyName = QInputDialog::getText(this, tr("New survey"),
-          tr("Survey name:"), QLineEdit::Normal, "Survey");
-
-    mtSurvey.reset(new MTSurveyData(surveyName.toStdString()));
-
-    this->setWindowTitle("MT Survey [" + surveyName + "]");
+  const auto files = QFileDialog::getOpenFileNames(this, tr("Select EDI files"), lastDirectory, tr("EDI files (*.edi)"));
+  if(files.isEmpty()) return;
+  QString surveyName;
+  if(!mtSurvey) {
+    bool accepted = false;
+    surveyName = QInputDialog::getText(this, tr("New survey"), tr("Survey name:"), QLineEdit::Normal, "Survey", &accepted);
+    if(!accepted) return;
   }
-
-  QStringList files = QFileDialog::getOpenFileNames(
-                            this,
-                            "Select one or more files to open",
-                            lastDirectory,
-                            "EDI files (*.edi)");
-
-  if(files.size() > 0)
-  {
-    rememberDirectory(files.first());
-
-    std::vector<std::string> file_list;
-    for(auto &file: files)
-      file_list.push_back(file.toStdString());
-
-    try
-    {
-      auto duplicates = mtSurvey->load_from_edi(file_list);
-
-      if(duplicates.size() != 0)
-      {
-        QString dupStr;
-        for(auto &s: duplicates)
-          dupStr += QString(s.c_str()) + "\n";
-
-        QMessageBox msgBox;
-        msgBox.setIcon(QMessageBox::Warning);
-        msgBox.setText(QString("Following stations had duplicates and were ignored: ") + dupStr);
-        msgBox.setStandardButtons(QMessageBox::Ok);
-        msgBox.exec();
-      }
-    }
-    catch(std::exception &e)
-    {
-      QMessageBox msgBox;
-      msgBox.setIcon(QMessageBox::Critical);
-      msgBox.setText(QString("Exception on file reading. The error message: ") + e.what());
-      msgBox.setStandardButtons(QMessageBox::Ok);
-      msgBox.exec();
-    }
+  rememberDirectory(files.first());
+  try {
+    // Parse and review a copy: cancellation or a failed file leaves the open project intact.
+    auto candidate = mtSurvey ? std::make_shared<MTSurveyData>(*mtSurvey) : std::make_shared<MTSurveyData>(surveyName.toStdString());
+    const auto oldNames = candidate->get_stations_names();
+    const std::set<std::string> existing(oldNames.begin(), oldNames.end());
+    std::vector<std::string> paths;
+    for(const auto &file: files) paths.push_back(file.toStdString());
+    const auto duplicates = candidate->load_from_edi(paths);
+    std::set<std::string> incoming;
+    for(const auto &name: candidate->get_stations_names()) if(!existing.count(name)) incoming.insert(name);
+    if(!reviewEDIImport(this, *candidate, incoming, duplicates)) return;
+    mtSurvey = std::move(candidate);
+    projectFile.clear();
+    setWindowTitle(tr("MT Survey [%1]").arg(QString::fromStdString(mtSurvey->get_survey_name())));
+    createStationsList();
+    updateMap();
+    refreshAnalysisWindows();
+    if(ui->stationList->count()) ui->stationList->setCurrentRow(0);
+  } catch(const std::exception &error) {
+    QMessageBox::critical(this, tr("EDI import"), QString::fromUtf8(error.what()));
   }
-
-  projectFile = "";
-
-  createStationsList();
-  updateMap();
-  refreshAnalysisWindows();
 }
 
 void MainWindow::createStationsList()
@@ -370,6 +352,7 @@ void MainWindow::updateMap()
       SurveyCoordinates::suggested(mtSurvey->geographic_locations());
   const auto locations = view.transform(mtSurvey->geographic_locations());
   mapCoordinates = view;
+  mapBackground->setCoordinates(view);
   const auto &coordinates = view.utm ? view : mtSurvey->coordinates();
   mapHandler->set_coordinate_labels(view.utm, view.centered);
   coordinateInfoLabel->setText(coordinates.utm ?
@@ -383,7 +366,7 @@ void MainWindow::updateMap()
   on_stationList_itemSelectionChanged();
 }
 
-void MainWindow::updatePlots()
+void MainWindow::updatePlots(bool rescaleAxes)
 {
   QListWidgetItem* item = ui->stationList->currentItem();
   if(item == nullptr)
@@ -392,7 +375,7 @@ void MainWindow::updatePlots()
   MTStationData& data = mtSurvey->get_station_data(item->text().toStdString());
   for(auto &ph: plotHandlers) {
     ph->clear_predicted_data();
-    ph->set_observed_data(data);
+    ph->set_observed_data(data, rescaleAxes);
   }
   ui->label->setText(tr("Stations (%1):").arg(mtSurvey->n_stations()));
 
@@ -447,7 +430,7 @@ void MainWindow::maskDataType(bool on)
   QAction* action = qobject_cast<QAction*>(sender());
   const RealDataType type = static_cast<RealDataType>(action->data().toInt());
 
-  mtSurvey->set_active_flag(station_name, type, on);
+  mtSurvey->get_station_data(station_name).mask_type(type, on, linkTensorMasksAction->isChecked());
 
   updatePlots();
   refreshAnalysisWindows();
@@ -585,7 +568,13 @@ void MainWindow::on_actionLoad_project_triggered()
         plotOptions.componentVisible = {{legacyPlotOptions.impedanceVisible, legacyPlotOptions.impedanceVisible,
                                         legacyPlotOptions.tipperVisible, legacyPlotOptions.impedanceVisible}};
       }
-      else if(version >= 6)
+      else if(version == 6)
+      {
+        PlotOptionsV6 legacyPlotOptions;
+        ia >> legacyPlotOptions;
+        static_cast<PlotOptionsV6 &>(plotOptions) = legacyPlotOptions;
+      }
+      else if(version >= 7)
       {
         ia >> plotOptions;
       }
@@ -821,9 +810,8 @@ void MainWindow::on_stationList_customContextMenuRequested(const QPoint &pos)
 
 void MainWindow::setupListContextMenu()
 {
-  listContextMenu = new QMenu;
-  QMenu* mask_menu = new QMenu(tr("Mask"));
-  listContextMenu->addMenu(mask_menu);
+  listContextMenu = new QMenu(this);
+  QMenu* mask_menu = listContextMenu->addMenu(tr("Mask"));
   listContextMenu->addAction(tr("Delete"), this, &MainWindow::deleteStation);
   listContextMenu->addAction(tr("Rename"), this, &MainWindow::renameStation);
 
@@ -1006,7 +994,7 @@ void MainWindow::loadResponseFiles(const QStringList &files)
           if(ui->responsesList->item(i)->toolTip() == path)
             item = ui->responsesList->item(i);
         if(!item) {
-          item = new QListWidgetItem(QFileInfo(path).fileName(), ui->responsesList);
+          item = new QListWidgetItem(FileLabels::fileName(path), ui->responsesList);
           item->setToolTip(path);
         }
         selected = item;
@@ -1016,6 +1004,7 @@ void MainWindow::loadResponseFiles(const QStringList &files)
     }
     if(selected) ui->responsesList->setCurrentItem(selected);
   }
+  if(selected) ui->responsesToggle->setChecked(true);
   updatePlots();
   if(!errors.isEmpty())
     QMessageBox::warning(this, tr("Load responses"), errors.join("\n\n"));
@@ -1066,6 +1055,7 @@ void MainWindow::openSurveyCopy(std::shared_ptr<MTSurveyData> data)
 void MainWindow::on_actionPeriod_maps_triggered()
 {
   if(!periodMaps) periodMaps = new PeriodMapWindow(this, [this] { updatePlots(); refreshAnalysisWindows(); });
+  periodMaps->setLinkTensorMasks(linkTensorMasksAction->isChecked());
   periodMaps->setData(mtSurvey, mtResponses);
   periodMaps->show();
   periodMaps->raise();
@@ -1078,11 +1068,12 @@ void MainWindow::createResponsesList()
   ui->responsesList->clear();
   for(const auto &response: mtResponses) {
     const QString path = QString::fromStdString(response.first);
-    auto *item = new QListWidgetItem(QFileInfo(path).fileName(), ui->responsesList);
+    auto *item = new QListWidgetItem(FileLabels::fileName(path), ui->responsesList);
     item->setToolTip(path);
   }
   if(ui->responsesList->count())
     ui->responsesList->setCurrentRow(ui->responsesList->count() - 1);
+  ui->responsesToggle->setChecked(ui->responsesList->count() > 0);
 }
 
 void MainWindow::on_responsesList_currentRowChanged(int /*currentRow*/)

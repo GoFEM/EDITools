@@ -3,6 +3,7 @@
 
 #include "include/MTMapData.h"
 #include "include/MTSurveyData.h"
+#include "include/MapDisplaySettings.h"
 #include "qcustomplot.h"
 #include <QCheckBox>
 #include <QComboBox>
@@ -13,11 +14,19 @@
 #include <set>
 
 class QPushButton;
+class MapBackground;
 
 class PeriodMapWindow : public QDialog
 {
 public:
+  using DisplaySettings = MapDisplaySettings;
   explicit PeriodMapWindow(QWidget *parent, std::function<void()> observationsChanged = {});
+  DisplaySettings displaySettings() const;
+  void setDisplaySettings(const DisplaySettings &settings);
+  // Render using this window's data and styles. Use an independent window for reports.
+  QString renderReport(QCPPainter &painter, const QRect &rect, double seconds,
+                       bool phaseTensors, bool induction, const QString &responseKey = {});
+  void setLinkTensorMasks(bool on) { linkTensorMasks = on; }
   void setData(const std::shared_ptr<MTSurveyData> &survey,
                const std::map<std::string, MTSurveyData> &responses);
 
@@ -45,16 +54,18 @@ private:
   std::shared_ptr<MTSurveyData> survey;
   std::map<QString, const MTSurveyData *> responses;
   std::vector<Site> sites;
-  QString coordinatesDescription, locationError;
+  QString coordinatesDescription, originDescription, locationError;
   QComboBox *dataset, *period, *convention, *colorBy, *colorMap;
   QCheckBox *names, *tensors, *realArrows, *imagArrows, *reverseColors;
   QDoubleSpinBox *tolerance, *ellipseSize, *arrowSize, *colorMin, *colorMax;
   QCustomPlot *plot;
+  MapBackground *background;
   QCPColorScale *colorScale;
   QCPTextElement *title, *note;
   QLabel *summary;
   QCPRange boundsX, boundsY;
   bool haveBounds = false, geometryChanged = true;
+  bool linkTensorMasks = true;
   QCPItemLine *referenceArrow = nullptr;
   std::function<void()> observationsChanged;
   std::set<std::string> selectedStations;

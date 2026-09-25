@@ -1,14 +1,18 @@
+#include "include/MapBackground.h"
+#include "include/PlotColorMaps.h"
+#include "include/FileLabels.h"
 #include "FitStatisticsWindow.h"
 #include "include/HelpButton.h"
 #include <QDialogButtonBox>
 #include <QDoubleValidator>
 #include <QLineEdit>
 #include <QFileDialog>
-#include <QFileInfo>
 #include <QGridLayout>
 #include <QHeaderView>
 #include <QMessageBox>
 #include <QPrinter>
+#include <QPageLayout>
+#include <QPageSize>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QSignalBlocker>
@@ -19,26 +23,12 @@
 #include <set>
 
 namespace {
-QCPColorGradient gradient(const QString &name = "Viridis")
-{
-  if(name == "Thermal") return QCPColorGradient(QCPColorGradient::gpThermal);
-  if(name == "Jet") return QCPColorGradient(QCPColorGradient::gpJet);
-  if(name == "Grayscale") return QCPColorGradient(QCPColorGradient::gpGrayscale);
-  if(name == "Polar") return QCPColorGradient(QCPColorGradient::gpPolar);
-  QCPColorGradient result;
-  result.setColorStopAt(0., QColor("#440154"));
-  result.setColorStopAt(.25, QColor("#3b528b"));
-  result.setColorStopAt(.5, QColor("#21918c"));
-  result.setColorStopAt(.75, QColor("#5ec962"));
-  result.setColorStopAt(1., QColor("#fde725"));
-  return result;
-}
 QCPColorScale *colorScale(QCustomPlot *plot)
 {
   auto *scale = new QCPColorScale(plot);
   plot->plotLayout()->addElement(1, 1, scale);
   scale->setType(QCPAxis::atRight);
-  scale->setGradient(gradient());
+  scale->setGradient(PlotColorMaps::gradient());
   scale->axis()->setLabel("nRMS");
   return scale;
 }
@@ -63,7 +53,7 @@ void finish(QCustomPlot *plot, bool zero = true)
 }
 QString shortName(const QString &path)
 {
-  const auto file = QFileInfo(path).fileName();
+  const auto file = FileLabels::fileName(path);
   const auto match = QRegularExpression("_predicted_iter(\\d+)\\.txt$").match(file);
   return match.hasMatch() ? QObject::tr("Iteration %1").arg(match.captured(1).toInt()) : file;
 }
@@ -90,7 +80,8 @@ FitStatisticsWindow::FitStatisticsWindow(QWidget *parent, std::function<void()> 
   controls->addWidget(new QLabel(tr("Colors:"), this));
   curveColors = new QComboBox(this);
   curveColors->setObjectName("fitCurveColors");
-  curveColors->addItems({tr("Distinct"), "Viridis", "Thermal", "Jet", "Grayscale", "Polar"});
+  curveColors->addItem(tr("Distinct"));
+  curveColors->addItems(PlotColorMaps::names());
   controls->addWidget(curveColors);
   controls->addStretch();
   auto *pdf = new QPushButton(tr("Save PDF…"), this);
@@ -153,7 +144,7 @@ FitStatisticsWindow::FitStatisticsWindow(QWidget *parent, std::function<void()> 
   colorLayout->addWidget(UiHelp::label(colorControls, tr("Colormap:"), tr("Choose two checked responses above to compare. Both panels share color limits. Auto fits the checked responses; manual limits clip to the endpoint colors. Grey means no matching observations."), "fitSpatialHelp"), 0, 0);
   colorMap = new QComboBox(colorControls);
   colorMap->setObjectName("fitColorMap");
-  colorMap->addItems({"Viridis", "Thermal", "Jet", "Grayscale", "Polar"});
+  colorMap->addItems(PlotColorMaps::names());
   colorLayout->addWidget(colorMap, 0, 1);
   reverseColors = new QCheckBox(tr("Reverse"), colorControls);
   reverseColors->setObjectName("fitReverseColors");
@@ -212,6 +203,10 @@ FitStatisticsWindow::FitStatisticsWindow(QWidget *parent, std::function<void()> 
   spatialGrid->addWidget(colorControls, 1, 0, 1, 2);
   mapA = makePlot("fitMapA", tr("Station nRMS"), "", "");
   mapB = makePlot("fitMapB", tr("Station nRMS"), "", "");
+  backgroundA = new MapBackground(mapA); backgroundB = new MapBackground(mapB);
+  colorLayout->addWidget(MapBackground::button(this, 0, [this](int mask) {
+    backgroundA->setLayers(mask); backgroundB->setLayers(mask); mapA->replot(); mapB->replot();
+  }), 0, 6);
   heatA = makePlot("fitHeatmapA", tr("Station / period nRMS"), tr("Period (s)"), tr("Station"));
   heatB = makePlot("fitHeatmapB", tr("Station / period nRMS"), tr("Period (s)"), tr("Station"));
   mapScaleA = colorScale(mapA); mapScaleB = colorScale(mapB);
@@ -291,9 +286,12 @@ void FitStatisticsWindow::setData(const std::shared_ptr<MTSurveyData> &data,
     try {
       if(!coordinates.utm) coordinates = SurveyCoordinates::suggested(locations);
       locations = coordinates.transform(locations);
-      mapXLabel = tr("Easting (km)"); mapYLabel = tr("Northing (km)");
+      backgroundA->setCoordinates(coordinates, .001); backgroundB->setCoordinates(coordinates, .001);
+      mapXLabel = coordinates.centered ? tr("East offset (km)") : tr("Easting (km)");
+      mapYLabel = coordinates.centered ? tr("North offset (km)") : tr("Northing (km)");
       for(auto &position: locations) { position[0] /= 1000.; position[1] /= 1000.; }
     } catch(const std::exception &) {
+      backgroundA->setCoordinates(SurveyCoordinates{}); backgroundB->setCoordinates(SurveyCoordinates{});
       mapXLabel = tr("Longitude (°)"); mapYLabel = tr("Latitude (°)");
     }
     for(unsigned i = 0; i < stationOrder.size(); ++i)
@@ -339,7 +337,7 @@ void FitStatisticsWindow::updatePlots()
   const auto active = enabled();
   {
     const QSignalBlocker block(responseList);
-    auto colors = gradient(curveColors->currentText());
+    auto colors = PlotColorMaps::gradient(curveColors->currentText());
     for(unsigned i = 0; i < responses.size(); ++i) {
       // Keep pale palette endpoints away from line plots on a white background.
       responses[i].color = curveColors->currentIndex() == 0 ? QColor::fromHsv((i * 137 + 215) % 360, 175, 185) :
@@ -580,7 +578,7 @@ void FitStatisticsWindow::applyAxisRanges()
 
 QCPColorGradient FitStatisticsWindow::spatialGradient() const
 {
-  auto colors = gradient(colorMap->currentText());
+  auto colors = PlotColorMaps::gradient(colorMap->currentText());
   return reverseColors->isChecked() ? colors.inverted() : colors;
 }
 
@@ -668,14 +666,15 @@ void FitStatisticsWindow::savePdf()
   if(!path.endsWith(".pdf", Qt::CaseInsensitive)) path += ".pdf";
   QPrinter printer(QPrinter::HighResolution);
   printer.setOutputFormat(QPrinter::PdfFormat); printer.setOutputFileName(path);
-  printer.setPaperSize(QPrinter::A4); printer.setOrientation(QPrinter::Landscape);
+  printer.setPageSize(QPageSize(QPageSize::A4)); printer.setPageOrientation(QPageLayout::Landscape);
   printer.setResolution(120);
   QCPPainter painter;
   if(!painter.begin(&printer)) {
     QMessageBox::warning(this, tr("Save fit statistics"), tr("Cannot write the PDF file."));
     return;
   }
-  const int width = printer.pageRect().width(), height = printer.pageRect().height();
+  const auto pageRect = printer.pageLayout().paintRectPixels(printer.resolution());
+  const int width = pageRect.width(), height = pageRect.height();
   const std::vector<std::vector<QCustomPlot *>> pages{{overall, periods, histogram, components}, {stations}, {mapA, mapB}, {heatA, heatB}};
   for(unsigned page = 0; page < pages.size(); ++page) {
     if(page) printer.newPage();

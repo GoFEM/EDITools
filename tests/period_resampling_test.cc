@@ -1,5 +1,7 @@
 #include "PeriodLayoutWindow.h"
 #include "include/MTMapData.h"
+#include <boost/archive/binary_iarchive.hpp>
+#include <boost/archive/binary_oarchive.hpp>
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>

@@ -20,15 +20,13 @@
 #include "include/MTSurveyData.h"
 
 #include "include/datum.h"
+#include "include/EDIFileReader.h"
 
 #include <fstream>
 #include <iomanip>
 #include <locale>
 
-MTSurveyData::MTSurveyData()
-{}
-
-MTSurveyData::MTSurveyData(const std::string survey_name):
+MTSurveyData::MTSurveyData(const std::string &survey_name):
   m_survey_name(survey_name)
 {}
 
@@ -39,14 +37,10 @@ std::string MTSurveyData::get_survey_name() const
 
 bool MTSurveyData::is_station_present(const std::string &name) const
 {
-  auto it = m_stations_data.find(name);
-  if(it == m_stations_data.end())
-    return false;
-  else
-    return true;
+  return m_stations_data.count(name) != 0;
 }
 
-std::vector<std::string> MTSurveyData::load_from_edi(std::vector<std::string> &file_list)
+std::vector<std::string> MTSurveyData::load_from_edi(const std::vector<std::string> &file_list)
 {
   std::vector<std::string> duplicates;
 
@@ -80,7 +74,7 @@ void MTSurveyData::load_responses(const std::string &file_path, MTResponseData::
   m_coordinates = SurveyCoordinates{};
 }
 
-void MTSurveyData::load_from_gofem(std::string file_path)
+void MTSurveyData::load_from_gofem(const std::string &file_path)
 {
   load_responses(file_path, MTResponseData::Format::GoFEM);
 }
@@ -110,7 +104,9 @@ MTStationData &MTSurveyData::get_station_data(const std::string &name)
 
 const MTStationData &MTSurveyData::get_station_data(const std::string &name) const
 {
-  return m_stations_data.at(name);
+  const auto it = m_stations_data.find(name);
+  if(it == m_stations_data.end()) throw std::runtime_error("Station " + name + " not found");
+  return it->second;
 }
 
 std::vector<std::array<double, 3>> MTSurveyData::get_stations_locations() const
@@ -181,33 +177,17 @@ std::string MTSurveyData::closest_station_name(const double &lat,
 
 void MTSurveyData::set_active_flag(const std::string &name, const bool flag)
 {
-  auto it = m_stations_data.find(name);
-  if(it == m_stations_data.end())
-    throw std::runtime_error("Station " + name + " not found");
-
-  MTStationData &data = it->second;
-  data.set_active(flag);
+  get_station_data(name).set_active(flag);
 }
 
 void MTSurveyData::set_active_flag(const std::string &name, RealDataType type, const bool flag)
 {
-  auto it = m_stations_data.find(name);
-  if(it == m_stations_data.end())
-    throw std::runtime_error("Station " + name + " not found");
-
-  MTStationData &data = it->second;
-  data.mask_type(type, flag);
+  get_station_data(name).mask_type(type, flag);
 }
 
 bool MTSurveyData::is_active(const std::string &name) const
 {
-  const auto it = m_stations_data.find(name);
-  if(it == m_stations_data.end())
-    throw std::runtime_error("Station " + name + " not found");
-
-  const MTStationData &data = it->second;
-
-  return data.active();
+  return get_station_data(name).active();
 }
 
 void MTSurveyData::decimate()
