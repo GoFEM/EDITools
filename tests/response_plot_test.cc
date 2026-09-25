@@ -2,6 +2,8 @@
 #include "include/NativeMT.h"
 #include "include/FitStatistics.h"
 #include "PeriodMapWindow.h"
+#include "PeriodLayoutWindow.h"
+#include "include/SurveyReport.h"
 #include <QApplication>
 #include <QFileDialog>
 #include <QCheckBox>
@@ -15,6 +17,7 @@
 #include <QSettings>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QRegularExpression>
 #include <boost/archive/binary_oarchive.hpp>
 #include <boost/serialization/array.hpp>
 #include <boost/serialization/complex.hpp>
@@ -26,6 +29,8 @@
 #include <iostream>
 #include <locale>
 #include <sstream>
+
+void period_resampling_tests(const QString &directory);
 
 namespace {
 void check(bool ok, const std::string &message)
@@ -80,6 +85,146 @@ void write(const QString &path, const std::string &contents)
   std::ofstream output(path.toStdString());
   output << contents;
   check(bool(output), "Failed writing fixture");
+}
+QByteArray read_report(const QString &path)
+{
+  QFile file(path); check(file.open(QIODevice::ReadOnly), "Report missing"); return file.readAll();
+}
+void report_pages(const QString &path, unsigned expected)
+{
+  const auto pdf = read_report(path);
+  check(pdf.startsWith("%PDF-"), "Report is not PDF");
+  auto pages = QRegularExpression("/Type\\s*/Page\\b").globalMatch(QString::fromLatin1(pdf.constData(), pdf.size()));
+  unsigned count = 0; while(pages.hasNext()) { pages.next(); ++count; }
+  check(count == expected, "Report must have an overview and exactly one page per included station");
+}
+void check_report_axes(const std::array<SurveyReport::Options::Axis, 4> &axes)
+{
+  unsigned found = 0;
+  for(auto *top: QApplication::topLevelWidgets()) {
+    auto *plot = qobject_cast<QCustomPlot *>(top);
+    if(!plot) continue;
+    for(unsigned i = 0; i < axes.size(); ++i) if(plot->objectName() == QString("surveyReportPlot%1").arg(i)) {
+      ++found;
+      if(!axes[i].autoscale) check(plot->yAxis->range() == QCPRange(axes[i].lower, axes[i].upper), "PDF changed a fixed Y range");
+      else check(plot->yAxis->range() != QCPRange(axes[i].lower, axes[i].upper), "PDF used stale fixed limits for an automatic Y axis");
+    }
+  }
+  check(found == 4, "Could not inspect all rendered report panels");
+}
+void export_report(MainWindow &window, const QString &path,
+                   const std::array<SurveyReport::Options::Axis, 4> *expectedAxes = nullptr)
+{
+  auto *stations = widget<QListWidget>(window, "stationList");
+  auto *responses = widget<QListWidget>(window, "responsesList");
+  const int stationRow = stations->currentRow(), responseRow = responses->currentRow();
+  QTimer inspectTimer; unsigned inspected = 0;
+  if(expectedAxes) {
+    QObject::connect(&inspectTimer, &QTimer::timeout, [&] {
+      for(auto *top: QApplication::topLevelWidgets()) if(top->objectName() == "surveyReportPlot0") {
+        check_report_axes(*expectedAxes); ++inspected; break;
+      }
+    });
+    inspectTimer.start(0);
+  }
+  QTimer timer; bool handled = false;
+  QObject::connect(&timer, &QTimer::timeout, [&] {
+    auto *dialog = window.findChild<QDialog *>("surveyReportDialog");
+    if(!dialog || !dialog->isVisible()) return;
+    check(widget<QComboBox>(*dialog, "reportResponse")->currentData().toString() ==
+          (responses->currentItem() ? responses->currentItem()->toolTip() : QString()), "Report should select current response");
+    check(widget<QToolButton>(*dialog, "reportHelp")->toolTip().contains("overview"), "Report help missing");
+    handled = true; timer.stop(); dialog->accept();
+  });
+  // Exercise the default suffix when the remaining filename has no other dots.
+  const auto enteredPath = QFileInfo(path).completeBaseName().contains('.') ? path : path.chopped(4);
+  timer.start(10); file_action(window, "actionExport_survey_report", {enteredPath});
+  check(handled, "Report options did not open");
+  check(!expectedAxes || inspected > 0, "GUI fixed ranges were not checked during export");
+  report_pages(path, stations->count() + 1);
+  check(stations->currentRow() == stationRow && responses->currentRow() == responseRow, "Report changed current selection");
+}
+void main_axis_ranges(MainWindow &window, bool autoscale, const std::array<SurveyReport::Options::Axis, 4> &axes)
+{
+  QTimer timer; bool handled = false;
+  QObject::connect(&timer, &QTimer::timeout, [&] {
+    for(auto *top: QApplication::topLevelWidgets()) {
+      auto *dialog = qobject_cast<QDialog *>(top);
+      if(!dialog || !dialog->isVisible() || dialog->windowTitle() != "Axis ranges") continue;
+      const auto edits = dialog->findChildren<QLineEdit *>();
+      check(edits.size() == 8, "Unexpected main axis controls");
+      dialog->findChild<QCheckBox *>()->setChecked(autoscale);
+      for(unsigned i = 0; i < axes.size(); ++i) {
+        edits[2 * i]->setText(QString::number(axes[i].lower)); edits[2 * i + 1]->setText(QString::number(axes[i].upper));
+      }
+      handled = true; timer.stop(); dialog->accept(); return;
+    }
+  });
+  timer.start(0); widget<QAction>(window, "actionPlot_axis_ranges")->trigger();
+  check(handled, "Main axis dialog did not open");
+}
+void survey_reports(const QString &directory)
+{
+  // Period counts distinguish complete tensors, partial components, masks, and
+  // missing values without counting real/imaginary parts as separate periods.
+  const auto layoutInput = directory + "/report-periods.gofem";
+  std::ostringstream layout;
+  for(int f: {1, 16}) for(const auto *type: {"RealZxx", "ImagZxx", "RealZxy", "ImagZxy", "RealZyx", "ImagZyx", "RealZyy", "ImagZyy"})
+    layout << type << ' ' << f << " Plane_wave LAYOUT 0 0\n";
+  layout << "RealZxy 2 Plane_wave LAYOUT 1 .1\nImagZxy 2 Plane_wave LAYOUT 1 .1\n"
+            "RealZyx 2 Plane_wave LAYOUT 1 .1\nImagZyx 2 Plane_wave LAYOUT 1 .1\n"
+            "RealZxx 4 Plane_wave LAYOUT 1 .1\nRealTzx 8 Plane_wave LAYOUT 0 0\n";
+  write(layoutInput, layout.str());
+  MTSurveyData layoutSurvey; layoutSurvey.load_from_gofem(layoutInput.toStdString());
+  auto &layoutStation = layoutSurvey.get_station_data("LAYOUT");
+  layoutStation.set_data_mask(RealZxx, 4., false); layoutStation.set_data_mask(RealZxx, 16., false);
+  const auto summary = SurveyReport::summarize_periods(layoutStation);
+  check(summary.counts[0] == std::array<unsigned, 4>{{1, 2, 1, 1}}, "Wrong full/partial/masked/missing impedance period counts");
+  check(summary.counts[1] == std::array<unsigned, 4>{{0, 1, 0, 4}}, "A lone finite tipper scalar must count as one partial period");
+  check(summary.periods.size() == 5 && summary.periods.at(1.)[0] == SurveyReport::PeriodState::Full &&
+        summary.periods.at(.25)[0] == SurveyReport::PeriodState::Masked, "Coverage must retain exact periods and all-masked entries");
+  for(const auto &counts: summary.counts) check(counts[0] + counts[1] + counts[2] + counts[3] == 5, "Period categories must be exhaustive and disjoint");
+  layoutStation.set_active(false);
+  const auto disabledSummary = SurveyReport::summarize_periods(layoutStation);
+  check(disabledSummary.counts[0] == std::array<unsigned, 4>{{0, 0, 4, 1}}, "Disabled periods must remain distinct from absent data");
+  const auto input = directory + "/report-input.gofem";
+  write(input, "RealZxy 1 Plane_wave MAP .002 .0001\nImagZxy 1 Plane_wave MAP .002 .0001\n"
+               "RealZxy 2 Plane_wave MAP .003 .0001\nImagZxy 2 Plane_wave MAP .003 .0001\n"
+               "RealTzx 1 Plane_wave NO_LOCATION .1 .01\nImagTzx 1 Plane_wave NO_LOCATION .2 .01\n");
+  MTSurveyData survey; survey.load_from_gofem(input.toStdString());
+  survey.get_station_data("MAP").set_position({{55., 9., 100.}});
+  survey.get_station_data("MAP").set_data_mask(RealZxy, 2., false);
+  survey.get_station_data("NO_LOCATION").set_position({{NAN, NAN, NAN}});
+  survey.set_active_flag("NO_LOCATION", false);
+  const auto masks = survey.get_station_data("MAP").impedance_mask();
+  SurveyReport::Options options;
+  std::vector<unsigned> progress;
+  const auto all = directory + "/report-all.pdf";
+  check(SurveyReport::write_pdf(all, survey, nullptr, options, [&](unsigned done, unsigned total) {
+    check(total == 3, "Report progress has wrong page total"); progress.push_back(done); return true;
+  }), "Report export failed");
+  report_pages(all, 3); check(progress == std::vector<unsigned>({0, 1, 2, 3}), "Report progress missing pages");
+  options.includeDisabled = false; options.responseName = "GoFEM response";
+  options.errorBars = false; options.components[0].fill(false);
+  MTSurveyData response; response.load_from_gofem(input.toStdString());
+  const auto enabled = directory + "/report-enabled.pdf";
+  check(SurveyReport::write_pdf(enabled, survey, &response, options), "Response report export failed"); report_pages(enabled, 2);
+  const auto original = read_report(enabled);
+  auto fixedOptions = options; fixedOptions.includeDisabled = true;
+  fixedOptions.axes = {{{false, 10., 100.}, {true, 1234., 5678.}, {false, -.3, .3}, {false, -5., 5.}}};
+  unsigned checkedPages = 0;
+  check(SurveyReport::write_pdf(directory + "/report-ranges.pdf", survey, &response, fixedOptions, [&](unsigned done, unsigned) {
+    if(done >= 2) { check_report_axes(fixedOptions.axes); ++checkedPages; }
+    return true;
+  }), "Fixed range export failed");
+  check(checkedPages == 2, "Fixed ranges must persist across all station pages, including empty panels");
+  check(!SurveyReport::write_pdf(enabled, survey, nullptr, options, [](unsigned done, unsigned) { return done < 1; }), "Report cancellation ignored");
+  check(read_report(enabled) == original, "Cancellation replaced existing report");
+  check(!survey.is_active("NO_LOCATION") && survey.get_station_data("MAP").impedance_mask() == masks, "Report changed source masks");
+  survey.set_active_flag("MAP", false);
+  bool rejected = false;
+  try { SurveyReport::write_pdf(enabled, survey, nullptr, options); } catch(const std::runtime_error &) { rejected = true; }
+  check(rejected && read_report(enabled) == original, "Empty selection must preserve existing destination");
 }
 std::string gofem_text(const std::vector<NativeMT::Observation> &rows)
 {
@@ -657,6 +802,54 @@ void period_maps(const QString &directory)
         "Map masked a nearby frequency instead of the selected frequency");
 }
 
+void resampling_project_workflow(const QString &directory)
+{
+  auto survey = std::make_shared<MTSurveyData>();
+  survey->load_from_gofem((directory + "/resampling-input.gofem").toStdString());
+  for(const auto &name: survey->get_stations_names()) survey->get_station_data(name).set_position({{55., 9., 100.}});
+  const auto original = directory + "/layout-original.mtd", saved = directory + "/layout-copy.mtd";
+  {
+    std::ofstream file(original.toStdString(), std::ios::binary);
+    boost::archive::binary_oarchive archive(file); archive << survey << std::map<std::string, MTSurveyData>{};
+  }
+  MainWindow window;
+  file_action(window, "actionLoad_project", {original}); select_station(window, "A");
+  widget<QAction>(window, "actionPeriod_layout")->trigger();
+  auto *layout = widget<QDialog>(window, "periodLayoutWindow");
+  widget<QComboBox>(*layout, "layoutGridMode")->setCurrentIndex(2);
+  widget<QLineEdit>(*layout, "layoutCustomPeriods")->setText("1 2 4");
+  widget<QDoubleSpinBox>(*layout, "layoutMaximumRatio")->setValue(4.);
+  widget<QPushButton>(*layout, "layoutPreview")->click();
+  file_action(*layout, "layoutExportReport", {directory + "/resampling-audit.csv"});
+  QFile audit(directory + "/resampling-audit.csv"); check(audit.open(QIODevice::ReadOnly), "Audit CSV missing");
+  const auto text = audit.readAll();
+  check(text.contains("\"A\",Zxy,2,\"Interpolated\",1,4"), "CSV omitted interpolation source brackets");
+  widget<QPushButton>(*layout, "layoutApply")->click(); QApplication::processEvents();
+  MainWindow *copy = nullptr;
+  for(auto *top: QApplication::topLevelWidgets())
+    if(top->objectName() == "resampledSurveyWindow") copy = qobject_cast<MainWindow *>(top);
+  check(copy, "Apply did not open a separate survey window");
+  select_station(*copy, "A");
+  near(value(*widget<QCustomPlot>(*copy, "plot12"), 1, 2.), std::atan2(3., 2.) * 180. / std::acos(-1.));
+  check(widget<QCustomPlot>(window, "plot12")->graph(1)->data()->findBegin(2.)->key != 2., "Resampling modified the original window");
+  file_action(*copy, "actionSave_project", {saved});
+  copy->close(); QApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+  MainWindow restored;
+  file_action(restored, "actionLoad_project", {saved}); select_station(restored, "A");
+  near(value(*widget<QCustomPlot>(restored, "plot12"), 1, 2.), std::atan2(3., 2.) * 180. / std::acos(-1.));
+  widget<QAction>(restored, "actionPeriod_layout")->trigger();
+  auto *restoredLayout = widget<QDialog>(restored, "periodLayoutWindow");
+  check(!widget<QPushButton>(*restoredLayout, "layoutOpenSource")->isHidden(), "Saved project lost source access");
+  widget<QPushButton>(*restoredLayout, "layoutOpenSource")->click(); QApplication::processEvents();
+  copy = nullptr;
+  for(auto *top: QApplication::topLevelWidgets())
+    if(top->objectName() == "resampledSurveyWindow") copy = qobject_cast<MainWindow *>(top);
+  check(copy, "Could not reopen the saved source survey");
+  select_station(*copy, "A");
+  near(value(*widget<QCustomPlot>(*copy, "plot12"), 1, 100.), std::atan2(9., 8.) * 180. / std::acos(-1.));
+  copy->close(); QApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+}
+
 struct LegacyAxisV5 {
   bool automatic = true;
   double lower = 0., upper = 1.;
@@ -737,6 +930,16 @@ void workflow(const QString &directory)
   auto &phase = *widget<QCustomPlot>(window, "plot12");
   auto &tipper = *widget<QCustomPlot>(window, "plot21");
   auto &tensor = *widget<QCustomPlot>(window, "plot22");
+  const auto beforeReportRange = rho.xAxis->range();
+  const auto beforeReportValue = value(rho, 9, 1.);
+  export_report(window, directory + "/survey-report.pdf");
+  near(rho.xAxis->range().lower, beforeReportRange.lower); near(rho.xAxis->range().upper, beforeReportRange.upper);
+  near(value(rho, 9, 1.), beforeReportValue);
+  const std::array<SurveyReport::Options::Axis, 4> guiAxes{{
+    {false, 1., 1000.}, {false, -10., 100.}, {false, -.4, .4}, {false, -2., 2.}}};
+  main_axis_ranges(window, false, guiAxes);
+  export_report(window, directory + "/survey-fixed-ranges.pdf", &guiAxes);
+  main_axis_ranges(window, true, guiAxes);
   for(auto *plot: {&rho, &phase, &tipper, &tensor})
     for(int i = 8; i < 12; ++i) {
       check(plot->graph(i)->lineStyle() == QCPGraph::lsLine, "Responses must be lines");
@@ -1077,6 +1280,20 @@ void real_run(const QString &project, const QString &directory, const QString &s
     check(maps->grab().save(screenshot + ".response-map.png"), "Could not save response period map");
   }
   std::cout << paths.size() << " real iterations loaded; " << plotted << " stations plotted.\n";
+  if(!screenshot.isEmpty()) export_report(window, screenshot + ".survey.pdf");
+  widget<QAction>(window, "actionPeriod_layout")->trigger();
+  auto *layout = widget<QDialog>(window, "periodLayoutWindow");
+  widget<QPushButton>(*layout, "layoutPreview")->click();
+  check(widget<QPushButton>(*layout, "layoutApply")->isEnabled(), "Real survey resampling preview has no usable samples");
+  std::cout << "Period layout: " << widget<QLabel>(*layout, "layoutSummary")->text().toStdString() << '\n';
+  if(!screenshot.isEmpty()) {
+    layout->resize(1300, 950); QApplication::processEvents();
+    check(layout->grab().save(screenshot + ".period-layout.png"), "Could not save source layout preview");
+    widget<QTabWidget>(*layout, "layoutTabs")->setCurrentIndex(1); QApplication::processEvents();
+    check(layout->grab().save(screenshot + ".resampling.png"), "Could not save resampling preview");
+    widget<QTabWidget>(*layout, "layoutTabs")->setCurrentIndex(2); QApplication::processEvents();
+    check(layout->grab().save(screenshot + ".coverage.png"), "Could not save coverage preview");
+  }
 }
 }
 
@@ -1092,7 +1309,7 @@ int main(int argc, char **argv)
   try {
     check(directory.isValid(), "No temporary directory");
     if(argc >= 3) real_run(argv[1], argv[2], argc >= 4 ? argv[3] : QString(), argc >= 5 && QString(argv[4]) == "mixed");
-    else { statistics(directory.path()); gofem_responses(directory.path()); period_maps(directory.path()); workflow(directory.path()); }
+    else { statistics(directory.path()); gofem_responses(directory.path()); period_maps(directory.path()); period_resampling_tests(directory.path()); resampling_project_workflow(directory.path()); survey_reports(directory.path()); workflow(directory.path()); }
     std::cout << "Response import, curves and project workflow checks passed.\n";
   } catch(const std::exception &e) {
     std::cerr << e.what() << '\n';

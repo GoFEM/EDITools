@@ -38,6 +38,7 @@ set( Srcs ${QCUSTOMPLOT_PATH}/qcustomplot.cpp
           src/MTResponseData.cc
           src/FitStatistics.cc
           src/MTMapData.cc
+          src/PeriodResampling.cc
           src/SurveyCoordinates.cc
           src/MTSurveyData.cc
           src/EDIFileReader.cc
@@ -52,6 +53,8 @@ set( Srcs ${QCUSTOMPLOT_PATH}/qcustomplot.cpp
           SurveyCoordinatesDialog.cpp
           FitStatisticsWindow.cpp
           PeriodMapWindow.cpp
+          PeriodLayoutWindow.cpp
+          SurveyReport.cpp
           mainwindow.cpp
           ${TARGET}.cpp)
 
@@ -118,7 +121,7 @@ if(BUILD_TESTING)
   set_tests_properties(native_mt_dialog PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 20)
   set(ResponseTestSrcs ${Srcs})
   list(REMOVE_ITEM ResponseTestSrcs ${TARGET}.cpp)
-  add_executable(response_plot_test tests/response_plot_test.cc ${ResponseTestSrcs}
+  add_executable(response_plot_test tests/response_plot_test.cc tests/period_resampling_test.cc ${ResponseTestSrcs}
     ${Hdrs} ${UI_Srcs} ${MOC_Hdrs} ${QRC_Srcs})
   set_target_properties(response_plot_test PROPERTIES
     Fortran_MODULE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/response_plot_modules")

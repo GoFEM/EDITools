@@ -1,4 +1,5 @@
 #include "PeriodMapWindow.h"
+#include "include/HelpButton.h"
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QGridLayout>
@@ -32,7 +33,7 @@ PeriodMapWindow::PeriodMapWindow(QWidget *parent, std::function<void()> changed)
   : QDialog(parent, Qt::Window), observationsChanged(std::move(changed))
 {
   setObjectName("periodMapWindow");
-  setWindowTitle(tr("Induction vector and phase tensor maps"));
+  setWindowTitle(tr("Induction / phase tensor maps"));
   resize(1200, 1000);
   auto *layout = new QVBoxLayout(this);
   auto *top = new QHBoxLayout;
@@ -61,11 +62,11 @@ PeriodMapWindow::PeriodMapWindow(QWidget *parent, std::function<void()> changed)
     box = new QCheckBox(text, this); box->setObjectName(name); box->setChecked(checked); layers->addWidget(box);
   };
   addLayer(tensors, tr("Phase tensors"), "mapPhaseTensors", true);
-  addLayer(realArrows, tr("Real induction arrows"), "mapRealArrows", true);
-  addLayer(imagArrows, tr("Imaginary induction arrows"), "mapImagArrows", false);
+  addLayer(realArrows, tr("Real arrows"), "mapRealArrows", true);
+  addLayer(imagArrows, tr("Imaginary arrows"), "mapImagArrows", false);
   addLayer(names, tr("Station names"), "mapStationNames", false);
   layers->addStretch();
-  layers->addWidget(new QLabel(tr("Period tolerance (%):"), this));
+  layers->addWidget(UiHelp::label(this, tr("Tolerance (%):"), tr("Use each station's closest period within this percentage of the selected period. No interpolation or extrapolation. Missing, incomplete and masked data are omitted; valid zero vectors are counted but have no arrowhead."), "mapPeriodHelp"));
   tolerance = new QDoubleSpinBox(this); tolerance->setObjectName("mapPeriodTolerance");
   tolerance->setRange(0., 25.); tolerance->setDecimals(3); tolerance->setValue(.1); tolerance->setKeyboardTracking(false);
   tolerance->setToolTip(tr("Use the closest available period within this percentage. No interpolation or extrapolation."));
@@ -73,7 +74,7 @@ PeriodMapWindow::PeriodMapWindow(QWidget *parent, std::function<void()> changed)
   layout->addLayout(layers);
 
   auto *controls = new QGridLayout;
-  controls->addWidget(new QLabel(tr("Arrow convention:"), this), 0, 0);
+  controls->addWidget(UiHelp::label(this, tr("Convention:"), tr("Parkinson reverses the stored tipper sign; Wiese keeps it. The sign applies to both real and imaginary arrows. Tzx is north and Tzy is east, accounting for the projection's direction of true north."), "mapConventionHelp"), 0, 0);
   convention = new QComboBox(this); convention->setObjectName("mapArrowConvention");
   convention->addItems({tr("Parkinson (−T)"), tr("Wiese (+T)")});
   convention->setToolTip(tr("The sign applies to both real and imaginary arrows. Stored Tzx is north and Tzy is east."));
@@ -85,13 +86,13 @@ PeriodMapWindow::PeriodMapWindow(QWidget *parent, std::function<void()> changed)
   };
   ellipseSize = sizeControl("mapEllipseSize", .5);
   arrowSize = sizeControl("mapArrowSize", 1.);
-  controls->addWidget(new QLabel(tr("Ellipse diameter (km):"), this), 0, 2);
+  controls->addWidget(UiHelp::label(this, tr("Ellipse (km):"), tr("Major-axis diameter. Ellipses have equal major diameters; their minor/major ratio is |Φmin/Φmax|. Orientation is clockwise from geographic north. Singular or undefined tensors are omitted."), "mapEllipseHelp"), 0, 2);
   controls->addWidget(ellipseSize, 0, 3);
-  controls->addWidget(new QLabel(tr("Arrow length for |T| = 1 (km):"), this), 0, 4);
+  controls->addWidget(UiHelp::label(this, tr("Arrow scale (km):"), tr("Arrow length for a tipper magnitude |T| = 1. The map reference arrow shows |T| = 0.5."), "mapArrowHelp"), 0, 4);
   controls->addWidget(arrowSize, 0, 5);
-  controls->addWidget(new QLabel(tr("Ellipse color:"), this), 1, 0);
+  controls->addWidget(UiHelp::label(this, tr("Color by:"), tr("Color represents maximum phase φmax, minimum phase φmin, or skew β, in degrees. Min and Max set the color range; values outside it use endpoint colors."), "mapColorHelp"), 1, 0);
   colorBy = new QComboBox(this); colorBy->setObjectName("mapColorBy");
-  colorBy->addItems({tr("Maximum phase φmax (°)"), tr("Minimum phase φmin (°)"), tr("Skew β (°)")});
+  colorBy->addItems({tr("φmax (°)"), tr("φmin (°)"), tr("Skew β (°)")});
   controls->addWidget(colorBy, 1, 1);
   controls->addWidget(new QLabel(tr("Colormap:"), this), 1, 2);
   colorMap = new QComboBox(this); colorMap->setObjectName("mapColorMap");
@@ -115,9 +116,10 @@ PeriodMapWindow::PeriodMapWindow(QWidget *parent, std::function<void()> changed)
   selectMode = new QCheckBox(tr("Select stations"), this); selectMode->setObjectName("mapSelectStations");
   selectMode->setToolTip(tr("Click a station, arrow or ellipse; drag a box to select several stations. Ctrl-click toggles a station; Ctrl-drag adds stations. Turn off to pan."));
   maskControls->addWidget(selectMode);
-  maskControls->addWidget(new QLabel(tr("Observed data at shown period:"), this));
+  maskControls->addWidget(UiHelp::button(this, tr("Station selection"), selectMode->toolTip(), "mapSelectionHelp"));
+  maskControls->addWidget(UiHelp::label(this, tr("Mask group:"), tr("Mask / Unmask edits observed data at the displayed period, within the tolerance, even while viewing a computed response. Computed responses are unchanged. Disabled stations and unmatched observed periods are skipped. Masked stations keep selectable center dots so they can be unmasked.\nTippers affects both directions and real/imaginary parts. Phase tensor affects all four tensor components. Impedance + tensor also affects all impedance components and derived resistivity and phase."), "mapMaskHelp"));
   maskGroup = new QComboBox(this); maskGroup->setObjectName("mapMaskGroup");
-  maskGroup->addItems({tr("Tippers"), tr("Phase tensor"), tr("Impedance + phase tensor")});
+  maskGroup->addItems({tr("Tippers"), tr("Phase tensor"), tr("Impedance + tensor")});
   maskGroup->setToolTip(tr("Tippers: both directions, real and imaginary. Phase tensor: all four tensor components. Impedance + phase tensor: all impedance and tensor components, including derived resistivity and phase."));
   maskControls->addWidget(maskGroup);
   maskButton = new QPushButton(tr("Mask"), this); maskButton->setObjectName("mapMask");
@@ -127,7 +129,7 @@ PeriodMapWindow::PeriodMapWindow(QWidget *parent, std::function<void()> changed)
   maskControls->addStretch();
   layout->addLayout(maskControls);
   selectionSummary = new QLabel(this); selectionSummary->setObjectName("mapSelectionSummary");
-  selectionSummary->setWordWrap(true); layout->addWidget(selectionSummary);
+  selectionSummary->setWordWrap(false); maskControls->addWidget(selectionSummary);
 
   plot = new QCustomPlot(this); plot->setObjectName("periodMapPlot");
   plot->setMinimumSize(650, 450);
@@ -450,12 +452,11 @@ void PeriodMapWindow::updateMap(bool fit)
     label->setText("|T| = 0.5"); label->setPositionAlignment(Qt::AlignLeft | Qt::AlignVCenter); label->setSelectable(false);
   }
   title->setText(tr("%1 — T = %2 s").arg(dataset->currentText()).arg(requested, 0, 'g', 8));
-  note->setText(tr("%1   |   %2   |   Ellipses: equal major axes, |Φmin/Φmax| shape")
+  note->setText(tr("%1   |   %2")
                 .arg(coordinatesDescription).arg(convention->currentText()));
   summary->setText(!locationError.isEmpty() ? tr("Cannot project station locations: %1").arg(locationError) :
-    (sites.empty() ? tr("Load observed stations with geographic locations to draw period maps.") :
-     tr("%1/%2 stations match the period. Displayed: %3 phase tensors, %4 real and %5 imaginary vectors (including zeros). "
-        "Missing, incomplete or masked data are omitted. Hover near a station for values.")
+    (sites.empty() ? tr("Load stations with geographic locations.") :
+     tr("%1/%2 stations · %3 tensors · %4 real / %5 imaginary vectors")
        .arg(matchingPeriods).arg(sites.size()).arg(nTensor).arg(nReal).arg(nImag)));
   plot->setProperty("phaseTensorCount", nTensor); plot->setProperty("realVectorCount", nReal); plot->setProperty("imagVectorCount", nImag);
   updateSelection(false);
@@ -513,7 +514,7 @@ void PeriodMapWindow::updateSelection(bool replot)
   if(selectionGraph) selectionGraph->setData(x, y);
   maskButton->setEnabled(eligible > 0); unmaskButton->setEnabled(eligible > 0);
   clearSelection->setEnabled(!selectedStations.empty());
-  selectionSummary->setText(tr("%1 selected; %2 have active observed data at this period. Mask / Unmask edits only that observed period, within the tolerance. Computed responses are unchanged.")
+  selectionSummary->setText(tr("%1 selected · %2 editable")
                             .arg(selectedStations.size()).arg(eligible));
   if(replot) plot->replot();
 }
