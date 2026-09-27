@@ -2,7 +2,7 @@
 #include "include/PlotColorMaps.h"
 #include "include/FileLabels.h"
 #include "PeriodMapWindow.h"
-#include "include/HelpButton.h"
+#include "include/ToolTips.h"
 #include <QFileDialog>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -54,18 +54,16 @@ PeriodMapWindow::PeriodMapWindow(QWidget *parent, std::function<void()> changed)
   addLayer(imagArrows, tr("Imaginary arrows"), "mapImagArrows", false);
   addLayer(names, tr("Station names"), "mapStationNames", false);
   layers->addStretch();
-  layers->addWidget(UiHelp::label(this, tr("Tolerance (%):"), tr("Use each station's closest period within this percentage of the selected period. No interpolation or extrapolation. Missing, incomplete and masked data are omitted; valid zero vectors are counted but have no arrowhead."), "mapPeriodHelp"));
   tolerance = new QDoubleSpinBox(this); tolerance->setObjectName("mapPeriodTolerance");
   tolerance->setRange(0., 25.); tolerance->setDecimals(3); tolerance->setValue(.1); tolerance->setKeyboardTracking(false);
-  tolerance->setToolTip(tr("Use the closest available period within this percentage. No interpolation or extrapolation."));
+  layers->addWidget(ToolTips::label(tolerance, tr("Tolerance (%):"), tr("Use each station's closest period within this percentage of the selected period. No interpolation or extrapolation. Missing, incomplete and masked data are omitted; valid zero vectors are counted but have no arrowhead.")));
   layers->addWidget(tolerance);
   layout->addLayout(layers);
 
   auto *controls = new QGridLayout;
-  controls->addWidget(UiHelp::label(this, tr("Convention:"), tr("Parkinson reverses the stored tipper sign; Wiese keeps it. The sign applies to both real and imaginary arrows. Tzx is north and Tzy is east, accounting for the projection's direction of true north."), "mapConventionHelp"), 0, 0);
   convention = new QComboBox(this); convention->setObjectName("mapArrowConvention");
   convention->addItems({tr("Parkinson (−T)"), tr("Wiese (+T)")});
-  convention->setToolTip(tr("The sign applies to both real and imaginary arrows. Stored Tzx is north and Tzy is east."));
+  controls->addWidget(ToolTips::label(convention, tr("Convention:"), tr("Parkinson reverses the stored tipper sign; Wiese keeps it. The sign applies to both real and imaginary arrows. Tzx is north and Tzy is east, accounting for the projection's direction of true north.")), 0, 0);
   controls->addWidget(convention, 0, 1);
   auto sizeControl = [&](const QString &name, double value) {
     auto *spin = new QDoubleSpinBox(this); spin->setObjectName(name);
@@ -74,13 +72,13 @@ PeriodMapWindow::PeriodMapWindow(QWidget *parent, std::function<void()> changed)
   };
   ellipseSize = sizeControl("mapEllipseSize", .5);
   arrowSize = sizeControl("mapArrowSize", 1.);
-  controls->addWidget(UiHelp::label(this, tr("Ellipse (km):"), tr("Major-axis diameter. Ellipses have equal major diameters; their minor/major ratio is |Φmin/Φmax|. Orientation is clockwise from geographic north. Singular or undefined tensors are omitted."), "mapEllipseHelp"), 0, 2);
+  controls->addWidget(ToolTips::label(ellipseSize, tr("Ellipse (km):"), tr("Major-axis diameter. Ellipses have equal major diameters; their minor/major ratio is |Φmin/Φmax|. Orientation is clockwise from geographic north. Singular or undefined tensors are omitted.")), 0, 2);
   controls->addWidget(ellipseSize, 0, 3);
-  controls->addWidget(UiHelp::label(this, tr("Arrow scale (km):"), tr("Arrow length for a tipper magnitude |T| = 1. The map reference arrow shows |T| = 0.5."), "mapArrowHelp"), 0, 4);
+  controls->addWidget(ToolTips::label(arrowSize, tr("Arrow scale (km):"), tr("Arrow length for a tipper magnitude |T| = 1. The map reference arrow shows |T| = 0.5.")), 0, 4);
   controls->addWidget(arrowSize, 0, 5);
-  controls->addWidget(UiHelp::label(this, tr("Color by:"), tr("Color represents maximum phase φmax, minimum phase φmin, or skew β, in degrees. Min and Max set the color range; values outside it use endpoint colors."), "mapColorHelp"), 1, 0);
   colorBy = new QComboBox(this); colorBy->setObjectName("mapColorBy");
   colorBy->addItems({tr("φmax (°)"), tr("φmin (°)"), tr("Skew β (°)")});
+  controls->addWidget(ToolTips::label(colorBy, tr("Color by:"), tr("Color represents maximum phase φmax, minimum phase φmin, or skew β, in degrees. Min and Max set the color range; values outside it use endpoint colors.")), 1, 0);
   controls->addWidget(colorBy, 1, 1);
   controls->addWidget(new QLabel(tr("Colormap:"), this), 1, 2);
   colorMap = new QComboBox(this); colorMap->setObjectName("mapColorMap");
@@ -94,6 +92,7 @@ PeriodMapWindow::PeriodMapWindow(QWidget *parent, std::function<void()> changed)
   for(auto *spin: {colorMin, colorMax}) {
     spin->setRange(-180., 180.); spin->setDecimals(2); spin->setKeyboardTracking(false);
   }
+  for(auto *spin: {colorMin, colorMax}) ToolTips::set(spin, tr("Color range in degrees. Values outside the range use the endpoint colors."));
   colorMin->setMaximum(179.99); colorMax->setMinimum(-179.99); colorMax->setValue(90.);
   limits->addWidget(new QLabel(tr("Min:"), this)); limits->addWidget(colorMin);
   limits->addWidget(new QLabel(tr("Max:"), this)); limits->addWidget(colorMax);
@@ -104,15 +103,16 @@ PeriodMapWindow::PeriodMapWindow(QWidget *parent, std::function<void()> changed)
   selectMode = new QCheckBox(tr("Select stations"), this); selectMode->setObjectName("mapSelectStations");
   selectMode->setToolTip(tr("Click a station, arrow or ellipse; drag a box to select several stations. Ctrl-click toggles a station; Ctrl-drag adds stations. Turn off to pan."));
   maskControls->addWidget(selectMode);
-  maskControls->addWidget(UiHelp::button(this, tr("Station selection"), selectMode->toolTip(), "mapSelectionHelp"));
-  maskControls->addWidget(UiHelp::label(this, tr("Mask group:"), tr("Mask / Unmask edits observed data at the displayed period, within the tolerance, even while viewing a computed response. Computed responses are unchanged. Disabled stations and unmatched observed periods are skipped. Masked stations keep selectable center dots so they can be unmasked.\nTippers affects both directions and real/imaginary parts. Phase tensor affects all four tensor components and, when Data → Link Z / PT masks is on, all impedance components too. Impedance + tensor always affects both tensors and derived resistivity and phase."), "mapMaskHelp"));
   maskGroup = new QComboBox(this); maskGroup->setObjectName("mapMaskGroup");
   maskGroup->addItems({tr("Tippers"), tr("Phase tensor"), tr("Impedance + tensor")});
-  maskGroup->setToolTip(tr("Tippers: both directions, real and imaginary. Phase tensor: all four tensor components, plus impedance when Link Z / PT masks is on. Impedance + phase tensor: all impedance and tensor components, including derived resistivity and phase."));
+  maskControls->addWidget(ToolTips::label(maskGroup, tr("Mask group:"), tr("Mask / Unmask edits observed data at the displayed period, within the tolerance, even while viewing a computed response. Computed responses are unchanged. Disabled stations and unmatched observed periods are skipped. Masked stations keep selectable center dots so they can be unmasked.\nTippers affects both directions and real/imaginary parts. Phase tensor affects all four tensor components and, when Data → Link Z / PT masks is on, all impedance components too. Impedance + tensor always affects both tensors and derived resistivity and phase.")));
   maskControls->addWidget(maskGroup);
   maskButton = new QPushButton(tr("Mask"), this); maskButton->setObjectName("mapMask");
   unmaskButton = new QPushButton(tr("Unmask"), this); unmaskButton->setObjectName("mapUnmask");
   clearSelection = new QPushButton(tr("Clear selection"), this); clearSelection->setObjectName("mapClearSelection");
+  for(auto *button: {maskButton, unmaskButton}) {
+    button->setToolTip(maskGroup->toolTip()); button->setAccessibleDescription(maskGroup->accessibleDescription());
+  }
   for(auto *button: {maskButton, unmaskButton, clearSelection}) maskControls->addWidget(button);
   maskControls->addStretch();
   layout->addLayout(maskControls);

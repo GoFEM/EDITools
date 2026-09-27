@@ -328,10 +328,12 @@ void response_import()
         "Sparse, shuffled response keys were not preserved");
   stations.at("S01").get_apparent_resistivity(values, errors);
   near(values[1][0], 1.0132118364233778);
+  near(errors[1][0], 2.*values[1][0]*.0001/std::hypot(.002,.002));
   check(std::isnan(values[0][0]) && std::isnan(values[1][1]) && std::isnan(values[1][2]),
         "Missing impedance components were filled with zero");
   stations.at("S01").get_phase(values, errors);
   near(values[1][0], 45.);
+  near(errors[1][0], 180./std::acos(-1.)*.0001/std::hypot(.002,.002));
   check(std::isnan(values[1][2]), "Incomplete impedance yielded a phase");
   stations.at("S01").get_phase_tensor(values, errors);
   near(values[1][0], .75);

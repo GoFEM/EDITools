@@ -20,6 +20,8 @@
  */
 
 #include "mainwindow.h"
+#include "ImpedanceAnalysisWindows.h"
+#include "include/RhoPlusOverlay.h"
 #include "ui_mainwindow.h"
 
 #include <algorithm>
@@ -69,7 +71,7 @@ namespace
 // version so the loader can distinguish both layouts and keep old .mtd files
 // readable.
 const std::uint32_t projectFileMagic = 0x45444954; // "EDIT"
-const std::uint32_t projectFileVersion = 7;
+const std::uint32_t projectFileVersion = 8;
 }
 
 MainWindow::MainWindow(QWidget *parent) :
@@ -117,6 +119,14 @@ MainWindow::MainWindow(QWidget *parent) :
 
   plotHandlers[0]->set_associated_plot(*plotHandlers[1]);
   plotHandlers[1]->set_associated_plot(*plotHandlers[0]);
+  rhoPlusAction = ui->menuPlot->addAction(tr("Show rho+ guides"));
+  rhoPlusAction->setObjectName("actionShow_rho_plus"); rhoPlusAction->setCheckable(true);
+  const auto rhoPlusHelp = tr("Thin dashed XY/YX rho+ fits in the component colors. Fits use enabled, unmasked observations and refresh after masking. Component checkboxes also hide the guides. These are 1-D consistency guides, not automatic validity judgments. Change grid density in Data → Impedance validity / Rho+…");
+  rhoPlusAction->setToolTip(rhoPlusHelp); ui->menuPlot->setToolTipsVisible(true);
+  rhoPlusOverlay.reset(new RhoPlusOverlay(plot11,plot12,[this,rhoPlusHelp](const QString &status) {
+    rhoPlusAction->setToolTip(rhoPlusHelp + (status.isEmpty()?QString():"\n\n"+status));
+  }));
+  connect(rhoPlusAction,&QAction::toggled,this,[this]{updatePlots(false);});
   for(const auto &plot: plotHandlers) {
     connect(plot.get(), &MTDataPlot::observationsChanged, this, [this] { updatePlots(false); refreshAnalysisWindows(); });
     connect(plot.get(), &MTDataPlot::componentVisibilityChanged, this, [this] { updatePlots(); });
@@ -143,6 +153,24 @@ MainWindow::MainWindow(QWidget *parent) :
   auto *periodLayoutAction = ui->menuData->addAction(tr("Period layout / Resampling…"));
   periodLayoutAction->setObjectName("actionPeriod_layout");
   connect(periodLayoutAction, &QAction::triggered, this, &MainWindow::openPeriodLayout);
+  auto *validityAction = ui->menuData->addAction(tr("Impedance validity / Rho+…"));
+  validityAction->setObjectName("actionImpedance_validity");
+  connect(validityAction, &QAction::triggered, this, [this] {
+    if(!impedanceValidity) impedanceValidity = new ImpedanceValidityWindow(this, [this](const ImpedanceAnalysis::RhoPlusOptions &options) {
+      rhoPlusOptions=options; updatePlots(false);
+    }, [this] { updatePlots(false); refreshAnalysisWindows(); });
+    impedanceValidity->setLinkTensorMasks(linkTensorMasksAction->isChecked());
+    impedanceValidity->setFitOptions(rhoPlusOptions);
+    impedanceValidity->setData(mtSurvey, ui->stationList->currentItem() ? ui->stationList->currentItem()->text() : QString());
+    impedanceValidity->show(); impedanceValidity->raise(); impedanceValidity->activateWindow();
+  });
+  auto *averagesAction = ui->menuData->addAction(tr("Survey impedance averages…"));
+  averagesAction->setObjectName("actionSurvey_averages");
+  connect(averagesAction, &QAction::triggered, this, [this] {
+    if(!surveyAverage) surveyAverage = new SurveyAverageWindow(this);
+    surveyAverage->setData(mtSurvey);
+    surveyAverage->show(); surveyAverage->raise(); surveyAverage->activateWindow();
+  });
   linkTensorMasksAction = ui->menuData->addAction(tr("Link Z / PT masks"));
   linkTensorMasksAction->setObjectName("actionLink_tensor_masks");
   linkTensorMasksAction->setCheckable(true); linkTensorMasksAction->setChecked(true);
@@ -150,6 +178,7 @@ MainWindow::MainWindow(QWidget *parent) :
   connect(linkTensorMasksAction, &QAction::toggled, this, [this](bool on) {
     for(const auto &plot: plotHandlers) plot->set_link_tensor_masks(on);
     if(periodMaps) periodMaps->setLinkTensorMasks(on);
+    if(impedanceValidity) impedanceValidity->setLinkTensorMasks(on);
   });
   auto *reportAction = ui->menuFile->addAction(tr("Export survey report…"));
   reportAction->setObjectName("actionExport_survey_report");
@@ -223,6 +252,8 @@ void MainWindow::rememberDirectory(const QString &path)
 MainWindow::PlotOptions MainWindow::currentPlotOptions() const
 {
   PlotOptions options;
+  options.rhoPlus = rhoPlusAction->isChecked();
+  options.rhoPlusGridDensity = rhoPlusOptions.intervalsPerDecade;
   options.linkTensorMasks = linkTensorMasksAction->isChecked();
   for(unsigned i = 0; i < plotHandlers.size(); ++i)
     options.componentVisible[i] = plotHandlers[i]->component_visibility();
@@ -255,6 +286,10 @@ MainWindow::PlotOptions MainWindow::currentPlotOptions() const
 
 void MainWindow::applyPlotOptions(const PlotOptions &options)
 {
+  const QSignalBlocker rhoPlusBlock(rhoPlusAction);
+  rhoPlusAction->setChecked(options.rhoPlus);
+  rhoPlusOptions.intervalsPerDecade = options.rhoPlusGridDensity >= 4 && options.rhoPlusGridDensity <= 48 ? options.rhoPlusGridDensity : 12;
+  if(impedanceValidity) impedanceValidity->setFitOptions(rhoPlusOptions);
   linkTensorMasksAction->setChecked(options.linkTensorMasks);
   const QSignalBlocker phaseBlock(ui->actionPhase_wrap);
   const QSignalBlocker namesBlock(ui->actionShow_station_names);
@@ -368,9 +403,15 @@ void MainWindow::updateMap()
 
 void MainWindow::updatePlots(bool rescaleAxes)
 {
+  // Designer-connected actions can fire while the plots are being constructed.
+  if(!rhoPlusOverlay) return;
+  rhoPlusOverlay->hide();
   QListWidgetItem* item = ui->stationList->currentItem();
-  if(item == nullptr)
+  if(item == nullptr) {
+    rhoPlusOverlay->update(nullptr,rhoPlusAction->isChecked(),ui->actionPhase_wrap->isChecked(),
+      plotHandlers[0]->component_visibility(),plotHandlers[1]->component_visibility(),rhoPlusOptions);
     return;
+  }
 
   MTStationData& data = mtSurvey->get_station_data(item->text().toStdString());
   for(auto &ph: plotHandlers) {
@@ -405,6 +446,8 @@ void MainWindow::updatePlots(bool rescaleAxes)
 
   ui->statusBar->showMessage("# frequencies: " + QString("%1").arg(data.frequencies().size()) +
                              "\t\t\t# path: " + data.file_path().c_str());
+  rhoPlusOverlay->update(&data,rhoPlusAction->isChecked(),ui->actionPhase_wrap->isChecked(),
+    plotHandlers[0]->component_visibility(),plotHandlers[1]->component_visibility(),rhoPlusOptions);
 }
 
 void MainWindow::stationSelected(const QCPDataSelection &selection)
@@ -574,7 +617,13 @@ void MainWindow::on_actionLoad_project_triggered()
         ia >> legacyPlotOptions;
         static_cast<PlotOptionsV6 &>(plotOptions) = legacyPlotOptions;
       }
-      else if(version >= 7)
+      else if(version == 7)
+      {
+        PlotOptionsV7 legacyPlotOptions;
+        ia >> legacyPlotOptions;
+        static_cast<PlotOptionsV7 &>(plotOptions) = legacyPlotOptions;
+      }
+      else if(version >= 8)
       {
         ia >> plotOptions;
       }
@@ -1026,6 +1075,8 @@ void MainWindow::refreshAnalysisWindows()
   if(fitStatistics) fitStatistics->setData(mtSurvey, mtResponses);
   if(periodMaps) periodMaps->setData(mtSurvey, mtResponses);
   if(periodLayout) periodLayout->setData(mtSurvey);
+  if(impedanceValidity) impedanceValidity->setData(mtSurvey);
+  if(surveyAverage) surveyAverage->setData(mtSurvey);
 }
 
 void MainWindow::openPeriodLayout()

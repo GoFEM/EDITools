@@ -14,6 +14,8 @@
 #include <QCheckBox>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
+#include <QSpinBox>
+#include <QEventLoop>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
@@ -228,7 +230,7 @@ void export_report(MainWindow &window, const QString &path,
     if(!dialog || !dialog->isVisible()) return;
     check(widget<QComboBox>(*dialog, "reportResponse")->currentData().toString() ==
           (responses->currentItem() ? responses->currentItem()->toolTip() : QString()), "Report should select current response");
-    check(widget<QToolButton>(*dialog, "reportHelp")->toolTip().contains("overview"), "Report help missing");
+    check(widget<QCheckBox>(*dialog, "reportOverview")->toolTip().contains("overview"), "Report overview tooltip missing");
     auto *save = widget<QDialogButtonBox>(*dialog, "")->button(QDialogButtonBox::Save);
     widget<QCheckBox>(*dialog, "reportOverview")->setChecked(false);
     widget<QCheckBox>(*dialog, "reportStationPages")->setChecked(false);
@@ -1232,6 +1234,93 @@ struct LegacyOptionsV6 {
   }
 };
 
+struct LegacyOptionsV7 : LegacyOptionsV6 {
+  bool linkTensorMasks = true;
+  template<class Archive> void serialize(Archive &ar, const unsigned int version) {
+    LegacyOptionsV6::serialize(ar,version); ar & linkTensorMasks;
+  }
+};
+void rho_plus_overlay(const QString &directory)
+{
+  const auto input=directory+"/rho-guide.gofem", project=directory+"/rho-guide.mtd";
+  std::ostringstream text; text << std::setprecision(17);
+  const double pi=std::acos(-1.);
+  for(const auto &name:{std::string("GUIDE"),std::string("OUTLIER")}) for(int i=0;i<12;++i) {
+    const double f=std::pow(10.,-2.+4.*i/11), z=std::sqrt(pi*f*4e-7*pi*100.);
+    for(const auto &part:{"Real","Imag"}) for(const auto &component:{"xy","yx"}) {
+      double value=component==std::string("xy")?z:-z;
+      if(name=="OUTLIER" && i==5 && component==std::string("xy") && part==std::string("Imag")) value=-value;
+      text<<part<<'Z'<<component<<' '<<f<<" Plane_wave "<<name<<' '<<value<<' '<<.02*z<<'\n';
+    }
+  }
+  write(input,text.str());
+  auto survey=std::make_shared<MTSurveyData>(); survey->load_from_gofem(input.toStdString());
+  {
+    std::ofstream file(project.toStdString(),std::ios::binary); boost::archive::binary_oarchive archive(file);
+    const std::uint32_t magic=0x45444954, version=7;
+    LegacyOptionsV7 options; for(auto &visible:options.visible) visible.fill(true);
+    archive << magic << version << survey << std::map<std::string,MTSurveyData>{} << options;
+  }
+  auto settle=[] { QEventLoop loop; QTimer::singleShot(300,&loop,&QEventLoop::quit); loop.exec(); };
+  MainWindow window; file_action(window,"actionLoad_project",{project}); select_station(window,"GUIDE");
+  auto *toggle=widget<QAction>(window,"actionShow_rho_plus"); check(!toggle->isChecked(),"Legacy project enabled rho+ guides");
+  auto *rho=widget<QCustomPlot>(window,"plot11"), *phase=widget<QCustomPlot>(window,"plot12");
+  auto *xy=widget<QCPCurve>(*rho,"rhoPlusXY"), *yxPhase=widget<QCPCurve>(*phase,"rhoPlusYX");
+  rho->xAxis->setRange(.02,20.); rho->yAxis->setRange(10.,1000.);
+  const auto xRange=rho->xAxis->range(), yRange=rho->yAxis->range();
+  toggle->setChecked(true); settle();
+  check(xy->visible() && xy->data()->size()==201,"Rho+ guide missing");
+  check(xy->pen().color()==PlotColors::componentColors()[1] && xy->pen().widthF()<1. && xy->pen().style()==Qt::DashLine,"Guide style differs from component");
+  check(xy->selectable()==QCP::stNone && rho->legend->itemCount()==4 && rho->graphCount()==12,"Guide affects masking or legend layout");
+  check(rho->xAxis->range()==xRange && rho->yAxis->range()==yRange,"Fitting changed zoom");
+  check(std::abs(xy->data()->constBegin()->value-100.)<.01 &&
+        std::abs(yxPhase->data()->constBegin()->value-45.)<.01,"Incorrect half-space guide");
+  const double originalStart=xy->data()->constBegin()->key;
+  file_action(window,"actionLoad_responses",{input}); settle();
+  check(!rho->graph(9)->data()->isEmpty() && xy->visible(),"Loaded response and rho+ cannot coexist");
+  auto *menu=widget<QMenu>(*rho,"");
+  rho->graph(1)->setSelection(QCPDataSelection(QCPDataRange(0,1)));
+  menu->actions().front()->trigger(); settle();
+  check(xy->data()->constBegin()->key>originalStart && rho->graph(5)->data()->size()==1,"Masking did not refit the guide");
+  check(!rho->graph(9)->data()->isEmpty(),"Masking cleared loaded responses");
+  rho->graph(5)->setSelection(QCPDataSelection(QCPDataRange(0,1)));
+  menu->actions()[2]->trigger(); settle();
+  near(xy->data()->constBegin()->key,originalStart);
+  component_box(*rho,1)->setChecked(false);
+  check(!xy->visible() && widget<QCPCurve>(*phase,"rhoPlusXY")->visible(),"Guide ignored independent component visibility");
+  component_box(*rho,1)->setChecked(true);
+  widget<QAction>(window,"actionPhase_wrap")->setChecked(false);
+  check(std::abs(yxPhase->data()->constBegin()->value+135.)<.01,"Guide ignored phase wrapping");
+  widget<QAction>(window,"actionImpedance_validity")->trigger();
+  auto *validity=widget<QDialog>(window,"impedanceValidityWindow");
+  check(!validity->findChild<QDoubleSpinBox *>("validityErrorFloor"),"Rho+ still has an independent error floor");
+  widget<QSpinBox>(*validity,"validityGridDensity")->setValue(16); settle();
+  validity->hide();
+  widget<QAction>(window,"actionSave_project")->trigger();
+  MainWindow restored; file_action(restored,"actionLoad_project",{project}); select_station(restored,"GUIDE"); settle();
+  check(widget<QAction>(restored,"actionShow_rho_plus")->isChecked(),"Project lost rho+ visibility");
+  widget<QAction>(restored,"actionImpedance_validity")->trigger();
+  auto *restoredValidity=widget<QDialog>(restored,"impedanceValidityWindow");
+  check(!restoredValidity->findChild<QDoubleSpinBox *>("validityErrorFloor"),"Project restored an obsolete floor control");
+  check(widget<QSpinBox>(*restoredValidity,"validityGridDensity")->value()==16,"Project lost rho+ grid density");
+  auto *list=widget<QListWidget>(window,"stationList"); list->currentItem()->setCheckState(Qt::Unchecked); settle();
+  check(!xy->visible(),"Disabled station retained a guide");
+  list->currentItem()->setCheckState(Qt::Checked); settle(); check(xy->visible(),"Re-enabled station lost its guide");
+  toggle->setChecked(false); check(!xy->visible() && !yxPhase->visible(),"Overlay switch ignored");
+  select_station(window,"OUTLIER");
+  widget<QAction>(window,"actionImpedance_validity")->trigger();
+  auto *preview=widget<QCheckBox>(*validity,"validityPreviewMasks");
+  auto *apply=widget<QPushButton>(*validity,"validityApplyMasks");
+  auto *undo=widget<QPushButton>(*validity,"validityUndoMasks");
+  preview->setChecked(true); settle(); check(apply->isEnabled(),"Main-window masking preview missing");
+  widget<QAction>(window,"actionLink_tensor_masks")->setChecked(false);
+  check(!apply->isEnabled(),"Link setting left a stale masking preview");
+  preview->setChecked(true); settle(); apply->click();
+  check(rho->graph(5)->data()->size()>0 && phase->graph(5)->data()->size()>0,"Auto-masking did not refresh main plots");
+  check(undo->isEnabled(),"Main-window refresh lost undo");
+  undo->click(); check(rho->graph(5)->data()->isEmpty() && phase->graph(5)->data()->isEmpty(),"Undo did not refresh main plots");
+}
+
 void workflow(const QString &directory)
 {
   const QString observations = directory + "/observed.gofem";
@@ -1706,7 +1795,7 @@ int main(int argc, char **argv)
   try {
     check(directory.isValid(), "No temporary directory");
     if(argc >= 3) real_run(argv[1], argv[2], argc >= 4 ? argv[3] : QString(), argc >= 5 && QString(argv[4]) == "mixed");
-    else { map_backgrounds(directory.path()); linked_mask_tests(directory.path()); edi_import_tests(directory.path()); statistics(directory.path()); gofem_responses(directory.path()); period_maps(directory.path()); period_resampling_tests(directory.path()); resampling_project_workflow(directory.path()); survey_reports(directory.path()); workflow(directory.path()); }
+    else { rho_plus_overlay(directory.path()); map_backgrounds(directory.path()); linked_mask_tests(directory.path()); edi_import_tests(directory.path()); statistics(directory.path()); gofem_responses(directory.path()); period_maps(directory.path()); period_resampling_tests(directory.path()); resampling_project_workflow(directory.path()); survey_reports(directory.path()); workflow(directory.path()); }
     std::cout << "Response import, curves and project workflow checks passed.\n";
   } catch(const std::exception &e) {
     std::cerr << e.what() << '\n';

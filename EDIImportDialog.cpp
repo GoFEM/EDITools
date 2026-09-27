@@ -1,6 +1,6 @@
 #include "EDIImportDialog.h"
 #include "include/EDIPeriodMerge.h"
-#include "include/HelpButton.h"
+#include "include/ToolTips.h"
 #include <QCheckBox>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -18,16 +18,19 @@ bool reviewEDIImport(QWidget *parent, MTSurveyData &candidate,
   auto *summary = new QLabel(&dialog); summary->setObjectName("ediImportSummary"); summary->setWordWrap(true); layout->addWidget(summary);
   auto *controls = new QHBoxLayout;
   auto *merge = new QCheckBox(QObject::tr("Merge close periods"), &dialog); merge->setObjectName("ediMergePeriods"); controls->addWidget(merge);
-  controls->addWidget(UiHelp::label(&dialog, QObject::tr("Tolerance (%)"), QObject::tr("A group is merged only if (longest period - shortest period) / shortest period is strictly below this percentage. This limits the whole group, so chains of nearby values cannot bridge a larger gap.")));
-  auto *tolerance = new QDoubleSpinBox(&dialog); tolerance->setObjectName("ediPeriodTolerance"); tolerance->setDecimals(4); tolerance->setRange(0., 5.); tolerance->setSingleStep(.01); tolerance->setValue(.1); controls->addWidget(tolerance); controls->addStretch(); layout->addLayout(controls);
-  layout->addWidget(UiHelp::label(&dialog, QObject::tr("Period groups"), QObject::tr("Statistics include existing survey stations and new stations. Each row shows a nearby-period group involving new data. Merging gives new stations a shared stored frequency, using the lower median distinct period or an existing survey period. It does not average measurements or interpolate. Z, tipper, phase tensor, errors and masks are preserved; apparent resistivity and its error are adjusted to the assigned frequency. Groups with multiple samples from one station or conflicting existing periods stay unchanged. Existing stations and EDI files are never modified. Leave Merge close periods off to keep all original frequencies."), "ediImportHelp"));
+  auto *tolerance = new QDoubleSpinBox(&dialog); tolerance->setObjectName("ediPeriodTolerance"); tolerance->setDecimals(4); tolerance->setRange(0., 5.); tolerance->setSingleStep(.01); tolerance->setValue(.1);
+  controls->addWidget(ToolTips::label(tolerance, QObject::tr("Tolerance (%)"), QObject::tr("A group is merged only if (longest period - shortest period) / shortest period is strictly below this percentage. This limits the whole group, so chains of nearby values cannot bridge a larger gap.")));
+  controls->addWidget(tolerance); controls->addStretch(); layout->addLayout(controls);
   auto *table = new QTableWidget(&dialog); table->setObjectName("ediPeriodGroups"); table->setColumnCount(6);
+  ToolTips::set(table, QObject::tr("Statistics include existing survey stations and new stations. Each row shows a nearby-period group involving new data. Merging gives new stations a shared stored frequency, using the lower median distinct period or an existing survey period. It does not average measurements or interpolate. Z, tipper, phase tensor, errors and masks are preserved; apparent resistivity and its error are adjusted to the assigned frequency. Groups with multiple samples from one station or conflicting existing periods stay unchanged. Existing stations and EDI files are never modified. Leave Merge close periods off to keep all original frequencies."));
+  ToolTips::set(merge, QObject::tr("Assign shared periods to nearby samples without averaging or interpolating. Preserve transfer functions, errors and masks; adjust apparent resistivity to the assigned frequency. Existing stations and EDI files remain unchanged. Leave off to retain original frequencies."));
   table->setHorizontalHeaderLabels({QObject::tr("Min (s)"), QObject::tr("Max (s)"), QObject::tr("Target (s)"), QObject::tr("Periods"), QObject::tr("Stations"), QObject::tr("Action")});
   table->setEditTriggers(QAbstractItemView::NoEditTriggers); table->setSelectionBehavior(QAbstractItemView::SelectRows); table->verticalHeader()->hide();
   table->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents); table->horizontalHeader()->setStretchLastSection(true); layout->addWidget(table);
   if(!duplicates.empty()) {
     QStringList names; for(const auto &name: duplicates) names.push_back(QString::fromStdString(name));
-    layout->addWidget(UiHelp::label(&dialog, QObject::tr("%1 duplicate stations skipped").arg(duplicates.size()), names.join('\n')));
+    auto *skipped = new QLabel(QObject::tr("%1 duplicate stations skipped").arg(duplicates.size()), &dialog);
+    ToolTips::set(skipped, names.join('\n')); layout->addWidget(skipped);
   }
   auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
   buttons->button(QDialogButtonBox::Ok)->setText(QObject::tr("Import")); buttons->button(QDialogButtonBox::Ok)->setEnabled(!incoming.empty()); layout->addWidget(buttons);

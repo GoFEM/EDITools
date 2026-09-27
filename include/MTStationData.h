@@ -107,6 +107,9 @@ public:
   void calculate_phase_tensor();
 
   void set_error_floor(double val);
+  // Refresh derived errors from the current effective impedance errors.
+  // Does not change impedance/tipper errors or assign an error floor.
+  void propagate_rho_phase_error();
 
   // Optional UI linkage follows Phi = Re(Z)^-1 Im(Z): a complex Z component
   // relates to every PT entry, and any PT entry to all complex Z components.
@@ -132,7 +135,6 @@ private:
 
   std::vector<bool> &mask_for(RealDataType type);
   void apply_error_floor();
-  void propagate_rho_phase_error();
   void propagate_phase_tensor_error();
 
   template<class Archive>

@@ -33,6 +33,7 @@
 #include "include/MTSurveyData.h"
 #include "include/MapPlot.h"
 #include "include/MTDataPlot.h"
+#include "include/ImpedanceAnalysis.h"
 
 namespace Ui {
 class MainWindow;
@@ -41,6 +42,9 @@ class MapBackground;
 class FitStatisticsWindow;
 class PeriodMapWindow;
 class PeriodLayoutWindow;
+class ImpedanceValidityWindow;
+class SurveyAverageWindow;
+class RhoPlusOverlay;
 
 class MainWindow : public QMainWindow
 {
@@ -126,13 +130,26 @@ private:
     }
   };
 
-  struct PlotOptions : PlotOptionsV6
+  struct PlotOptionsV7 : PlotOptionsV6
   {
     bool linkTensorMasks = true;
     template<class Archive> void serialize(Archive &ar, const unsigned int version)
     {
       PlotOptionsV6::serialize(ar, version);
       ar & linkTensorMasks;
+    }
+  };
+
+  struct PlotOptions : PlotOptionsV7
+  {
+    bool rhoPlus = false;
+    unsigned rhoPlusGridDensity = 12;
+    template<class Archive> void serialize(Archive &ar, const unsigned int version)
+    {
+      PlotOptionsV7::serialize(ar, version);
+      // Keep the obsolete version-8 field readable, but never use it.
+      double legacyErrorFloor=0.;
+      ar & rhoPlus & legacyErrorFloor & rhoPlusGridDensity;
     }
   };
 
@@ -235,6 +252,11 @@ private:
   FitStatisticsWindow *fitStatistics = nullptr;
   PeriodMapWindow *periodMaps = nullptr;
   PeriodLayoutWindow *periodLayout = nullptr;
+  ImpedanceValidityWindow *impedanceValidity = nullptr;
+  SurveyAverageWindow *surveyAverage = nullptr;
+  QAction *rhoPlusAction;
+  std::unique_ptr<RhoPlusOverlay> rhoPlusOverlay;
+  ImpedanceAnalysis::RhoPlusOptions rhoPlusOptions;
   void openPeriodLayout();
   void exportSurveyReport();
   void openSurveyCopy(std::shared_ptr<MTSurveyData> survey);

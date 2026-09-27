@@ -1,5 +1,5 @@
 #include "PeriodLayoutWindow.h"
-#include "include/HelpButton.h"
+#include "include/ToolTips.h"
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -61,36 +61,39 @@ PeriodLayoutWindow::PeriodLayoutWindow(QWidget *parent, std::function<void(std::
   auto *controls = new QGridLayout;
   gridMode = new QComboBox(this); gridMode->setObjectName("layoutGridMode");
   gridMode->addItems({tr("Logarithmic grid"), tr("Reference station"), tr("Custom periods")});
-  controls->addWidget(UiHelp::label(this, tr("Grid:"), tr("Choose a logarithmic grid, the periods of a reference station, or a custom list in seconds. Custom periods accept spaces, commas or semicolons and are sorted and deduplicated. A logarithmic grid includes both limits; its last interval may be shorter."), "layoutGridHelp"), 0, 0); controls->addWidget(gridMode, 0, 1);
+  controls->addWidget(ToolTips::label(gridMode, tr("Grid:"), tr("Choose a logarithmic grid, the periods of a reference station, or a custom list in seconds. Custom periods accept spaces, commas or semicolons and are sorted and deduplicated. A logarithmic grid includes both limits; its last interval may be shorter.")), 0, 0); controls->addWidget(gridMode, 0, 1);
   minimum = new QLineEdit("0.01", this); minimum->setObjectName("layoutMinimum");
+  ToolTips::set(minimum, tr("Shortest target period in seconds. Scientific notation is accepted. No values are extrapolated beyond each component’s source range."));
   maximum = new QLineEdit("1000", this); maximum->setObjectName("layoutMaximum");
+  ToolTips::set(maximum, tr("Longest target period in seconds. Scientific notation is accepted. No values are extrapolated beyond each component’s source range."));
   density = new QSpinBox(this); density->setObjectName("layoutDensity"); density->setRange(1, 100); density->setValue(6);
   controls->addWidget(new QLabel(tr("Min (s):"), this), 0, 2); controls->addWidget(minimum, 0, 3);
   controls->addWidget(new QLabel(tr("Max (s):"), this), 0, 4); controls->addWidget(maximum, 0, 5);
-  controls->addWidget(UiHelp::label(this, tr("Pts/decade:"), tr("Number of grid intervals per tenfold increase in period. Higher density creates more estimates, not more independent measurements."), "layoutDensityHelp"), 0, 6); controls->addWidget(density, 0, 7);
+  controls->addWidget(ToolTips::label(density, tr("Pts/decade:"), tr("Number of grid intervals per tenfold increase in period. Higher density creates more estimates, not more independent measurements.")), 0, 6); controls->addWidget(density, 0, 7);
   reference = new QComboBox(this); reference->setObjectName("layoutReference");
+  ToolTips::set(reference, tr("Use this station’s stored periods as the common target grid."));
   controls->addWidget(new QLabel(tr("Reference:"), this), 1, 0); controls->addWidget(reference, 1, 1);
   custom = new QLineEdit(this); custom->setObjectName("layoutCustomPeriods");
   custom->setPlaceholderText(tr("e.g. 0.1, 1, 10"));
+  ToolTips::set(custom, tr("Target periods in seconds, separated by spaces, commas or semicolons. Scientific notation is accepted. Values are sorted and duplicates removed."));
   controls->addWidget(new QLabel(tr("Periods (s):"), this), 1, 2); controls->addWidget(custom, 1, 3, 1, 5);
   gap = new QDoubleSpinBox(this); gap->setObjectName("layoutMaximumRatio");
   gap->setDecimals(3); gap->setRange(1.001, 10000.); gap->setValue(2.); gap->setKeyboardTracking(false);
   gap->setToolTip(tr("Maximum ratio of upper to lower bounding periods. A limit of 2 allows 1–2 s, but blocks 1–10 s, including targets near either endpoint."));
-  controls->addWidget(UiHelp::label(this, tr("Max gap ratio:"), gap->toolTip(), "layoutGapHelp"), 2, 0, 1, 3); controls->addWidget(gap, 2, 3);
+  controls->addWidget(ToolTips::label(gap, tr("Max gap ratio:"), gap->toolTip()), 2, 0, 1, 3); controls->addWidget(gap, 2, 3);
   barriers = new QCheckBox(tr("Respect masks"), this);
   barriers->setObjectName("layoutMaskBarriers"); barriers->setChecked(true);
   auto *maskRow = new QHBoxLayout; maskRow->addWidget(barriers);
-  maskRow->addWidget(UiHelp::button(this, tr("Mask barriers"), tr("Masked samples block interpolation across them. Turn this off to bridge masks within the gap limit. Exact masked samples remain masked in either mode."), "layoutMasksHelp")); maskRow->addStretch();
+  ToolTips::set(barriers, tr("Masked samples block interpolation across them. Turn this off to bridge masks within the gap limit. Exact masked samples remain masked in either mode."));
+  maskRow->addStretch();
   controls->addLayout(maskRow, 2, 4, 1, 4);
   layout->addLayout(controls);
   auto *filters = new QHBoxLayout;
   filters->addWidget(new QLabel(tr("Component:"), this));
   group = new QComboBox(this); group->setObjectName("layoutGroup"); group->addItems({tr("Impedance"), tr("Tipper"), tr("Phase tensor")}); filters->addWidget(group);
   component = new QComboBox(this); component->setObjectName("layoutComponent"); filters->addWidget(component);
-  component->setToolTip(tr("Impedance and tipper availability requires both real and imaginary parts. Matching partial source samples are retained, but do not form interpolation endpoints."));
-  filters->addWidget(UiHelp::button(this, tr("Preview component"), tr("These filters change the preview only. All components are resampled. Impedance and tipper endpoints need both real and imaginary parts; exact partial samples are retained."), "layoutComponentHelp")); filters->addStretch();
-  filters->addWidget(UiHelp::label(this, tr("Method"), tr("Real and imaginary values are interpolated linearly against log(period), with no extrapolation. Derived quantities are recomputed from impedance; tensor-only stations use direct tensor interpolation. Standard errors use weighted endpoint errors. Interpolated samples share source information and are not independent measurements."), "layoutMethodHelp"));
-  filters->addWidget(UiHelp::label(this, tr("Coverage"), tr("Coverage counts enabled stations with a complete component at each exact period. Source shows the original periods; Original on grid counts original samples at target periods; Usable on grid includes interpolated estimates. An increase means more estimates on the chosen grid, not new measurements or a wider valid period range.\nTarget markers: Original = retained sample; Estimated = interpolation; Derived = calculated from impedance. Hover over a target for its source periods or the reason it was skipped. Counts in the preview summary span all complex and tensor components."), "layoutCoverageHelp"));
+  for(auto *control: {group, component}) ToolTips::set(control, tr("These filters change the preview only. All components are resampled. Impedance and tipper endpoints need both real and imaginary parts; exact partial samples are retained."));
+  filters->addStretch();
   layout->addLayout(filters);
   auto *tabs = new QTabWidget(this); tabs->setObjectName("layoutTabs");
   auto addPlot = [&](const char *name) {
@@ -108,6 +111,10 @@ PeriodLayoutWindow::PeriodLayoutWindow(QWidget *parent, std::function<void(std::
   };
   sourcePlot = addPlot("layoutSourcePlot"); targetPlot = addPlot("layoutTargetPlot"); coverage = addPlot("layoutCoveragePlot");
   tabs->addTab(sourcePlot, tr("Source layout")); tabs->addTab(targetPlot, tr("Target preview")); tabs->addTab(coverage, tr("Coverage"));
+  ToolTips::set(coverage, tr("Coverage counts enabled stations with a complete component at each exact period. Source shows the original periods; Original on grid counts original samples at target periods; Usable on grid includes interpolated estimates. An increase means more estimates on the chosen grid, not new measurements or a wider valid period range.\nTarget markers: Original = retained sample; Estimated = interpolation; Derived = calculated from impedance. Hover over a target for its source periods or the reason it was skipped. Counts in the preview summary span all complex and tensor components."));
+  tabs->setTabToolTip(2, coverage->toolTip());
+  const auto interpolationHelp = tr("Real and imaginary values are interpolated linearly against log(period), with no extrapolation. Derived quantities are recomputed from impedance; tensor-only stations use direct tensor interpolation. Standard errors use weighted endpoint errors. Interpolated samples share source information and are not independent measurements.");
+  tabs->setTabToolTip(1, interpolationHelp);
   counts = new QTableWidget(this); counts->setObjectName("layoutCounts"); counts->setColumnCount(7);
   counts->setHorizontalHeaderLabels({tr("Station"), tr("Source"), tr("Gaps"), tr("Original"), tr("Estimated"), tr("Missing"), tr("Enabled")});
   const QStringList headerHelp{tr("Station name."), tr("Active source samples for the selected component."), tr("Adjacent valid source periods exceeding the maximum gap ratio."), tr("Existing samples matching a target period."), tr("Interpolated values or values derived from impedance."), tr("Unavailable, masked or incomplete target samples."), tr("Whether this station is enabled; only enabled stations contribute to coverage.")};
@@ -126,9 +133,12 @@ PeriodLayoutWindow::PeriodLayoutWindow(QWidget *parent, std::function<void(std::
   actions->addStretch();
   actions->addWidget(history);
   apply = new QPushButton(tr("Create survey"), this); apply->setObjectName("layoutApply"); actions->addWidget(apply);
-  actions->addWidget(UiHelp::button(this, tr("Survey copies and audit"), tr("Create survey opens an independent resampled survey in a new window. The original remains open and its file is unchanged. Saving the new project embeds a source snapshot and audit; no separate backup file is created automatically. Open source reopens that snapshot. Preview CSV exports the current calculation; Saved audit exports the saved resampling operation, before later edits."), "layoutSourceHelp"));
   auto *close = new QPushButton(tr("Close"), this); actions->addWidget(close); layout->addLayout(actions);
-  apply->setToolTip(tr("Open an independent survey in a new window. Save it as a new project; the original remains open and a source snapshot is retained in the new project."));
+  ToolTips::set(apply, tr("Open an independent resampled survey in a new window. The original remains open and its file is unchanged. Saving the new project embeds a source snapshot and audit; no separate backup file is created automatically."));
+  ToolTips::set(previewButton, interpolationHelp);
+  ToolTips::set(openSource, tr("Open the source snapshot retained in this resampled project, in a separate window."));
+  ToolTips::set(report, tr("Export the current preview calculation to CSV."));
+  ToolTips::set(sourceReport, tr("Export the saved resampling operation, before subsequent edits or masking."));
   connect(close, &QPushButton::clicked, this, &QDialog::hide);
   connect(previewButton, &QPushButton::clicked, this, &PeriodLayoutWindow::preview);
   connect(apply, &QPushButton::clicked, this, [this] { if(result && createSurvey) createSurvey(std::make_shared<MTSurveyData>(*result)); });
@@ -139,7 +149,7 @@ PeriodLayoutWindow::PeriodLayoutWindow(QWidget *parent, std::function<void(std::
   });
   connect(gridMode, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this] { invalidate(); });
   connect(reference, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this] { invalidate(); });
-  for(auto *edit: {minimum, maximum, custom}) connect(edit, &QLineEdit::textChanged, this, [this, edit] { edit->setToolTip(edit->text()); invalidate(); });
+  for(auto *edit: {minimum, maximum, custom}) connect(edit, &QLineEdit::textChanged, this, [this] { invalidate(); });
   connect(density, QOverload<int>::of(&QSpinBox::valueChanged), this, [this] { invalidate(); });
   connect(gap, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this] { invalidate(); });
   connect(barriers, &QCheckBox::toggled, this, [this] { invalidate(); });
@@ -193,7 +203,7 @@ void PeriodLayoutWindow::setData(const std::shared_ptr<MTSurveyData> &data)
     if(!periods.empty()) {
       const QSignalBlocker lo(minimum), hi(maximum);
       minimum->setText(QString::number(periods.front(), 'g', 17)); maximum->setText(QString::number(periods.back(), 'g', 17));
-      for(auto *edit: {minimum, maximum}) { edit->setCursorPosition(0); edit->setToolTip(edit->text()); }
+      for(auto *edit: {minimum, maximum}) edit->setCursorPosition(0);
     }
   }
   const bool resampled = survey && survey->resampling_source();

@@ -7,7 +7,7 @@
 #include "include/TipperPlot.h"
 #include "include/PhaseTensorPlot.h"
 #include "include/FitStatistics.h"
-#include "include/HelpButton.h"
+#include "include/ToolTips.h"
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
@@ -481,12 +481,18 @@ void show_dialog(QWidget *parent, const MTSurveyData &survey, const std::map<std
   sections->addWidget(overview, 0, 0); sections->addWidget(stations, 0, 1);
   sections->addWidget(ptMaps, 1, 0); sections->addWidget(induction, 1, 1);
   form->addRow(tr("Include:"), sections);
+  ToolTips::set(overview, tr("Survey overview with a station map, period coverage and response fit statistics. Full / Part. / Mask / Miss. count complete, partial, masked and missing periods per data type, independently of plot visibility. UTM origin coordinates explain map offsets."));
+  ToolTips::set(stations, tr("One page per station with plots and a locator map. Retains the current phase wrapping and fixed GUI Y ranges."));
+  ToolTips::set(visible, tr("Include only components currently visible in station plots. Leave off to include all components."));
+  ToolTips::set(errors, tr("Show error bars on the station plots."));
+  const auto mapHelp = tr("One map per period and dataset; selected phase-tensor ellipses and induction vectors appear together. Uses the period map window’s sizes, colors, tolerance, station labels and vector convention. Masked, disabled, missing and unmatched values are omitted. UTM origin coordinates explain map offsets.");
+  ToolTips::set(ptMaps, mapHelp); ToolTips::set(induction, mapHelp);
   auto *tipper = new QComboBox(&dialog); tipper->setObjectName("reportTipperStyle");
   tipper->addItems({tr("Lines"), tr("Arrows")}); tipper->setCurrentIndex(defaults.tipperArrows ? 1 : 0);
-  form->addRow(tr("Station tippers:"), tipper);
+  form->addRow(ToolTips::label(tipper, tr("Station tippers:"), tr("Lines connect usable observations; masked samples break the lines. Arrows use the current station plot convention.")), tipper);
   auto *mapData = new QComboBox(&dialog); mapData->setObjectName("reportMapData");
   mapData->addItems({tr("Observed"), tr("Response"), tr("Both")}); mapData->setCurrentIndex(int(defaults.mapData));
-  form->addRow(tr("Map data:"), mapData);
+  form->addRow(ToolTips::label(mapData, tr("Map data:"), tr("Choose observed data, the selected computed response, or separate pages for both.")), mapData);
   std::set<double> surveyPeriods;
   for(const auto &name: survey.get_stations_names()) for(double f: survey.get_station_data(name).frequencies())
     if(std::isfinite(f) && f > 0.) surveyPeriods.insert(1. / f);
@@ -497,8 +503,9 @@ void show_dialog(QWidget *parent, const MTSurveyData &survey, const std::map<std
   auto *periods = new QLineEdit(initialPeriods.isEmpty() ? QString::number(initialPeriod, 'g', 17) : initialPeriods.join(", "), &dialog);
   periods->setObjectName("reportMapPeriods");
   auto *all = new QPushButton(tr("All"), &dialog); all->setObjectName("reportAllPeriods");
+  ToolTips::set(all, tr("Use every distinct period in the survey for the map pages."));
   auto *periodRow = new QHBoxLayout; periodRow->addWidget(periods); periodRow->addWidget(all);
-  form->addRow(UiHelp::label(&dialog, tr("Periods (s):"), tr("Comma-separated map periods. One page per period and dataset, with selected phase-tensor ellipses and induction vectors together on the same map. Each station uses its nearest period within the map window's tolerance; no interpolation. All selects the survey's exact periods."), "reportPeriodsHelp"), periodRow);
+  form->addRow(ToolTips::label(periods, tr("Periods (s):"), tr("Comma-separated map periods. One page per period and dataset, with selected phase-tensor ellipses and induction vectors together on the same map. Each station uses its nearest period within the map window's tolerance; no interpolation. All selects the survey's exact periods.")), periodRow);
   QObject::connect(all, &QPushButton::clicked, &dialog, [&] { periods->setText(allPeriods.join(", ")); });
   auto *real = checkbox(tr("Real"), "reportRealArrows", defaults.mapSettings.real);
   auto *imaginary = checkbox(tr("Imaginary"), "reportImagArrows", defaults.mapSettings.imaginary);
@@ -507,10 +514,10 @@ void show_dialog(QWidget *parent, const MTSurveyData &survey, const std::map<std
   int mapLayers = defaults.mapLayers;
   form->addRow(tr("Geography:"), MapBackground::button(&dialog, mapLayers, [&](int mask) { mapLayers = mask; }, true));
   layout->addLayout(form);
-  layout->addWidget(UiHelp::label(&dialog, tr("Report"), tr("Choose a survey overview, one page per station, and/or maps at selected periods. Station plots retain current phase wrapping and fixed GUI Y ranges. All components are included unless Visible components only is checked. Tipper lines connect usable observations; arrows use the station plot convention. Map pages inherit the period map window's sizes, colors, tolerance, station labels and vector convention. Maps omit masked, disabled, missing and unmatched values. UTM origin coordinates describe the offsets on each map. Full / Part. / Mask / Miss. count complete, partial, masked and missing periods per data type, independent of plot visibility. Export leaves your survey and current plots unchanged."), "reportHelp"));
   auto *pages = new QLabel(&dialog); pages->setObjectName("reportPageCount"); layout->addWidget(pages);
   auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog); layout->addWidget(buttons);
   buttons->button(QDialogButtonBox::Save)->setText(tr("Export…"));
+  ToolTips::set(buttons->button(QDialogButtonBox::Save), tr("Choose a PDF destination and export the selected pages. Your survey and current plots remain unchanged."));
   auto updatePages = [&] {
     const bool maps = ptMaps->isChecked() || induction->isChecked();
     for(auto *control: QList<QWidget *>{mapData, periods, all}) control->setEnabled(maps);

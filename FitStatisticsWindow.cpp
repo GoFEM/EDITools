@@ -2,7 +2,7 @@
 #include "include/PlotColorMaps.h"
 #include "include/FileLabels.h"
 #include "FitStatisticsWindow.h"
-#include "include/HelpButton.h"
+#include "include/ToolTips.h"
 #include <QDialogButtonBox>
 #include <QDoubleValidator>
 #include <QLineEdit>
@@ -67,10 +67,10 @@ FitStatisticsWindow::FitStatisticsWindow(QWidget *parent, std::function<void()> 
   resize(1450, 940);
   auto *layout = new QVBoxLayout(this);
   auto *controls = new QHBoxLayout;
-  controls->addWidget(UiHelp::label(this, tr("Errors:"), tr("nRMS = √mean(((predicted − observed) / error)²). Choose inversion/response errors or current observation errors, including error floors. Only matching, unmasked data are compared. N is matched / available response scalars; the dotted line marks nRMS = 1."), "fitErrorsHelp"));
   errorSource = new QComboBox(this);
   errorSource->setObjectName("fitErrorSource");
   errorSource->addItems({tr("Response"), tr("Observed")});
+  controls->addWidget(ToolTips::label(errorSource, tr("Errors:"), tr("nRMS = √mean(((predicted − observed) / error)²). Choose inversion/response errors or current observation errors, including error floors. Only matching, unmasked data are compared. N is matched / available response scalars; the dotted line marks nRMS = 1.")));
   controls->addWidget(errorSource);
   auto *refreshButton = new QPushButton(tr("Refresh"), this);
   controls->addWidget(refreshButton);
@@ -141,10 +141,10 @@ FitStatisticsWindow::FitStatisticsWindow(QWidget *parent, std::function<void()> 
   auto *colorControls = new QWidget(spatial);
   auto *colorLayout = new QGridLayout(colorControls);
   colorLayout->setContentsMargins(0, 0, 0, 0);
-  colorLayout->addWidget(UiHelp::label(colorControls, tr("Colormap:"), tr("Choose two checked responses above to compare. Both panels share color limits. Auto fits the checked responses; manual limits clip to the endpoint colors. Grey means no matching observations."), "fitSpatialHelp"), 0, 0);
   colorMap = new QComboBox(colorControls);
   colorMap->setObjectName("fitColorMap");
   colorMap->addItems(PlotColorMaps::names());
+  colorLayout->addWidget(ToolTips::label(colorMap, tr("Colormap:"), tr("Choose two checked responses above to compare. Both panels share color limits. Auto fits the checked responses; manual limits clip to the endpoint colors. Grey means no matching observations.")), 0, 0);
   colorLayout->addWidget(colorMap, 0, 1);
   reverseColors = new QCheckBox(tr("Reverse"), colorControls);
   reverseColors->setObjectName("fitReverseColors");
@@ -158,6 +158,7 @@ FitStatisticsWindow::FitStatisticsWindow(QWidget *parent, std::function<void()> 
     limits.automatic = new QCheckBox(tr("Auto"), colorControls);
     limits.automatic->setObjectName(prefix + "Auto");
     limits.automatic->setChecked(true);
+    ToolTips::set(limits.automatic, tr("Fit both panels to the checked responses. Turn off to set shared color limits."));
     colorLayout->addWidget(limits.automatic, row, 1);
     limits.minimum = new QDoubleSpinBox(colorControls);
     limits.maximum = new QDoubleSpinBox(colorControls);
@@ -166,6 +167,7 @@ FitStatisticsWindow::FitStatisticsWindow(QWidget *parent, std::function<void()> 
     for(auto *spin: {limits.minimum, limits.maximum}) {
       spin->setRange(0., 1e12);
       spin->setDecimals(3);
+      ToolTips::set(spin, tr("Shared color limit when Auto is off. Values outside the range use the endpoint colors."));
       spin->setSingleStep(.25);
       spin->setKeyboardTracking(false);
       spin->setEnabled(false);
@@ -478,8 +480,7 @@ void FitStatisticsWindow::editRanges()
   layout->addLayout(grid);
   const QStringList headers{tr("Plot"), tr("Axis"), tr("Auto"), tr("Minimum"), tr("Maximum")};
   for(int column = 0; column < headers.size(); ++column)
-    if(column == 2) grid->addWidget(UiHelp::label(&dialog, headers[column], tr("Auto fits the checked responses. Turn it off to set the visible axis limits. These settings also apply to PDF export."), "fitRangesHelp"), 0, column);
-    else grid->addWidget(new QLabel(headers[column], &dialog), 0, column);
+    grid->addWidget(new QLabel(headers[column], &dialog), 0, column);
   struct Fields {
     QCustomPlot *plot;
     unsigned axis;
@@ -503,6 +504,7 @@ void FitStatisticsWindow::editRanges()
       auto *automatic = new QCheckBox(&dialog);
       automatic->setObjectName(prefix + "Auto");
       automatic->setChecked(option.automatic);
+      ToolTips::set(automatic, tr("Fit the checked responses automatically. Turn off to set axis limits; PDF export uses these limits too."));
       auto *minimum = new QLineEdit(QString::number(range.lower, 'g', 8), &dialog);
       auto *maximum = new QLineEdit(QString::number(range.upper, 'g', 8), &dialog);
       minimum->setObjectName(prefix + "Min"); maximum->setObjectName(prefix + "Max");
@@ -510,6 +512,7 @@ void FitStatisticsWindow::editRanges()
         auto *validator = new QDoubleValidator(edit);
         validator->setLocale(QLocale::c());
         edit->setValidator(validator);
+        ToolTips::set(edit, tr("Visible axis limit when Auto is off. PDF export uses the same range."));
         edit->setEnabled(!option.automatic);
         edit->setMinimumWidth(160);
         edit->setCursorPosition(0);

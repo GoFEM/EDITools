@@ -98,6 +98,7 @@ std::map<std::string, MTStationData> stations(const std::vector<Scalar> &rows)
     station.calculate_apparent_resistivity();
     station.calculate_phase();
     station.calculate_phase_tensor();
+    station.propagate_rho_phase_error();
 
     // Derived curves fill only what can be computed from complete impedances.
     // Restore explicitly supplied scalars after deriving the other curves.

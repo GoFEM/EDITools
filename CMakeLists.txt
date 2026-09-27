@@ -37,6 +37,7 @@ endif()
 add_library(editools_data STATIC
   src/Datum.cc
   src/MTSpectra.cc
+  src/ImpedanceAnalysis.cc
   src/MTStationData.cc
   src/NativeMT.cc
   src/MTResponseData.cc
@@ -61,6 +62,7 @@ target_link_libraries(editools_qcustomplot PUBLIC Qt5::Widgets Qt5::PrintSupport
 
 add_library(editools_ui STATIC
   src/MTDataPlot.cc
+  src/RhoPlusOverlay.cc
   src/ApparentResistivityPlot.cc
   src/PhasePlot.cc
   src/TipperPlot.cc
@@ -77,6 +79,7 @@ add_library(editools_ui STATIC
   PeriodMapWindow.cpp
   PeriodLayoutWindow.cpp
   EDIImportDialog.cpp
+  ImpedanceAnalysisWindows.cpp
   SurveyReport.cpp
   mainwindow.cpp
   mainwindow.h
@@ -96,6 +99,15 @@ target_link_libraries(main PRIVATE editools_ui)
 
 include(CTest)
 if(BUILD_TESTING)
+  add_executable(impedance_analysis_test tests/impedance_analysis_test.cc)
+  target_link_libraries(impedance_analysis_test PRIVATE editools_data)
+  add_test(NAME impedance_analysis COMMAND impedance_analysis_test)
+  set_tests_properties(impedance_analysis PROPERTIES TIMEOUT 60)
+  add_executable(impedance_analysis_dialog_test tests/impedance_analysis_dialog_test.cc)
+  target_link_libraries(impedance_analysis_dialog_test PRIVATE editools_ui)
+  add_test(NAME impedance_analysis_dialog COMMAND impedance_analysis_dialog_test)
+  set_tests_properties(impedance_analysis_dialog PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
+
   add_executable(mt_spectra_test tests/mt_spectra_test.cc)
   target_link_libraries(mt_spectra_test PRIVATE editools_data)
   target_compile_definitions(mt_spectra_test PRIVATE

@@ -180,6 +180,121 @@ change the other entries in the starting tensor. Unmasking applies the same link
 For inverted selections, a mask takes precedence if multiple selected components
 give conflicting instructions for a shared dependent entry.
 
+### Impedance validity and rho+
+
+Open **Data → Impedance validity / Rho+…** to compare a station's measured
+apparent resistivity and phase with fitted rho+ responses. Select the station;
+**XY / YX** shows both off-diagonal components together, with independent fits
+drawn as thin dashed lines in their component colors. The **XY** and **YX**
+checkboxes control the plots, table rows and masking scope; **Rho+** toggles the
+fitted lines. Individual diagonal components are not offered. Invariant responses
+remain available in the response selector. The table and CSV identify each
+component explicitly. **YX**
+is shown as `−Zyx` to use the same sign convention as XY. Phase is not folded
+into the first quadrant, so anomalous phases remain visible.
+
+Use **Plot → Show rho+ guides** to overlay thin, dashed XY/YX fits on the main
+resistivity and phase plots in their component colors. They follow the existing
+component visibility and phase-wrapping controls and refresh after masking or
+unmasking, preserving the current axes. The guides cannot be selected for masking
+and can be shown alongside loaded responses. They use the main data's propagated
+errors. Grid density comes from the validity window; this setting and guide visibility are saved in
+the project. Unconverged or grid-sensitive fits are omitted from the main plots.
+
+The native C++ implementation uses the bounded spectral representation of
+log admittance from [Parker and Booker (1996)](https://doi.org/10.1016/S0031-9201(96)03191-3).
+It minimizes weighted residuals in log resistivity and phase jointly, using
+exact spectral-interval integrals, a free real offset, and both spectral tails.
+It is a **finite-grid approximation**, with a second solve at twice the selected
+**Grid/decade**. The window reports solver convergence and the change in χ²;
+a grid-sensitive result should be rechecked at higher density. Curves are drawn
+only within the usable period range.
+
+Rho+ uses the **main data's propagated resistivity and phase errors**, including
+the error floor assigned in the main interface. It has no separate error-floor
+setting and never changes these errors. Fit weights use `σρ / ρ` for log
+resistivity and `σφ` for phase. The same errors are used for the displayed error
+bars, residuals, guides and masking. Invariant errors are propagated from the
+main impedance errors, assuming independent tensor entries. Missing, zero or
+invalid errors are counted and excluded from fitting and masking; no fallback
+floor is supplied. At least three usable complex-impedance samples with positive
+errors spanning distinct periods are required. Masked, missing and disabled
+data are omitted. Resistivity/phase-only inputs without complex impedance are
+not used. Obsolete rho+ floor settings in older projects are ignored.
+
+The table gives observed and fitted values and normalized residuals. Residuals
+beyond ±2 are highlighted. `nRMS = sqrt(χ² / (2N))` uses both measurements at
+N periods; it is not reduced χ² or a formal significance test. A poor fit may
+reflect multidimensional structure, a convention mismatch, or underestimated
+errors. In particular, diagonal components and tensor averages are not generally
+1-D responses. This is a consistency diagnostic, not an automatic bad-data test;
+fits alone do not change observations or masks. **CSV…** exports the displayed values.
+
+For the selected station's checked **XY / YX** components, the **Preview masks**
+checkbox highlights
+periods where either normalized log-resistivity or phase residual exceeds the
+**Residual threshold (σ)**. The default is 3σ; use 2σ for closer review. This uses
+the main data's propagated measurement errors, not a confidence band around
+the fitted curve. Only converged, grid-stable fits can provide candidates.
+Crosses in component colors and red table rows identify candidates; the preview
+reports each component's count and how many linked PT masks would change,
+counting shared PT changes once. Components without a stable fit are skipped
+and identified in the preview. **Apply masks** performs one pass,
+masking both resistivity and phase for those component/periods. It respects
+**Data → Link Z / PT masks** and leaves other impedance components and tippers
+unchanged. Refitting does not trigger further rejection. **Undo masks** restores
+only changes from the last application, including linked PT masks, while keeping
+earlier masks intact. Preview is enabled by default and automatically refreshes
+when navigating stations or changing the threshold, components or fit settings.
+Turning it off hides candidates and disables single-station Apply.
+
+**Apply all stations** fits the checked components at every enabled station and
+applies one masking pass with the current threshold, main-data errors, grid density
+and Z/PT linking setting. Disabled stations and unavailable or unstable fits are
+skipped and counted in the summary. All fits finish before any masks change;
+**Cancel** leaves the survey unchanged. **Undo masks** restores the entire last
+batch or single-station operation. Navigating stations preserves undo; other
+data edits clear it. Automatic preview never applies additional masking passes.
+
+### Survey impedance averages
+
+Open **Data → Survey impedance averages…** to display station responses and
+their **Regional geometric mean**. Check stations in the list to include them;
+the two checkboxes above the plots control curve visibility. Disabled survey
+stations and masked or incomplete required components cannot contribute.
+
+The response selector offers these explicitly defined quantities:
+
+| Response | Impedance |
+| --- | --- |
+| SSQ | `sqrt((Zxx² + Zxy² + Zyx² + Zyy²) / 2)` |
+| Berdichevsky | `(Zxy − Zyx) / 2` |
+| Determinant | `sqrt(Zxx Zyy − Zxy Zyx)` |
+
+SSQ uses **complex squares**, not squared magnitudes. The square-root quantities
+use the branch with nonnegative imaginary part, giving phases from 0° to 180°.
+Missing diagonal entries are not assumed to be zero. The determinant-based
+regional geometric mean is also called the Berdichevsky regional average;
+see [Rung-Arunwan et al. (2017)](https://doi.org/10.1186/s40623-017-0665-8)
+for its distinction from regional SSQ averaging.
+
+Each checked station has equal weight. Mean resistivity is
+`exp(mean(ln(rho)))`; phases are aligned to a common branch before averaging.
+If phase directions cancel, mean phase is left undefined. At an exact common
+period these are the apparent resistivity and phase of the complex geometric
+mean impedance. **SD lnρ** is the between-station sample spread, not an error
+bar on the mean; it is undefined for a single station.
+
+**Tolerance (%)** defaults to zero (exact periods). An optional tolerance groups
+nearby periods only when the entire group fits the relative span; it cannot
+chain across a larger gap. A station with multiple samples in a group is omitted
+from that group. Resistivities retain their measured periods during averaging;
+the group is plotted at the lower median contributing period. There is no
+interpolation or extrapolation. **Min. stations** suppresses underpopulated means.
+The table and CSV include the contributor count at each period, since changing
+station coverage can itself change a regional curve. The original survey and
+its station enable flags remain unchanged.
+
 ### Station, induction-vector and phase-tensor maps
 
 Use **Station names** below the small station map to show or hide its labels.
@@ -380,7 +495,7 @@ visibility. Fixed Y ranges from **Plot → Axis ranges** are retained on every
 station page, including response overlays and empty panels. Y axes set to
 autoscale and period axes scale to each station. Phase wrapping follows the
 main window. Station locator maps include all valid survey locations. Missing coordinates are
-noted on the station page. The **?** button explains the options.
+noted on the station page. Hover over an option to read its tooltip.
 
 Export leaves the survey and current plots unchanged. Canceling or a failed
 export preserves an existing destination PDF.
@@ -388,9 +503,9 @@ export preserves an existing destination PDF.
 ### Period layout and resampling
 
 The period-layout, period-map and fit-statistics windows use compact labels.
-Hover over a **?** button, click it, or focus it and press **Space** for the
-full explanation. Table headers also have tooltips. In the period-layout window,
-**Coverage ?** explains that **Usable on grid** includes estimates, while
+Hover over controls, their labels, or table headers for explanations. In the
+period-layout window, the **Coverage** tab and plot explain that **Usable on
+grid** includes estimates, while
 **Original on grid** counts retained source samples at the exact target periods;
 increased grid coverage does not mean additional measurements.
 

@@ -865,8 +865,15 @@ double MTStationData::rms(const MTStationData &other) const
         const bool impedance_active = Z_mask[i][j] && other.Z_mask[i][k];
         add(Z[i][j].real(), other.Z[i][k].real(), Z_err_floor[i][j], other.Z_err_floor[i][k], impedance_active);
         add(Z[i][j].imag(), other.Z[i][k].imag(), Z_err_floor[i][j], other.Z_err_floor[i][k], impedance_active);
-        add(Rho[i][j], other.Rho[i][k], Rho_err[i][j], other.Rho_err[i][k], impedance_active);
-        add(Phs[i][j], other.Phs[i][k], Phs_err[i][j], other.Phs_err[i][k], impedance_active, true);
+        // Prefer matching complex impedance; its derived rho/phase are not
+        // additional independent observations when their errors are available.
+        const bool matchedImpedance = impedance_active && std::isfinite(std::abs(Z[i][j])) &&
+          std::isfinite(std::abs(other.Z[i][k])) && std::isfinite(Z_err_floor[i][j]) &&
+          Z_err_floor[i][j]>0. && std::isfinite(other.Z_err_floor[i][k]) && other.Z_err_floor[i][k]>0.;
+        if(!matchedImpedance) {
+          add(Rho[i][j], other.Rho[i][k], Rho_err[i][j], other.Rho_err[i][k], impedance_active);
+          add(Phs[i][j], other.Phs[i][k], Phs_err[i][j], other.Phs_err[i][k], impedance_active, true);
+        }
         add(PT[i][j], other.PT[i][k], PT_err[i][j], other.PT_err[i][k], PT_mask[i][j] && other.PT_mask[i][k]);
         if(i < T.size()) {
           const bool tipper_active = T_mask[i][j] && other.T_mask[i][k];
