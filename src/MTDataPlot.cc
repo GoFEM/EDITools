@@ -228,6 +228,10 @@ void MTDataPlot::apply_component_visibility()
     auto *graph = m_plot->graph(i);
     const bool visible = m_componentVisible[i % 4];
     graph->setVisible(visible);
+    // Rectangle selection tests hidden graphs too. Only visible observations
+    // (active or masked) may be selected; calculated responses stay read-only.
+    graph->setSelectable(visible && i < static_cast<int>(m_errorBars.size())
+                         ? QCP::stMultipleDataRanges : QCP::stNone);
     if(!visible) graph->setSelection(QCPDataSelection());
   }
   for(unsigned i = 0; i < m_errorBars.size(); ++i)
@@ -476,6 +480,8 @@ void MTDataPlot::mask_selected_data(bool on)
   QList<QCPGraph*> selectedGraphs = m_plot->selectedGraphs();
   for(auto &graph: selectedGraphs)
   {
+    if(!graph->visible() || graph->selectable() == QCP::stNone)
+      continue;
     QCPDataSelection selection = graph->selection();
     const std::vector<RealDataType> types = get_graph_data_types(graph);
     if(types.empty())
@@ -509,6 +515,8 @@ void MTDataPlot::invMaskSelectedData()
   const auto &frequencies = m_data->frequencies();
   std::map<RealDataType, std::vector<bool>> selected;
   for(auto *graph: m_plot->selectedGraphs()) {
+    if(!graph->visible() || graph->selectable() == QCP::stNone)
+      continue;
     const auto types = get_graph_data_types(graph);
     for(auto type: types) if(!selected.count(type)) selected[type].assign(frequencies.size(), false);
     for(const auto &range: graph->selection().dataRanges()) {

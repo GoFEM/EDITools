@@ -13,7 +13,7 @@ struct Group {
 struct Plan {
   unsigned before = 0, after = 0, samples = 0, invalid = 0, mergeable = 0, blocked = 0;
   double minimum = std::numeric_limits<double>::infinity(), maximum = 0.;
-  std::vector<Group> groups;
+  std::vector<Group> groups; // Full period layout involving incoming stations, including exact matches.
   std::vector<Change> changes;
 };
 // Only incoming stations may change. Groups have a bounded total relative span,

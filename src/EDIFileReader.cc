@@ -231,21 +231,36 @@ void EDIFileReader::read_spectrasect_section(std::istringstream &ss)
             if(line.find("SPECTRA") == std::string::npos) { ss.seekg(position); break; }
             if(channels != 7) throw std::runtime_error("Spectra require seven channels: Hx, Hy, Hz, Ex, Ey, Rx, Ry.");
             const auto separator = line.find("//");
-            std::istringstream count(separator == std::string::npos ? "" : line.substr(separator + 2));
-            unsigned values = 0;
-            if(!(count >> values) || values != 49) throw std::runtime_error("Spectral matrix must contain 49 values.");
-            SPECTRA_DATA spectra; spectra.options = inlineOptions(line);
-            for(auto &row: spectra.data) for(auto &value: row) {
-                std::string token;
-                if(!(ss >> token)) throw std::runtime_error("Truncated spectral matrix.");
-                std::replace(token.begin(), token.end(), 'D', 'E');
-                std::replace(token.begin(), token.end(), 'd', 'e');
-                size_t consumed = 0;
-                try { value = std::stod(token, &consumed); }
-                catch(const std::exception &) { throw std::runtime_error("Invalid value in spectral matrix."); }
-                if(consumed != token.size()) throw std::runtime_error("Invalid value in spectral matrix.");
-                if(value == empty_value) value = std::numeric_limits<double>::quiet_NaN();
+            // Some writers omit the inline count; NCHAN still defines the
+            // matrix dimensions. Validate both declared and actual sizes.
+            const unsigned expected = channels * channels;
+            if(separator != std::string::npos) {
+                std::istringstream count(line.substr(separator + 2));
+                unsigned values = 0;
+                if(!(count >> values) || values != expected) throw std::runtime_error("Spectral matrix must contain 49 values.");
             }
+            SPECTRA_DATA spectra; spectra.options = inlineOptions(line);
+            unsigned values = 0;
+            for(std::string dataLine; ss.good();) {
+                const auto dataPosition = ss.tellg();
+                if(!std::getline(ss, dataLine)) break;
+                if(!dataLine.empty() && dataLine[0] == '>') { ss.seekg(dataPosition); break; }
+                std::istringstream tokens(dataLine);
+                for(std::string token; tokens >> token;) {
+                    if(values == expected) throw std::runtime_error("Spectral matrix contains more than 49 values.");
+                    std::replace(token.begin(), token.end(), 'D', 'E');
+                    std::replace(token.begin(), token.end(), 'd', 'e');
+                    size_t consumed = 0;
+                    double value;
+                    try { value = std::stod(token, &consumed); }
+                    catch(const std::exception &) { throw std::runtime_error("Invalid value in spectral matrix."); }
+                    if(consumed != token.size()) throw std::runtime_error("Invalid value in spectral matrix.");
+                    if(value == empty_value) value = std::numeric_limits<double>::quiet_NaN();
+                    spectra.data[values / channels][values % channels] = value;
+                    ++values;
+                }
+            }
+            if(values != expected) throw std::runtime_error("Truncated spectral matrix: expected 49 values.");
             spectrasect.spectra_data.push_back(std::move(spectra));
         } else if(line.find('=') != std::string::npos) {
             const auto separator = line.find('=');

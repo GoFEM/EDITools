@@ -58,9 +58,10 @@ Plan analyze(const MTSurveyData &survey, const std::set<std::string> &incoming, 
     const double frequency = anchors.empty() ? representative->second : anchors.begin()->second;
     group.target = 1. / frequency;
     const bool merge = hasIncoming && periods.size() > 1 && !group.collision && !group.existingConflict;
-    if(hasIncoming && (periods.size() > 1 || group.collision)) {
+    if(hasIncoming) {
       plan.groups.push_back(group);
-      if(merge) ++plan.mergeable; else ++plan.blocked;
+      if(merge) ++plan.mergeable;
+      else if(group.collision || group.existingConflict) ++plan.blocked;
     }
     for(unsigned i = begin; i < end; ++i) {
       const auto &point = points[i];

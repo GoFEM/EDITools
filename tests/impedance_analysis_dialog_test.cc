@@ -39,6 +39,7 @@ void masking(const std::shared_ptr<MTSurveyData> &original, const QString &previ
   s.set_data(frequency,{RealZxy,ImagZxy},{real,-real},{error,error});
   for(auto f:s.frequencies()) s.set_data(f,{RealTzx,ImagTzx,RealTzy,ImagTzy},{.1,.2,.3,.4},{.01,.01,.01,.01});
   s.set_data_mask(PTxx,frequency,false);
+  s.set_data_mask(RealZxx,s.frequencies().front(),false);
   s.set_data_mask(RealZyy,s.frequencies().front(),false);
   const auto z=s.impedance_mask(),pt=s.phase_tensor_mask(),tipper=s.tipper_mask();
   unsigned notifications=0;
@@ -71,7 +72,10 @@ void masking(const std::shared_ptr<MTSurveyData> &original, const QString &previ
   xy->setChecked(true);
   preview->setChecked(true); settle(); apply->click();
   check(!s.impedance_mask()[1][5],"Outlier was not masked");
-  for(unsigned c:{0u,2u,3u}) check(s.impedance_mask()[c]==z[c],"Masking changed unrelated impedance");
+  check(!s.impedance_mask()[0][5],"Zxy masking did not mask Zxx");
+  for(unsigned c:{2u,3u}) check(s.impedance_mask()[c]==z[c],"Masking changed the opposite polarization");
+  for(unsigned f=0;f<s.frequencies().size();++f)
+    check(s.impedance_mask()[0][f]==(z[0][f] && s.impedance_mask()[1][f]),"Zxx masking affected a different period");
   for(unsigned c=0;c<4;++c) check(!s.phase_tensor_mask()[c][5],"Linked PT mask missing");
   check(s.tipper_mask()==tipper,"Masking changed tippers");
   check(notifications==1 && undo->isEnabled() && !apply->isEnabled(),"Apply refresh or one-pass behavior broken");
@@ -79,7 +83,7 @@ void masking(const std::shared_ptr<MTSurveyData> &original, const QString &previ
   undo->click(); check(s.impedance_mask()==z && s.phase_tensor_mask()==pt && s.tipper_mask()==tipper,"Undo did not restore exact previous masks");
   check(notifications==2 && !undo->isEnabled(),"Undo notification missing");
   validity.setLinkTensorMasks(false); preview->setChecked(true); settle(); apply->click();
-  check(!s.impedance_mask()[1][5] && s.phase_tensor_mask()==pt,"Unlinked edit changed PT masks");
+  check(!s.impedance_mask()[1][5] && !s.impedance_mask()[0][5] && s.phase_tensor_mask()==pt,"Polarization masking incorrectly depends on PT linking");
   undo->click();
   // Reject stale previews even if a data change was not notified to the dialog.
   preview->setChecked(true); settle(); s.set_data_mask(RealZyy,s.frequencies().back(),false);
@@ -100,8 +104,16 @@ void masking(const std::shared_ptr<MTSurveyData> &original, const QString &previ
   check(graphs.size()==2 && graphs[0]->data()->size()==graphs[1]->data()->size(),"Combined preview lost a component");
   const int linkedCount=4*graphs[0]->data()->size();
   check(control<QLabel>(validity,"validityMaskStatus")->text().contains(QString("%1 linked PT masks").arg(linkedCount)),"Shared PT masks counted twice");
-  apply->click(); check(!s.impedance_mask()[1][5] && !s.impedance_mask()[2][5],"Combined apply missed a component");
+  check(control<QLabel>(validity,"validityMaskStatus")->text().contains(QString("%1 diagonal masks").arg(linkedCount/2)),"Preview omitted paired diagonal count");
+  apply->click();
+  for(unsigned c=0;c<4;++c) check(!s.impedance_mask()[c][5],"Combined apply missed a polarization component");
   undo->click(); check(s.impedance_mask()==bothZ && s.phase_tensor_mask()==bothPT,"Combined undo did not restore masks");
+  // YX-only masking must pair with YY without touching XX/XY.
+  xy->setChecked(false); settle(); apply->click();
+  check(!s.impedance_mask()[2][5] && !s.impedance_mask()[3][5],"Zyx masking did not mask Zyy");
+  check(s.impedance_mask()[0]==bothZ[0] && s.impedance_mask()[1]==bothZ[1],"YX-only masking changed XX/XY");
+  undo->click(); check(s.impedance_mask()==bothZ && s.phase_tensor_mask()==bothPT,"YX undo failed");
+  xy->setChecked(true);
   s.mask_type(RealZyx,false); validity.setData(survey); preview->setChecked(true); settle();
   check(apply->isEnabled() && control<QLabel>(validity,"validityMaskStatus")->text().contains("skipped"),"Unavailable YX prevented valid XY preview");
   validity.setData({}); check(!apply->isEnabled() && !undo->isEnabled(),"Unload retained masking actions");
@@ -112,7 +124,9 @@ void batchMasking(const std::shared_ptr<MTSurveyData> &original) {
     auto &s=survey->get_station_data(name); const bool active=s.active(); s.set_active(true);
     double real,error; check(s.scalar_value(RealZxy,5,real,error),"Missing batch fixture");
     s.set_data(s.frequencies()[5],{RealZxy,ImagZxy,RealZyx,ImagZyx},{real,-real,-real,real},{error,error,error,error});
-    s.set_data_mask(PTxx,s.frequencies()[5],false); s.set_active(active);
+    s.set_data_mask(PTxx,s.frequencies()[5],false);
+    s.set_data_mask(RealZxx,s.frequencies().front(),false);
+    s.set_data_mask(RealZyy,s.frequencies().back(),false); s.set_active(active);
   }
   survey->get_station_data("B").mask_type(RealZyx,false);
   const auto before=*survey;
@@ -149,7 +163,12 @@ void batchMasking(const std::shared_ptr<MTSurveyData> &original) {
   for(const auto &name:{"A","B"}) {
     const auto &s=survey->get_station_data(name), &old=before.get_station_data(name);
     check(!s.impedance_mask()[1][5] && !s.phase_tensor_mask()[1][5],"Batch skipped enabled station");
-    check(s.impedance_mask()[0]==old.impedance_mask()[0] && s.impedance_mask()[3]==old.impedance_mask()[3] && s.tipper_mask()==old.tipper_mask(),"Batch changed diagonals or tippers");
+    for(unsigned f=0;f<s.frequencies().size();++f) for(const auto &pair:{std::pair<unsigned,unsigned>{0,1},{3,2}}) {
+      const auto diagonal=pair.first, off=pair.second;
+      const bool newlyMasked=old.impedance_mask()[off][f] && !s.impedance_mask()[off][f];
+      check(s.impedance_mask()[diagonal][f]==(old.impedance_mask()[diagonal][f] && !newlyMasked),"Batch paired the wrong diagonal or period");
+    }
+    check(s.tipper_mask()==old.tipper_mask(),"Batch changed tippers");
   }
   auto summary=control<QLabel>(validity,"validityMaskStatus")->text();
   check(summary.contains("2 stations") && summary.contains("1 disabled stations") && summary.contains("1 skipped fits"),"Batch summary counts incorrect");
@@ -162,7 +181,8 @@ void batchMasking(const std::shared_ptr<MTSurveyData> &original) {
   control<QCheckBox>(validity,"validityYX")->setChecked(false); settle(); all->click();
   for(const auto &name:{"A","B"}) {
     const auto &s=survey->get_station_data(name), &old=before.get_station_data(name);
-    check(s.phase_tensor_mask()==old.phase_tensor_mask() && s.impedance_mask()[2]==old.impedance_mask()[2],"Batch ignored link or component controls");
+    check(!s.impedance_mask()[0][5],"Unlinked batch did not mask the paired diagonal");
+    check(s.phase_tensor_mask()==old.phase_tensor_mask() && s.impedance_mask()[2]==old.impedance_mask()[2] && s.impedance_mask()[3]==old.impedance_mask()[3],"Batch ignored link or component controls");
   }
   undo->click(); unchanged();
   control<QCheckBox>(validity,"validityXY")->setChecked(false); check(!all->isEnabled(),"Batch enabled without components");

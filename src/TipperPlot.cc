@@ -148,6 +148,8 @@ void TipperPlot::apply_component_visibility()
     const bool visible = (role == 1 || role == 2) &&
                         (m_componentVisible[offset] || m_componentVisible[offset + 1]);
     graph->setVisible(visible);
+    graph->setSelectable(visible && i < static_cast<int>(m_errorBars.size())
+                         ? QCP::stMultipleDataRanges : QCP::stNone);
     if(!visible) graph->setSelection(QCPDataSelection());
     if(i < 4 && (role == 1 || role == 2)) {
       QString name = role == 1 ? tr("Real") : tr("Imaginary");

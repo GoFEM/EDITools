@@ -150,7 +150,26 @@ void edi_import_tests(const QString &directory)
   // The threshold is strict, including at a binary-exact boundary.
   const auto edgePath = directory + "/EDI_edge.edi";
   write_edi(edgePath, {1., 1. / 1.03125}); paths = {edgePath.toStdString()}; MTSurveyData edge; edge.load_from_edi(paths);
-  check(EDIPeriodMerge::analyze(edge, {"EDI_edge"}, .03125).groups.empty(), "Exact tolerance boundary was included");
+  const auto boundary = EDIPeriodMerge::analyze(edge, {"EDI_edge"}, .03125);
+  check(boundary.groups.size()==2 && boundary.mergeable==0 && boundary.changes.empty(), "Exact tolerance boundary was included");
+
+  // Already aligned surveys still need a populated review, not an empty table.
+  const auto alignedPath=directory+"/EDI_aligned.edi"; write_edi(alignedPath,{1.,.1});
+  MTSurveyData aligned; aligned.load_from_edi({a.toStdString(),alignedPath.toStdString()});
+  const auto alignedNames=aligned.get_stations_names();
+  QTimer::singleShot(0,[] {
+    auto *dialog=qobject_cast<QDialog *>(QApplication::activeModalWidget()); check(dialog,"Import review missing");
+    auto *periods=widget<QTableWidget>(*dialog,"ediPeriodGroups");
+    check(periods->rowCount()==2,"Exact shared periods missing from import review");
+    for(int r=0;r<2;++r) {
+      check(periods->item(r,3)->text()=="1" && periods->item(r,4)->text()=="2","Shared-period counts incorrect");
+      check(periods->item(r,5)->text()=="Keep (already shared)","Aligned periods offered a merge");
+    }
+    check(widget<QLabel>(*dialog,"ediPeriodStatus")->text().contains("No close periods to merge"),"No-merge explanation missing");
+    dialog->accept();
+  });
+  check(reviewEDIImport(nullptr,aligned,{alignedNames.begin(),alignedNames.end()},{}),"Aligned import could not proceed");
+  check(aligned.get_station_data("EDI_A").frequencies()==std::vector<double>({1.,.1}),"Aligned review changed frequencies");
 
   MainWindow window;
   auto import = [&](const QStringList &files, bool accept, bool mergePeriods) {
@@ -526,8 +545,11 @@ void set_visibility(QCustomPlot &plot, int mask)
 
 void check_visibility(QCustomPlot &plot, int mask, bool errorBars = true)
 {
-  for(int i = 0; i < plot.graphCount(); ++i)
+  for(int i = 0; i < plot.graphCount(); ++i) {
     check(plot.graph(i)->visible() == bool(mask & (1 << (i % 4))), "Component visibility is inconsistent");
+    check(plot.graph(i)->selectable() == (i < 8 && plot.graph(i)->visible()
+          ? QCP::stMultipleDataRanges : QCP::stNone), "Hidden or calculated curves are selectable");
+  }
   int errorCount = 0;
   for(int i = 0; i < plot.plottableCount(); ++i)
     if(auto *bars = dynamic_cast<QCPErrorBars *>(plot.plottable(i))) {
@@ -819,6 +841,42 @@ void linked_mask_tests(const QString &directory)
   auto survey = std::make_shared<MTSurveyData>(); std::vector<std::string> paths{path.toStdString()}; survey->load_from_edi(paths);
   const auto original = survey->get_station_data("linked");
   const std::array<RealDataType, 4> zTypes{{RealZxx, RealZxy, RealZyx, RealZyy}}, ptTypes{{PTxx, PTxy, PTyx, PTyy}};
+  // Exercise real rectangle selection: the plotting library tests hidden
+  // graphs too unless they are explicitly made unselectable.
+  for(bool linked: {false, true}) {
+    auto edited = original;
+    QCustomPlot plot; ApparentResistivityPlot handler(&plot);
+    handler.set_link_tensor_masks(linked);
+    handler.set_observed_data(edited);
+    plot.resize(800, 600); plot.show(); QApplication::processEvents();
+    set_visibility(plot, 3); // XX and XY only
+    auto selectPeriod = [&](double period) {
+      plot.replot();
+      const auto rect = plot.axisRect()->rect();
+      map_gesture(&plot, QPointF(plot.xAxis->coordToPixel(period / 1.1), rect.top() + 2),
+                  QPointF(plot.xAxis->coordToPixel(period * 1.1), rect.bottom() - 2), true);
+      check(plot.graph(0)->selected() || plot.graph(4)->selected(), "Rectangle missed visible XX data");
+      for(int c: {2, 3, 6, 7}) check(!plot.graph(c)->selected(), "Rectangle selected a hidden component");
+    };
+    selectPeriod(1.); handler.maskSelectedData();
+    for(unsigned c = 0; c < 4; ++c) {
+      check(edited.impedance_mask()[c][0] == (c >= 2) && edited.impedance_mask()[c][1],
+            "Rectangle mask changed hidden components or another period");
+      check(edited.phase_tensor_mask()[c][0] == !linked, "Rectangle mask lost PT linkage");
+    }
+    selectPeriod(10.); handler.maskSelectedData();
+    selectPeriod(1.); handler.unmaskSelectedData();
+    selectPeriod(1.); handler.invMaskSelectedData();
+    for(unsigned c = 0; c < 4; ++c)
+      check(edited.impedance_mask()[c][0] && edited.impedance_mask()[c][1] == (c >= 2),
+            "Repeated or inverted masking changed hidden components");
+    check(edited.tipper_mask() == original.tipper_mask(), "Rectangle masking changed tippers");
+    set_visibility(plot, 15);
+    for(int c = 0; c < 8; ++c) check(plot.graph(c)->selectable() == QCP::stMultipleDataRanges,
+                                    "Shown observations did not become selectable again");
+    for(int c = 8; c < plot.graphCount(); ++c) check(plot.graph(c)->selectable() == QCP::stNone,
+                                                  "Response curves became selectable");
+  }
   // Z/PT edits must preserve both enabled and already-masked tipper samples.
   for(bool linked: {false, true}) for(auto type: {RealZxx, RealZxy, RealZyx, RealZyy,
       ImagZxx, ImagZxy, ImagZyx, ImagZyy, RhoZxx, RhoZxy, RhoZyx, RhoZyy,

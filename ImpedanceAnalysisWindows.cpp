@@ -205,9 +205,9 @@ struct ImpedanceValidityWindow::Impl {
     applyAll=new QPushButton(QObject::tr("Apply all stations"),w); applyAll->setObjectName("validityApplyAllMasks"); applyAll->setEnabled(false); maskControls->addWidget(applyAll);
     undo=new QPushButton(QObject::tr("Undo masks"),w); undo->setObjectName("validityUndoMasks"); undo->setEnabled(false); maskControls->addWidget(undo);
     ToolTips::set(preview,QObject::tr("Automatically highlight candidates when stations, components or fit settings change. Requires a converged, grid-stable XY/YX fit. Preview never changes masks."));
-    ToolTips::set(apply,QObject::tr("Mask the previewed component/periods in one pass, including both resistivity and phase. Respects Data → Link Z / PT masks; when linked, all PT entries at each candidate period are masked. Other impedance components and all tippers are unchanged. No repeated automatic rejection."));
-    ToolTips::set(applyAll,QObject::tr("Fit the checked XY/YX components independently at every enabled station using the current threshold, grid density and main-data errors, then apply one masking pass. Disabled stations and unavailable or unstable fits are skipped. Cancel stops the batch without changing any masks. Undo restores the whole batch."));
-    ToolTips::set(undo,QObject::tr("Restore only masks changed by the last single-station or all-stations operation, including linked PT entries. Earlier masks remain masked. Navigation preserves undo; other data edits clear it."));
+    ToolTips::set(apply,QObject::tr("Mask the previewed component/periods in one pass, including both resistivity and phase. Each Zxy candidate also masks Zxx; each Zyx candidate also masks Zyy at the same period. Respects Data → Link Z / PT masks; when linked, all PT entries at each candidate period are masked. Tippers are unchanged. No repeated automatic rejection."));
+    ToolTips::set(applyAll,QObject::tr("Fit the checked XY/YX components independently at every enabled station using the current threshold, grid density and main-data errors, then apply one masking pass. Zxy also masks Zxx; Zyx also masks Zyy. Disabled stations and unavailable or unstable fits are skipped. Cancel stops the batch without changing any masks. Undo restores the whole batch."));
+    ToolTips::set(undo,QObject::tr("Restore only masks changed by the last single-station or all-stations operation, including paired diagonal and linked PT entries. Earlier masks remain masked. Navigation preserves undo; other data edits clear it."));
     maskControls->addStretch(); layout->addLayout(maskControls);
     maskStatus=new QLabel(w); maskStatus->setObjectName("validityMaskStatus"); maskStatus->setWordWrap(true); layout->addWidget(maskStatus);
     clearPreview();
@@ -272,17 +272,18 @@ struct ImpedanceValidityWindow::Impl {
     status->setText(summary.isEmpty() ? QObject::tr("Check XY or YX to show a response.") : summary.join('\n'));
     refreshPreview(); draw();
   }
-  std::vector<MaskEdit> collectEdits(const MTStationData &s, std::vector<Series> &entries, unsigned &linkedCount) {
+  std::vector<MaskEdit> collectEdits(const MTStationData &s, std::vector<Series> &entries, unsigned &linkedCount, unsigned &diagonalCount) {
     const MaskState state(s);
     std::vector<MaskEdit> edits;
-    linkedCount=0;
+    linkedCount=0; diagonalCount=0;
     std::set<std::pair<RealDataType,double>> uniqueEdits;
     for(auto &entry:entries) {
       const auto &result=entry.result;
       if(!result.converged || !result.gridStable) continue;
       entry.candidates=rhoPlusOutliers(result,threshold->value());
       const auto type=entry.quantity==Quantity::XY ? RealZxy : RealZyx;
-      std::vector<RealDataType> types{type};
+      const auto diagonal=entry.quantity==Quantity::XY ? RealZxx : RealZyy;
+      std::vector<RealDataType> types{type,diagonal};
       if(linkTensorMasks) for(auto related:MTStationData::linked_mask_types(type)) types.push_back(related);
       for(auto index:entry.candidates) {
         const auto &freqs=s.frequencies();
@@ -290,9 +291,12 @@ struct ImpedanceValidityWindow::Impl {
         if(found==freqs.end()) throw std::runtime_error("Candidate period is no longer present.");
         const auto f=std::distance(freqs.begin(),found);
         for(auto target:types) {
-          const auto &masks=target==type ? state.z : state.pt;
+          const bool tensor=target!=type && target!=diagonal;
+          const auto &masks=tensor ? state.pt : state.z;
           if(masks.at(type_to_column_table.at(target)).at(f) && uniqueEdits.insert({target,*found}).second) {
-            edits.push_back({target,*found}); if(target!=type) ++linkedCount;
+            edits.push_back({target,*found});
+            if(tensor) ++linkedCount;
+            else if(target==diagonal) ++diagonalCount;
           }
         }
       }
@@ -304,15 +308,15 @@ struct ImpedanceValidityWindow::Impl {
     if(!preview->isChecked() || !maskable() || series.empty() || !survey) return;
     auto &s=survey->get_station_data(station->currentText().toStdString());
     previewState.reset(new MaskState(s));
-    unsigned linkedCount=0;
-    previewEdits=collectEdits(s,series,linkedCount);
+    unsigned linkedCount=0, diagonalCount=0;
+    previewEdits=collectEdits(s,series,linkedCount,diagonalCount);
     QStringList counts;
     for(const auto &entry:series) {
       if(!entry.result.converged || !entry.result.gridStable)
         counts.push_back(QObject::tr("%1: skipped (fit unavailable or unstable)").arg(entry.label()));
       else counts.push_back(QObject::tr("%1: %2/%3").arg(entry.label()).arg(entry.candidates.size()).arg(entry.result.observed.size()));
     }
-    maskStatus->setText(QObject::tr("%1 candidates · %2 linked PT masks").arg(counts.join(" · ")).arg(linkedCount));
+    maskStatus->setText(QObject::tr("%1 candidates · %2 diagonal masks · %3 linked PT masks").arg(counts.join(" · ")).arg(diagonalCount).arg(linkedCount));
     apply->setEnabled(!previewEdits.empty());
   }
   bool unchangedCurve(const MTStationData &s) const {
@@ -345,7 +349,7 @@ struct ImpedanceValidityWindow::Impl {
     for(const auto &edit:changes) s.set_data_mask(edit.type,edit.frequency,false,false);
     undoEdits.clear(); undoEdits.emplace_back(s,changes); undo->setEnabled(true);
     notifyMasksChanged();
-    maskStatus->setText(QObject::tr("Masked %1 component/periods in one pass.").arg(count));
+    maskStatus->setText(QObject::tr("Masked %1 off-diagonal points and their paired diagonals in one pass.").arg(count));
   }
   void applyAllMasks() {
     if(!survey || !maskable() || !(showXY->isChecked() || showYX->isChecked())) return;
@@ -361,7 +365,7 @@ struct ImpedanceValidityWindow::Impl {
     progress.setObjectName("validityMaskProgress"); progress.setWindowModality(Qt::ApplicationModal); progress.setMinimumDuration(0);
     progress.setAutoClose(false); progress.setAutoReset(false);
     std::vector<StationEdits> pending;
-    unsigned disabled=0, skipped=0, candidates=0, linked=0, index=0;
+    unsigned disabled=0, skipped=0, candidates=0, linked=0, diagonals=0, index=0;
     for(const auto &name:names) {
       progress.setLabelText(QObject::tr("Fitting %1").arg(QString::fromStdString(name)));
       progress.setValue(index++);
@@ -377,8 +381,8 @@ struct ImpedanceValidityWindow::Impl {
         if(!entry.result.converged || !entry.result.gridStable) { ++skipped; continue; }
         fits.push_back(std::move(entry));
       }
-      unsigned ptCount=0;
-      auto edits=collectEdits(s,fits,ptCount); linked+=ptCount;
+      unsigned ptCount=0, diagonalCount=0;
+      auto edits=collectEdits(s,fits,ptCount,diagonalCount); linked+=ptCount; diagonals+=diagonalCount;
       for(const auto &entry:fits) candidates+=entry.candidates.size();
       if(!edits.empty()) pending.emplace_back(s,std::move(edits));
     }
@@ -397,8 +401,8 @@ struct ImpedanceValidityWindow::Impl {
     }
     const auto changed=pending.size();
     if(changed) { undoEdits=std::move(pending); undo->setEnabled(true); notifyMasksChanged(); }
-    maskStatus->setText(QObject::tr("Masked %1 component/periods across %2 stations · %3 linked PT masks · %4 disabled stations · %5 skipped fits")
-      .arg(candidates).arg(changed).arg(linked).arg(disabled).arg(skipped));
+    maskStatus->setText(QObject::tr("Masked %1 off-diagonal points across %2 stations · %3 diagonal masks · %4 linked PT masks · %5 disabled stations · %6 skipped fits")
+      .arg(candidates).arg(changed).arg(diagonals).arg(linked).arg(disabled).arg(skipped));
   }
   void undoMasks() {
     if(undoEdits.empty() || !survey) return;

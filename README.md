@@ -48,6 +48,8 @@ Run checks with `ctest --test-dir build/Release --output-on-failure`.
 Both impedance (`MTSECT`) and seven-channel remote-reference spectra
 (`SPECTRASECT`) are processed natively in C++. No Fortran compiler or runtime is
 required. Spectral matrices use the channel order Hx, Hy, Hz, Ex, Ey, Rx, Ry.
+The inline `// 49` count may be omitted; the reader validates the matrix size
+against `NCHAN` and rejects missing or extra values.
 The estimator calculates impedance, tipper and their standard errors from the
 packed spectral powers and `AVGT`; derived quantities use the same routines as
 other input formats. Invalid reference powers, nonpositive averaging counts,
@@ -56,7 +58,9 @@ remain missing without discarding valid outputs from other channels.
 
 After selecting EDI files, the import preview shows station/sample counts, the
 period range, the distinct-period count before and after merging, and a table
-of nearby-period groups. **Merge close periods** is optional and off by default.
+of all periods involving new stations, including exact matches already shared
+across stations. The preview states when no merging is needed; click **Import**
+to keep those periods unchanged. **Merge close periods** is optional and off by default.
 The initial **Tolerance (%)** is **0.1**. Changing it updates the preview.
 
 A group must satisfy `(maximum period - minimum period) / minimum period <
@@ -237,13 +241,15 @@ periods where either normalized log-resistivity or phase residual exceeds the
 the main data's propagated measurement errors, not a confidence band around
 the fitted curve. Only converged, grid-stable fits can provide candidates.
 Crosses in component colors and red table rows identify candidates; the preview
-reports each component's count and how many linked PT masks would change,
+reports each component's count and how many paired diagonal and linked PT masks would change,
 counting shared PT changes once. Components without a stable fit are skipped
 and identified in the preview. **Apply masks** performs one pass,
-masking both resistivity and phase for those component/periods. It respects
-**Data → Link Z / PT masks** and leaves other impedance components and tippers
-unchanged. Refitting does not trigger further rejection. **Undo masks** restores
-only changes from the last application, including linked PT masks, while keeping
+masking both resistivity and phase for those component/periods. A **Zxy** candidate
+also masks **Zxx**, and a **Zyx** candidate also masks **Zyy**, at the same period.
+This polarization pairing applies even when **Data → Link Z / PT masks** is off;
+that option independently controls PT masking. Tippers remain unchanged.
+Refitting does not trigger further rejection. **Undo masks** restores
+only changes from the last application, including paired diagonals and linked PT masks, while keeping
 earlier masks intact. Preview is enabled by default and automatically refreshes
 when navigating stations or changing the threshold, components or fit settings.
 Turning it off hides candidates and disables single-station Apply.

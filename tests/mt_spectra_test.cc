@@ -144,6 +144,30 @@ void reader() {
   // Standard scientific exponent spelling is accepted in spectral values.
   auto exponent = text; const auto pos = exponent.find('\n', exponent.find(">SPECTRA FREQ")) + 1;
   exponent.replace(pos, 1, "4D+00"); load(exponent);
+  // Infer the matrix size from NCHAN when the inline count is absent.
+  auto implicit = text;
+  implicit.erase(implicit.find(" // 49"), std::string(" // 49").size());
+  const auto inferred = load(implicit);
+  check(inferred.scalar_value(RealZxy, 0, value, error), "Spectra without inline count failed");
+  near(value, factor * impedance[1].real()); near(error, factor * expected.impedanceError[1]);
+  for(bool explicitCount:{false,true}) {
+    auto sample=explicitCount ? text : implicit;
+    auto oversized=sample; oversized.insert(oversized.find(">END"),"1\n");
+    rejects([&] { load(oversized); });
+    const auto lastValue=sample.find_last_not_of(" \n",sample.find(">END")-1);
+    const auto start=sample.find_last_of(" \n",lastValue);
+    auto truncated=sample; truncated.erase(start+1,lastValue-start);
+    rejects([&] { load(truncated); });
+  }
+  auto incorrectCount=text; incorrectCount.replace(incorrectCount.find("// 49"),5,"// 48");
+  rejects([&] { load(incorrectCount); });
+  // Preserve boundaries across successive spectra, including extra header options.
+  auto multiple=implicit;
+  auto second=implicit.substr(implicit.find(">SPECTRA FREQ"));
+  second.replace(second.find("FREQ= 2"),7,"FREQ= 4 AVGT_SUMS=10");
+  multiple.replace(multiple.find(">END"),5,second);
+  const auto repeated=load(multiple);
+  check(repeated.frequencies()==std::vector<double>({2.,4.}),"Adjacent spectral blocks were not preserved");
   rejects([&] { load(edi(packed, 5)); });
   rejects([&] { load(edi(packed, 7, 47)); });
   rejects([&] { load(edi(packed, 7, 49, 0.)); });
