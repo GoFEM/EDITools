@@ -1,4 +1,5 @@
 #include "include/MapBackground.h"
+#include "TopographyDialog.h"
 #include "include/FileLabels.h"
 /*
  * The EDI Tools application.
@@ -57,7 +58,12 @@
 #include "include/TipperPlot.h"
 #include "ExportGOFEMDialog.h"
 #include "ExportNativeMTDialog.h"
+#include "ExportPreview.h"
+#include "StationComparisonWindow.h"
 #include "SurveyCoordinatesDialog.h"
+#include "include/SurveyHistory.h"
+#include <QUndoView>
+#include <QVBoxLayout>
 #include "FitStatisticsWindow.h"
 #include "PeriodMapWindow.h"
 #include "PeriodLayoutWindow.h"
@@ -79,6 +85,24 @@ MainWindow::MainWindow(QWidget *parent) :
   ui(new Ui::MainWindow)
 {
   ui->setupUi(this);
+  history.reset(new SurveyHistory([this] { restoreSurveyView(); }));
+  auto *edit = new QMenu(tr("Edit"), this);
+  ui->menuBar->insertMenu(ui->menuData->menuAction(), edit);
+  auto *undo = history->stack().createUndoAction(this, tr("Undo"));
+  undo->setObjectName("actionUndo"); undo->setShortcut(QKeySequence::Undo); edit->addAction(undo);
+  auto *redo = history->stack().createRedoAction(this, tr("Redo"));
+  redo->setObjectName("actionRedo"); redo->setShortcuts(QKeySequence::Redo); edit->addAction(redo);
+  auto *historyDialog = new QDialog(this, Qt::Window);
+  historyDialog->setObjectName("surveyHistory"); historyDialog->setWindowTitle(tr("Survey history"));
+  auto *historyLayout = new QVBoxLayout(historyDialog);
+  auto *view = new QUndoView(&history->stack(), historyDialog);
+  view->setEmptyLabel(tr("Start of retained history")); historyLayout->addWidget(view);
+  view->setToolTip(tr("Select a step to undo or redo edits. The latest 20 edits are retained for this session. Loading a project starts a new history. Resampling opens a separate survey with its own history."));
+  auto *original = new QPushButton(tr("Open original survey"), historyDialog); historyLayout->addWidget(original);
+  connect(original, &QPushButton::clicked, this, [this] { if(auto data=history->original()) openSurveyCopy(std::move(data)); });
+  historyDialog->resize(420, 360);
+  auto *historyAction = edit->addAction(tr("History…")); historyAction->setObjectName("actionSurvey_history");
+  connect(historyAction, &QAction::triggered, historyDialog, [historyDialog] { historyDialog->show(); historyDialog->raise(); });
   ui->responsesList->setTextElideMode(Qt::ElideLeft);
   ui->responsesList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
   auto *responsesPanel = ui->responsesList->parentWidget();
@@ -128,12 +152,24 @@ MainWindow::MainWindow(QWidget *parent) :
   }));
   connect(rhoPlusAction,&QAction::toggled,this,[this]{updatePlots(false);});
   for(const auto &plot: plotHandlers) {
-    connect(plot.get(), &MTDataPlot::observationsChanged, this, [this] { updatePlots(false); refreshAnalysisWindows(); });
+    connect(plot.get(), &MTDataPlot::observationsChanged, this, [this] { history->record(tr("Edit masks")); updatePlots(false); refreshAnalysisWindows(); });
     connect(plot.get(), &MTDataPlot::componentVisibilityChanged, this, [this] { updatePlots(); });
   }
 
   mapHandler.reset(new MapPlot(ui->mapPlot, this));
   mapBackground = new MapBackground(ui->mapPlot);
+  auto *topography = ui->menuCoordinates->addAction(tr("Topography…"));
+  topography->setObjectName("actionTopography");
+  connect(topography, &QAction::triggered, this, [this] {
+    if(!mtSurvey) { QMessageBox::information(this,tr("Topography"),tr("Load a survey first.")); return; }
+    try {
+      TopographyDialog dialog(this,*mtSurvey,[this] {
+        mapBackground->setTopography(mtSurvey->topography());ui->mapPlot->replot();refreshAnalysisWindows();
+      });
+      dialog.exec();
+      history->record(tr("Topography / elevations"));
+    } catch(const std::exception &e) { QMessageBox::warning(this,tr("Topography"),QString::fromUtf8(e.what())); }
+  });
   auto *mapControls = new QWidget(ui->splitter_3);
   auto *mapControlsLayout = new QVBoxLayout(mapControls);
   mapControlsLayout->setContentsMargins(4, 0, 4, 0);
@@ -142,6 +178,9 @@ MainWindow::MainWindow(QWidget *parent) :
   mapStationNames->setObjectName("stationMapNames");
   mapActions->addWidget(mapStationNames);
   mapActions->addWidget(MapBackground::button(mapControls, 0, [this](int layers) { mapBackground->setLayers(layers); ui->mapPlot->replot(); }));
+  auto *terrainButton = new QPushButton(tr("Topography…"),mapControls);
+  terrainButton->setObjectName("openTopography");mapActions->addWidget(terrainButton);
+  connect(terrainButton,&QPushButton::clicked,topography,&QAction::trigger);
   mapActions->addStretch();
   auto *mapsButton = new QPushButton(tr("Maps…"), mapControls);
   mapsButton->setObjectName("openPeriodMaps");
@@ -153,6 +192,16 @@ MainWindow::MainWindow(QWidget *parent) :
   auto *periodLayoutAction = ui->menuData->addAction(tr("Period layout / Resampling…"));
   periodLayoutAction->setObjectName("actionPeriod_layout");
   connect(periodLayoutAction, &QAction::triggered, this, &MainWindow::openPeriodLayout);
+  auto *compare = ui->menuData->addAction(tr("Compare neighbouring stations…"));
+  compare->setObjectName("actionCompare_stations");
+  connect(compare, &QAction::triggered, this, [this] {
+    if(!stationComparison) stationComparison = new StationComparisonWindow(this);
+    QStringList selected;
+    if(auto *item=ui->stationList->currentItem()) selected << item->text();
+    for(auto *item:ui->stationList->selectedItems()) if(!selected.contains(item->text()))selected << item->text();
+    stationComparison->setData(mtSurvey,selected);
+    stationComparison->show();stationComparison->raise();stationComparison->activateWindow();
+  });
   auto *validityAction = ui->menuData->addAction(tr("Impedance validity / Rho+…"));
   validityAction->setObjectName("actionImpedance_validity");
   connect(validityAction, &QAction::triggered, this, [this] {
@@ -161,6 +210,7 @@ MainWindow::MainWindow(QWidget *parent) :
     }, [this] { updatePlots(false); refreshAnalysisWindows(); });
     impedanceValidity->setLinkTensorMasks(linkTensorMasksAction->isChecked());
     impedanceValidity->setFitOptions(rhoPlusOptions);
+    impedanceValidity->setHistory(history.get());
     impedanceValidity->setData(mtSurvey, ui->stationList->currentItem() ? ui->stationList->currentItem()->text() : QString());
     impedanceValidity->show(); impedanceValidity->raise(); impedanceValidity->activateWindow();
   });
@@ -190,8 +240,14 @@ MainWindow::MainWindow(QWidget *parent) :
   auto *mapSwitchLayout = new QHBoxLayout;
   mapSwitchLayout->addWidget(new QLabel(tr("Map coordinates:"), mapControls));
   mapSwitchLayout->addWidget(mapCoordinateSwitch);
+  mapCenterUtm = new QCheckBox(tr("Center UTM"), mapControls);
+  mapCenterUtm->setObjectName("mapCenterUtm");
+  mapCenterUtm->setEnabled(false);
+  mapCenterUtm->setToolTip(tr("Subtract the midpoint of the projected survey bounds. The origin is saved with the survey and shared by maps, reports and exports. The chosen UTM zone is preserved; centering does not change projection distortion."));
+  mapSwitchLayout->addWidget(mapCenterUtm);
   mapControlsLayout->addLayout(mapSwitchLayout);
   coordinateInfoLabel = new QLabel(tr("Latitude / longitude (degrees)"), mapControls);
+  coordinateInfoLabel->setObjectName("mapCoordinateInfo");
   coordinateInfoLabel->setWordWrap(true);
   coordinateInfoLabel->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
   coordinateInfoLabel->setMaximumHeight(85);
@@ -205,6 +261,23 @@ MainWindow::MainWindow(QWidget *parent) :
     } catch(const std::exception &e) {
       const QSignalBlocker blocker(mapCoordinateSwitch);
       mapCoordinateSwitch->setCurrentIndex(mapCoordinates.utm ? 1 : 0);
+      QMessageBox::warning(this, tr("Map coordinates"), QString::fromUtf8(e.what()));
+    }
+  });
+  connect(mapCenterUtm, &QCheckBox::toggled, this, [this](bool centered) {
+    if(!mtSurvey) return;
+    try {
+      const auto geographic = mtSurvey->geographic_locations();
+      const auto settings = mtSurvey->coordinates().utm ? mtSurvey->coordinates() :
+        SurveyCoordinates::suggested(geographic);
+      mtSurvey->set_coordinates(SurveyCoordinates::calculate(geographic, settings.zone,
+                                                            settings.north, centered));
+      history->record(tr("Center UTM coordinates"));
+      updateMap();
+      refreshAnalysisWindows();
+    } catch(const std::exception &e) {
+      const QSignalBlocker blocker(mapCenterUtm);
+      mapCenterUtm->setChecked(mtSurvey->coordinates().centered);
       QMessageBox::warning(this, tr("Map coordinates"), QString::fromUtf8(e.what()));
     }
   });
@@ -350,7 +423,8 @@ void MainWindow::on_actionLoad_EDI_triggered()
     std::set<std::string> incoming;
     for(const auto &name: candidate->get_stations_names()) if(!existing.count(name)) incoming.insert(name);
     if(!reviewEDIImport(this, *candidate, incoming, duplicates)) return;
-    mtSurvey = std::move(candidate);
+    if(mtSurvey) { mtSurvey->restore(*candidate); history->record(tr("Import EDI stations")); }
+    else { mtSurvey = std::move(candidate); history->reset(mtSurvey); }
     projectFile.clear();
     setWindowTitle(tr("MT Survey [%1]").arg(QString::fromStdString(mtSurvey->get_survey_name())));
     createStationsList();
@@ -364,9 +438,8 @@ void MainWindow::on_actionLoad_EDI_triggered()
 
 void MainWindow::createStationsList()
 {
-  ui->stationList->blockSignals(true);
+  const QSignalBlocker blocker(ui->stationList);
   ui->stationList->clear();
-  ui->stationList->blockSignals(false);
 
   const auto names = mtSurvey->get_stations_names();
   for(unsigned i = 0; i < names.size(); ++i)
@@ -382,18 +455,24 @@ void MainWindow::updateMap()
 {
   if(!mtSurvey) return;
   SurveyCoordinates view;
-  if(mapCoordinateSwitch->currentIndex() == 1)
+  if(mapCoordinateSwitch->currentIndex() == 1 && mtSurvey->n_stations())
     view = mtSurvey->coordinates().utm ? mtSurvey->coordinates() :
       SurveyCoordinates::suggested(mtSurvey->geographic_locations());
   const auto locations = view.transform(mtSurvey->geographic_locations());
   mapCoordinates = view;
+  {
+    const QSignalBlocker blocker(mapCenterUtm);
+    mapCenterUtm->setEnabled(view.utm);
+    mapCenterUtm->setChecked(mtSurvey->coordinates().centered);
+  }
   mapBackground->setCoordinates(view);
+  mapBackground->setTopography(mtSurvey->topography());
   const auto &coordinates = view.utm ? view : mtSurvey->coordinates();
   mapHandler->set_coordinate_labels(view.utm, view.centered);
   coordinateInfoLabel->setText(coordinates.utm ?
-    tr("WGS84 / UTM %1%2\nE₀: %3 m\nN₀: %4 m")
+    tr("WGS84 / UTM %1%2\nOrigin E: %3 m\nOrigin N: %4 m")
       .arg(coordinates.zone).arg(coordinates.north ? "N" : "S")
-      .arg(coordinates.origin_easting, 0, 'g', 17).arg(coordinates.origin_northing, 0, 'g', 17) :
+      .arg(coordinates.origin_easting, 0, 'f', 3).arg(coordinates.origin_northing, 0, 'f', 3) :
     tr("Latitude / longitude (degrees)"));
   coordinateInfoLabel->setToolTip(QString::fromStdString(coordinates.description()));
   mapHandler->set_data(locations,
@@ -408,6 +487,7 @@ void MainWindow::updatePlots(bool rescaleAxes)
   rhoPlusOverlay->hide();
   QListWidgetItem* item = ui->stationList->currentItem();
   if(item == nullptr) {
+    for(auto &plot: plotHandlers) plot->clear_observed_data();
     rhoPlusOverlay->update(nullptr,rhoPlusAction->isChecked(),ui->actionPhase_wrap->isChecked(),
       plotHandlers[0]->component_visibility(),plotHandlers[1]->component_visibility(),rhoPlusOptions);
     return;
@@ -474,6 +554,7 @@ void MainWindow::maskDataType(bool on)
   const RealDataType type = static_cast<RealDataType>(action->data().toInt());
 
   mtSurvey->get_station_data(station_name).mask_type(type, on, linkTensorMasksAction->isChecked());
+  history->record(tr("Edit component masks"));
 
   updatePlots();
   refreshAnalysisWindows();
@@ -481,31 +562,45 @@ void MainWindow::maskDataType(bool on)
 
 void MainWindow::deleteStation()
 {
-  ui->stationList->blockSignals(true);
-  QListWidgetItem* item = ui->stationList->takeItem(ui->stationList->currentRow());
-  ui->stationList->blockSignals(false);
-
+  auto *item = ui->stationList->currentItem();
+  if(!item || !mtSurvey) return;
   mtSurvey->remove_station(item->text().toStdString());
-  refreshAnalysisWindows();
+  history->record(tr("Delete station"));
+  restoreSurveyView();
+}
 
-  ui->label->setText("Stations (" + QString("%1").arg(mtSurvey->n_stations()) + "):");
-
-  updatePlots();
+void MainWindow::restoreSurveyView()
+{
+  const auto *item = ui->stationList->currentItem();
+  const QString selected = item ? item->text() : QString();
+  createStationsList();
+  const auto matches = ui->stationList->findItems(selected, Qt::MatchExactly);
+  if(!matches.isEmpty()) ui->stationList->setCurrentItem(matches.front());
+  else if(ui->stationList->count()) ui->stationList->setCurrentRow(0);
+  updateMap(); updatePlots(false); refreshAnalysisWindows();
 }
 
 void MainWindow::renameStation()
 {
   QListWidgetItem* item = ui->stationList->currentItem();
 
+  if(!item || !mtSurvey) return;
   bool ok;
   QString newName = QInputDialog::getText(this, tr("Name"),
                                           tr("New name:"), QLineEdit::Normal,
                                           item->text(), &ok);
   if (ok && !newName.isEmpty())
   {
-    mtSurvey->rename_station(item->text().toStdString(), newName.toStdString());
-    item->setText(newName);
-    refreshAnalysisWindows();
+    try {
+      mtSurvey->rename_station(item->text().toStdString(), newName.toStdString());
+      { const QSignalBlocker block(ui->stationList); item->setText(newName); }
+      history->record(tr("Rename station"));
+      updateMap();
+      updatePlots(false);
+      refreshAnalysisWindows();
+    } catch(const std::exception &e) {
+      QMessageBox::warning(this,tr("Rename station"),QString::fromUtf8(e.what()));
+    }
   }
 }
 
@@ -545,22 +640,24 @@ void MainWindow::on_actionSave_project_triggered()
 
 void MainWindow::on_actionLoad_project_triggered()
 {
-  projectFile = QFileDialog::getOpenFileName(
+  const QString path = QFileDialog::getOpenFileName(
                             this,
                             "Open project file",
                             lastDirectory,
                             "Project file (*.mtd)");
 
-  if(projectFile.length() == 0)
+  if(path.isEmpty())
     return;
 
-  rememberDirectory(projectFile);
+  rememberDirectory(path);
 
   bool loaded = false;
+  std::shared_ptr<MTSurveyData> loadedSurvey;
+  std::map<std::string,MTSurveyData> loadedResponses;
 
   try
   {
-    std::ifstream ifs(projectFile.toStdString(), std::ios::binary);
+    std::ifstream ifs(path.toStdString(), std::ios::binary);
     if(ifs.is_open())
     {
       boost::archive::binary_iarchive ia(ifs);
@@ -572,8 +669,8 @@ void MainWindow::on_actionLoad_project_triggered()
       if(magic != projectFileMagic)
         throw std::runtime_error("Legacy project format");
 
-      ia >> mtSurvey;
-      ia >> mtResponses;
+      ia >> loadedSurvey;
+      ia >> loadedResponses;
 
       PlotOptions plotOptions;
       if(version == 2)
@@ -637,12 +734,12 @@ void MainWindow::on_actionLoad_project_triggered()
     // layout: mtSurvey followed by mtResponses, with no plot options.
     try
     {
-      std::ifstream ifs(projectFile.toStdString(), std::ios::binary);
+      std::ifstream ifs(path.toStdString(), std::ios::binary);
       if(ifs.is_open())
       {
         boost::archive::binary_iarchive ia(ifs);
-        ia >> mtSurvey;
-        ia >> mtResponses;
+        ia >> loadedSurvey;
+        ia >> loadedResponses;
 
         PlotOptions defaultPlotOptions;
         for(const auto &plot: plotHandlers)
@@ -664,17 +761,19 @@ void MainWindow::on_actionLoad_project_triggered()
     }
   }
 
-  if(!loaded)
+  if(!loaded || !loadedSurvey)
   {
     QMessageBox::critical(this, tr("Load project"),
                           tr("Failed to load project file."));
     return;
   }
 
-  createStationsList();
+  mtSurvey=std::move(loadedSurvey);
+  mtResponses=std::move(loadedResponses);
+  projectFile=path;
+  history->reset(mtSurvey);
   createResponsesList();
-  updateMap();
-  refreshAnalysisWindows();
+  restoreSurveyView();
 }
 
 void MainWindow::on_stationList_currentRowChanged(int /*currentRow*/)
@@ -684,6 +783,7 @@ void MainWindow::on_stationList_currentRowChanged(int /*currentRow*/)
 
 void MainWindow::on_stationList_itemChanged(QListWidgetItem *item)
 {
+  const QSignalBlocker blocker(ui->stationList);
   bool checked = item->checkState() == Qt::Checked;
   mtSurvey->set_active_flag(item->text().toStdString(), checked);
 
@@ -699,6 +799,7 @@ void MainWindow::on_stationList_itemChanged(QListWidgetItem *item)
     mtSurvey->set_active_flag(sitem->text().toStdString(), checked);
   }
 
+  history->record(tr("Enable / disable stations"));
   updatePlots();
   refreshAnalysisWindows();
 }
@@ -709,6 +810,7 @@ void MainWindow::on_actionDecimate_triggered()
     return;
 
   mtSurvey->decimate();
+  history->record(tr("Decimate periods"));
   updatePlots();
   refreshAnalysisWindows();
 }
@@ -730,31 +832,12 @@ void MainWindow::on_actionExport_in_GoFEM_triggered()
   if(mtSurvey == nullptr)
     return;
 
-  QString exportFile = QFileDialog::getSaveFileName(
-        this,
-        "Export data",
-        lastDirectory,
-        "Project file (*.*)");
-
-  if(exportFile.length() == 0)
-    return;
-
-  rememberDirectory(exportFile);
-
-  std::vector<double> periods = mtSurvey->get_unique_periods();
-
-  ExportGOFEMDialog* dlg = new ExportGOFEMDialog(periods, this);
-
-  if(dlg->exec())
-  {
-    auto selected_data_types = dlg->getSelectedDataTypes();
-    auto selected_periods = dlg->getSelectedPeriods();
-    try {
-      mtSurvey->write_gofem(exportFile.toStdString(), selected_data_types, selected_periods);
-    } catch(const std::exception &e) {
-      QMessageBox::warning(this, tr("Export data"), QString::fromUtf8(e.what()));
-    }
-  }
+  ExportGOFEMDialog dialog(*mtSurvey,this);
+  if(dialog.exec()!=QDialog::Accepted) return;
+  try {
+    const auto path=saveSurveyExport(this,dialog.exportPreview().result(),SurveyExport::Format::GoFEM,lastDirectory);
+    if(!path.isEmpty())rememberDirectory(path);
+  } catch(const std::exception &e) { QMessageBox::warning(this,tr("Export data"),QString::fromUtf8(e.what())); }
 }
 
 void MainWindow::on_actionExport_native_MT_triggered()
@@ -771,6 +854,7 @@ void MainWindow::on_actionConvert_UTM_triggered()
   try {
     SurveyCoordinatesDialog dialog(*mtSurvey, this);
     if(dialog.exec() == QDialog::Accepted) {
+      history->record(tr("UTM projection"));
       const QSignalBlocker blocker(mapCoordinateSwitch);
       mapCoordinateSwitch->setCurrentIndex(1);
       updateMap();
@@ -795,6 +879,7 @@ void MainWindow::on_actionSet_error_floor_triggered()
                                                5, 0, 100, 2, &ok);
   if(ok && mtSurvey != nullptr)
     mtSurvey->set_error_floor(error_floor / 100.);
+  history->record(tr("Error floor"));
 
   updatePlots();
   refreshAnalysisWindows();
@@ -1077,6 +1162,7 @@ void MainWindow::refreshAnalysisWindows()
   if(periodLayout) periodLayout->setData(mtSurvey);
   if(impedanceValidity) impedanceValidity->setData(mtSurvey);
   if(surveyAverage) surveyAverage->setData(mtSurvey);
+  if(stationComparison) stationComparison->setData(mtSurvey);
 }
 
 void MainWindow::openPeriodLayout()
@@ -1092,6 +1178,7 @@ void MainWindow::openSurveyCopy(std::shared_ptr<MTSurveyData> data)
   window->setAttribute(Qt::WA_DeleteOnClose);
   window->setObjectName("resampledSurveyWindow");
   window->mtSurvey = std::move(data);
+  window->history->reset(window->mtSurvey);
   window->mtResponses = mtResponses;
   window->lastDirectory = lastDirectory;
   window->projectFile.clear();
@@ -1105,7 +1192,7 @@ void MainWindow::openSurveyCopy(std::shared_ptr<MTSurveyData> data)
 
 void MainWindow::on_actionPeriod_maps_triggered()
 {
-  if(!periodMaps) periodMaps = new PeriodMapWindow(this, [this] { updatePlots(); refreshAnalysisWindows(); });
+  if(!periodMaps) periodMaps = new PeriodMapWindow(this, [this] { history->record(tr("Map masks")); updatePlots(); refreshAnalysisWindows(); });
   periodMaps->setLinkTensorMasks(linkTensorMasksAction->isChecked());
   periodMaps->setData(mtSurvey, mtResponses);
   periodMaps->show();

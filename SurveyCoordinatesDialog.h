@@ -2,6 +2,7 @@
 #define SURVEY_COORDINATES_DIALOG_H
 #include <QDialog>
 #include "include/SurveyCoordinates.h"
+#include "include/UTMAnalysis.h"
 
 class MTSurveyData;
 class QSpinBox;
@@ -11,20 +12,34 @@ class QLineEdit;
 class QTableWidget;
 class QLabel;
 class QPushButton;
+class QCustomPlot;
+class QDoubleSpinBox;
 
-class SurveyCoordinatesDialog : public QDialog
-{
+class SurveyCoordinatesDialog : public QDialog {
 public:
   explicit SurveyCoordinatesDialog(MTSurveyData &survey, QWidget *parent = nullptr);
+
 private:
   void updatePreview();
+  void updateZoneOverlay();
+  void fitSurvey();
+  const UTM::Analysis &analysis(int selectedZone);
   MTSurveyData &survey;
   SurveyCoordinates preview;
+  SurveyCoordinates suggested;
+  std::vector<std::array<double, 3>> geographic;
+  UTM::Extent bounds;
+  std::map<int, UTM::Analysis> analyses;
   QSpinBox *zone;
   QComboBox *hemisphere;
   QCheckBox *center;
   QLineEdit *easting, *northing;
   QTableWidget *table;
+  QTableWidget *candidates;
+  QCustomPlot *map;
+  QDoubleSpinBox *limit;
+  QCheckBox *names;
+  QLabel *crossing, *distortion;
   QLabel *status;
   QPushButton *apply, *copy;
 };

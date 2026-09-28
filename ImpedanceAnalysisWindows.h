@@ -6,6 +6,7 @@
 #include <functional>
 #include "include/ImpedanceAnalysis.h"
 class MTSurveyData;
+class SurveyHistory;
 class QShowEvent;
 
 class ImpedanceValidityWindow : public QDialog {
@@ -15,6 +16,7 @@ public:
     std::function<void()> masksChanged = {});
   ~ImpedanceValidityWindow() override;
   void setData(const std::shared_ptr<MTSurveyData> &survey, const QString &station = {});
+  void setHistory(SurveyHistory *history);
   void setFitOptions(const ImpedanceAnalysis::RhoPlusOptions &options);
   void setLinkTensorMasks(bool linked);
 protected:

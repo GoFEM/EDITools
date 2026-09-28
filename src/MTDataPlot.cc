@@ -477,6 +477,7 @@ void MTDataPlot::apply_axis_ranges(bool rescaleAxes, bool useDefaultYRange,
 
 void MTDataPlot::mask_selected_data(bool on)
 {
+  if(!m_data) return;
   QList<QCPGraph*> selectedGraphs = m_plot->selectedGraphs();
   for(auto &graph: selectedGraphs)
   {
@@ -505,6 +506,14 @@ void MTDataPlot::mask_selected_data(bool on)
   emit observationsChanged();
 }
 
+void MTDataPlot::clear_observed_data()
+{
+  m_data = nullptr;
+  for(int i=0; i<m_plot->graphCount(); ++i) m_plot->graph(i)->data()->clear();
+  for(auto *bars: m_errorBars) bars->data()->clear();
+  m_plot->replot();
+}
+
 void MTDataPlot::maskSelectedData()
 {
   mask_selected_data(false);
@@ -512,6 +521,7 @@ void MTDataPlot::maskSelectedData()
 
 void MTDataPlot::invMaskSelectedData()
 {
+  if(!m_data) return;
   const auto &frequencies = m_data->frequencies();
   std::map<RealDataType, std::vector<bool>> selected;
   for(auto *graph: m_plot->selectedGraphs()) {

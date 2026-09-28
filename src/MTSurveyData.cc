@@ -18,6 +18,7 @@
  */
 
 #include "include/MTSurveyData.h"
+#include "include/SurveyExport.h"
 
 #include "include/datum.h"
 #include "include/EDIFileReader.h"
@@ -33,6 +34,18 @@ MTSurveyData::MTSurveyData(const std::string &survey_name):
 std::string MTSurveyData::get_survey_name() const
 {
   return m_survey_name;
+}
+
+void MTSurveyData::restore(const MTSurveyData &state)
+{
+  MTSurveyData replacement(state);
+  for(auto it=m_stations_data.begin(); it!=m_stations_data.end();)
+    if(!replacement.is_station_present(it->first)) it=m_stations_data.erase(it);
+    else ++it;
+  for(auto &entry:replacement.m_stations_data)
+    m_stations_data[entry.first]=std::move(entry.second);
+  replacement.m_stations_data.swap(m_stations_data);
+  *this=std::move(replacement);
 }
 
 bool MTSurveyData::is_station_present(const std::string &name) const
@@ -72,6 +85,7 @@ void MTSurveyData::load_responses(const std::string &file_path, MTResponseData::
   m_response_observations = std::move(rows);
   m_survey_name = file_path;
   m_coordinates = SurveyCoordinates{};
+  m_topography = {};
 }
 
 void MTSurveyData::load_from_gofem(const std::string &file_path)
@@ -224,68 +238,14 @@ void MTSurveyData::write_gofem(const std::string &file,
                                const std::vector<RealDataType> &types,
                                const std::vector<double> &periods) const
 {
-  std::set<double> written_frequencies;
-  const auto geographic = geographic_locations();
-  const auto output_coordinates = m_coordinates.utm ? m_coordinates : SurveyCoordinates::suggested(geographic);
-  const auto locations = output_coordinates.transform(geographic);
-  // Write data file
-  {
-    std::ofstream ofs(file);
-
-    if(!ofs.is_open())
-      throw std::runtime_error("Cannot open file " + file);
-    ofs.imbue(std::locale::classic());
-
-    ofs << "# DataType Frequency SourceName ReceiverName Value Error" << std::endl;
-
-    for(auto &station: m_stations_data)
-    {
-      const MTStationData &data = station.second;
-
-      if(!data.active())
-        continue;
-
-      data.write(ofs, types, periods, &written_frequencies);
-    }
-    if(!ofs) throw std::runtime_error("Cannot write data file " + file);
+  NativeMT::Options options; options.types=types; options.periods=periods;
+  const auto result=SurveyExport::prepare(*this,options,SurveyExport::Format::GoFEM);
+  const std::array<std::string,3> paths{{file,file+".recvs",file+".freqs"}};
+  const std::array<std::string,3> texts{{result.data_text,result.receiver_text,result.frequency_text}};
+  for(unsigned i=0;i<paths.size();++i) {
+    std::ofstream out(paths[i]);out<<texts[i];
+    if(!out) throw std::runtime_error("Cannot write export file " + paths[i]);
   }
-
-  // Write receiver file
-  {
-    std::ofstream ofs(file + ".recvs");
-
-    if(!ofs.is_open())
-      throw std::runtime_error("Cannot open file " + file);
-    ofs.imbue(std::locale::classic());
-    ofs << std::setprecision(std::numeric_limits<double>::max_digits10);
-
-    ofs << "# Type Name Electrodes x y z" << std::endl;
-    {
-      std::istringstream provenance(output_coordinates.description());
-      std::string line;
-      while(std::getline(provenance, line)) ofs << "# " << line << '\n';
-    }
-    unsigned index = 0;
-
-    for(auto &station: m_stations_data)
-    {
-      const MTStationData &data = station.second;
-      const auto &position = locations[index++];
-
-      if(!data.active())
-        continue;
-
-      ofs << "Dipole\t" << data.name() << "\t1\t"
-          << position[0] << "\t"
-          << position[1] << "\t"
-          << position[2] << std::endl;
-    }
-  }
-  std::ofstream frequencies(file + ".freqs");
-  frequencies.imbue(std::locale::classic());
-  frequencies << std::setprecision(std::numeric_limits<double>::max_digits10);
-  for(double f: written_frequencies) frequencies << f << '\n';
-  if(!frequencies) throw std::runtime_error("Cannot write frequency file " + file + ".freqs");
 }
 
 void MTSurveyData::set_error_floor(double error_floor)
@@ -318,7 +278,7 @@ std::set<RealDataType> MTSurveyData::get_active_types(const std::string &name) c
 
 void MTSurveyData::remove_station(const std::string &name)
 {
-  m_stations_data.erase(m_stations_data.find(name));
+  m_stations_data.erase(name);
 }
 
 void MTSurveyData::rename_station(const std::string &name, const std::string &new_name)
@@ -326,6 +286,9 @@ void MTSurveyData::rename_station(const std::string &name, const std::string &ne
   auto it = m_stations_data.find(name);
   if(it == m_stations_data.end())
     throw std::runtime_error("Station " + name + " not found");
+  if(name == new_name) return;
+  if(new_name.empty() || is_station_present(new_name))
+    throw std::runtime_error("Choose a nonempty, unique station name.");
 
   MTStationData &data = it->second;
   data.set_name(new_name);

@@ -81,8 +81,9 @@ public:
   std::map<std::string, QPointF> positions;
   QString description;
   QCPRange x{-1., 1.}, y{-1., 1.};
-  LocationMap(const MTSurveyData &survey, int layers) {
+  LocationMap(const MTSurveyData &survey, int layers, bool terrain) {
     auto *background = new MapBackground(&plot); background->setLayers(layers);
+    if(terrain) { auto state=survey.topography(); state.style.visible=true; background->setTopography(state); }
     style(plot); title(plot, tr("Station map"));
     std::vector<std::string> names;
     std::vector<std::array<double, 3>> locations;
@@ -233,7 +234,7 @@ bool write_pdf(const QString &path, const MTSurveyData &survey, const MTSurveyDa
   }
   FitStatistics::Result fit;
   if(response) fit = FitStatistics::compare(survey, *response, FitStatistics::ErrorSource::Observed);
-  LocationMap map(survey, options.mapLayers);
+  LocationMap map(survey, options.mapLayers, options.topography);
   QSaveFile file(path);
   if(!file.open(QIODevice::WriteOnly)) throw std::runtime_error(file.errorString().toStdString());
   bool canceled = false;
@@ -423,6 +424,7 @@ bool write_pdf(const QString &path, const MTSurveyData &survey, const MTSurveyDa
     }
     if(maps && !canceled) {
       auto mapSurvey = std::make_shared<MTSurveyData>(survey);
+      mapSurvey->topography().style.visible = options.topography;
       if(!options.includeDisabled) for(const auto &name: survey.get_stations_names()) if(!survey.is_active(name)) mapSurvey->remove_station(name);
       const auto responseKey = responseName;
       std::map<std::string, MTSurveyData> mapResponses;
@@ -513,6 +515,10 @@ void show_dialog(QWidget *parent, const MTSurveyData &survey, const std::map<std
   form->addRow(tr("Map vectors:"), parts);
   int mapLayers = defaults.mapLayers;
   form->addRow(tr("Geography:"), MapBackground::button(&dialog, mapLayers, [&](int mask) { mapLayers = mask; }, true));
+  auto *terrain = checkbox(tr("Topography"), "reportTopography", defaults.topography && survey.topography().grid && survey.topography().style.visible);
+  terrain->setEnabled(bool(survey.topography().grid));
+  terrain->setToolTip(tr("Use the locally loaded DEM and its current colours, hillshade, contours and opacity on report maps. No downloads occur during export."));
+  form->addRow(QString(),terrain);
   layout->addLayout(form);
   auto *pages = new QLabel(&dialog); pages->setObjectName("reportPageCount"); layout->addWidget(pages);
   auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog); layout->addWidget(buttons);
@@ -547,6 +553,7 @@ void show_dialog(QWidget *parent, const MTSurveyData &survey, const std::map<std
   const auto path = destination.selectedFiles().first();
   Options options = defaults; options.title = title->text().trimmed(); if(options.title.isEmpty()) options.title = tr("Survey data report");
   options.mapLayers = mapLayers;
+  options.topography = terrain->isChecked();
   options.overview = overview->isChecked(); options.stationPages = stations->isChecked(); options.tipperArrows = tipper->currentIndex() == 1;
   options.phaseTensorMaps = ptMaps->isChecked(); options.inductionMaps = induction->isChecked();
   options.mapData = Options::MapData(mapData->currentIndex());

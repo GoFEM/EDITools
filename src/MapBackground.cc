@@ -1,5 +1,6 @@
 #include "include/MapBackground.h"
 #include "include/OsmBasemap.h"
+#include "include/TopographyLayer.h"
 #include <QDesktopServices>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -73,16 +74,19 @@ int MapBackground::availableLayers() {
 MapBackground::MapBackground(QCustomPlot *plot): QCPLayerable(plot) {
   setObjectName("mapBackground");
   osm = new Osm::Basemap(plot);
+  terrain = new TopographyLayer(plot);
   if(!plot->layer("geography")) plot->addLayer("geography", plot->layer("grid"), QCustomPlot::limBelow);
   setLayer("geography");
 }
 void MapBackground::setCoordinates(const SurveyCoordinates &value, double units) {
+  terrain->setCoordinates(value, units);
   if(coordinates.utm == value.utm && coordinates.zone == value.zone && coordinates.north == value.north &&
      coordinates.origin_easting == value.origin_easting && coordinates.origin_northing == value.origin_northing && scale == units) return;
   coordinates = value; scale = units;
   osm->setCoordinates(value, units);
   ready.fill(false); for(auto &paths: projected) paths.clear();
 }
+void MapBackground::setTopography(const Topography::State &state) { terrain->setData(state); }
 void MapBackground::setLayers(int layers) {
   const int previous = enabled; enabled = layers ? layers & (availableLayers() | OpenStreetMap) : 0;
   if((previous & OpenStreetMap) != (enabled & OpenStreetMap)) osm->setEnabled(enabled & OpenStreetMap);

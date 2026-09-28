@@ -1,21 +1,19 @@
 #include "ExportNativeMTDialog.h"
+#include "ExportPreview.h"
+#include <QTimer>
 #include "include/MTSurveyData.h"
 
 #include <QCheckBox>
 #include <QDialogButtonBox>
-#include <QFileDialog>
-#include <QFileInfo>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
 #include <QMessageBox>
 #include <QPushButton>
-#include <QSaveFile>
 #include <QToolButton>
 #include <QVBoxLayout>
 
 #include <cmath>
-#include <memory>
 
 ExportNativeMTDialog::ExportNativeMTDialog(MTSurveyData &data, const QString &path, QWidget *parent)
   : QDialog(parent), survey(data), directory(path)
@@ -67,9 +65,6 @@ ExportNativeMTDialog::ExportNativeMTDialog(MTSurveyData &data, const QString &pa
   });
   type_layout->addWidget(clear_types);
   selection_layout->addLayout(type_layout);
-  auto *coordinate_help = new QLabel(tr("Uses the survey coordinates. Convert or center them via Coordinates → Convert latitude/longitude to UTM. If needed, UTM is chosen automatically."), this);
-  coordinate_help->setWordWrap(true);
-  layout->addWidget(coordinate_help);
   auto *advanced_button = new QToolButton(this);
   advanced_button->setText(tr("Advanced"));
   advanced_button->setCheckable(true);
@@ -92,68 +87,40 @@ ExportNativeMTDialog::ExportNativeMTDialog(MTSurveyData &data, const QString &pa
     advanced_button->setArrowType(on ? Qt::DownArrow : Qt::RightArrow);
   });
 
+  preview = new ExportPreview(this); layout->addWidget(preview);
   auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, this);
-  buttons->button(QDialogButtonBox::Save)->setText(tr("Export…"));
+  save=buttons->button(QDialogButtonBox::Save); save->setText(tr("Export…"));
+  auto *timer=new QTimer(this); timer->setSingleShot(true);
+  connect(timer,&QTimer::timeout,this,&ExportNativeMTDialog::updatePreview);
+  auto changed=[timer] { timer->start(0); };
+  connect(periods,&QListWidget::itemSelectionChanged,this,changed);
+  connect(types,&QListWidget::itemChanged,this,changed);
+  for(auto *box:{conjugate,reverse_vertical,distortion})connect(box,&QCheckBox::toggled,this,changed);
   connect(buttons, &QDialogButtonBox::accepted, this, &ExportNativeMTDialog::exportFiles);
   connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
   layout->addWidget(buttons);
+  updatePreview();
+  resize(780,800);
 }
 
-void ExportNativeMTDialog::exportFiles()
-{
+NativeMT::Options ExportNativeMTDialog::options() const {
+  NativeMT::Options result;
+  for(auto *item:periods->selectedItems())result.periods.push_back(item->data(Qt::UserRole).toDouble());
+  for(int i=0;i<types->count();++i)if(types->item(i)->checkState()==Qt::Checked)
+    result.types.push_back(static_cast<RealDataType>(types->item(i)->data(Qt::UserRole).toInt()));
+  result.negative_time_convention=conjugate->isChecked();
+  result.vertical_magnetic_up=reverse_vertical->isChecked();result.distortion=distortion->isChecked();
+  return result;
+}
+void ExportNativeMTDialog::updatePreview() {
+  save->setEnabled(preview->update(survey,options(),SurveyExport::Format::Native));
+}
+void ExportNativeMTDialog::exportFiles() {
   try {
-    NativeMT::Options options;
-    for(auto *item: periods->selectedItems()) options.periods.push_back(item->data(Qt::UserRole).toDouble());
-    for(int i = 0; i < types->count(); ++i)
-      if(types->item(i)->checkState() == Qt::Checked)
-        options.types.push_back(static_cast<RealDataType>(types->item(i)->data(Qt::UserRole).toInt()));
-    options.horizontal_axes_confirmed = true;
-    options.conventions_confirmed = true;
-    options.negative_time_convention = conjugate->isChecked();
-    options.vertical_magnetic_up = reverse_vertical->isChecked();
-    options.distortion = distortion->isChecked();
-    survey.ensure_utm_coordinates();
-    const auto names = survey.get_stations_names();
-    const auto positions = survey.get_stations_locations();
-    for(unsigned i = 0; i < names.size(); ++i)
-      options.receivers[names[i]] = {{positions[i][0], positions[i][1], -positions[i][2]}};
-    options.coordinate_description = survey.coordinates().description() +
-      "\nNative z = -EDI elevation (metres); vertical origin elevation = 0, source elevation datum retained.";
-    std::vector<const MTStationData *> stations;
-    for(const auto &name: survey.get_stations_names()) stations.push_back(&survey.get_station_data(name));
-    const auto result = NativeMT::prepare(stations, options);
-
-    QString summary = tr("%1 observations, %2 receivers, %3 frequencies.\nOmitted: %4 masked, %5 missing, %6 undefined phases at zero impedance.")
-      .arg(qulonglong(result.observations.size())).arg(qulonglong(result.receivers.size())).arg(qulonglong(result.frequencies.size()))
-      .arg(qulonglong(result.masked)).arg(qulonglong(result.missing)).arg(qulonglong(result.undefined_phase));
-    for(const auto &warning: result.warnings) summary += "\n\n" + QString::fromStdString(warning);
-    QString path = QFileDialog::getSaveFileName(this, tr("Export native MT observations"), directory, tr("MT observations (*.data);;All files (*)"));
-    if(path.isEmpty()) return;
-    if(QFileInfo(path).suffix().isEmpty()) path += ".data";
-    QFileInfo info(path);
-    QString base = info.absolutePath() + "/" + info.completeBaseName();
-    const std::array<QString, 3> paths{{path, base + ".recvs", base + ".freqs"}};
-    if(paths[0] == paths[1] || paths[0] == paths[2])
-      throw std::runtime_error("Choose an observation filename different from the .recvs and .freqs companions.");
-    QStringList existing;
-    for(unsigned i = 1; i < paths.size(); ++i) if(QFileInfo::exists(paths[i])) existing << paths[i];
-    if(!existing.empty() && QMessageBox::question(this, tr("Replace companion files?"), existing.join("\n")) != QMessageBox::Yes) return;
-    const std::array<std::string, 3> texts{{result.data_text, result.receiver_text, result.frequency_text}};
-    std::array<std::unique_ptr<QSaveFile>, 3> files;
-    // Stage all three files before replacing any destination.
-    for(unsigned i = 0; i < paths.size(); ++i) {
-      files[i].reset(new QSaveFile(paths[i]));
-      if(!files[i]->open(QIODevice::WriteOnly) ||
-         files[i]->write(texts[i].data(), qint64(texts[i].size())) != qint64(texts[i].size()))
-        throw std::runtime_error("Cannot write " + paths[i].toStdString() + ": " + files[i]->errorString().toStdString());
-    }
-    for(unsigned i = 0; i < paths.size(); ++i)
-      if(!files[i]->commit()) throw std::runtime_error("Cannot finalize " + paths[i].toStdString() +
-        ". Some companion files may already have been replaced; retry the complete export. " + files[i]->errorString().toStdString());
-    exported_file = path;
-    QMessageBox::information(this, tr("MT export complete"), summary + "\n\n" + paths[0] + "\n" + paths[1] + "\n" + paths[2]);
+    updatePreview();if(!save->isEnabled())return;
+    exported_file=saveSurveyExport(this,preview->result(),SurveyExport::Format::Native,directory);
+    if(exported_file.isEmpty())return;
+    QMessageBox::information(this,tr("MT export complete"),tr("Observations and receiver/frequency companions saved."));
     accept();
-  } catch(const std::exception &e) {
-    QMessageBox::warning(this, tr("Cannot export MT data"), QString::fromUtf8(e.what()));
-  }
+  } catch(const std::exception &e) { QMessageBox::warning(this,tr("Cannot export MT data"),QString::fromUtf8(e.what())); }
 }

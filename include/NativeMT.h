@@ -35,7 +35,7 @@ struct Export {
   Receivers receivers;
   std::vector<double> frequencies;
   std::vector<std::string> warnings;
-  std::string data_text, receiver_text, frequency_text;
+  std::string data_text, receiver_text, frequency_text, coordinate_description;
   std::size_t masked = 0, missing = 0, undefined_phase = 0;
 };
 

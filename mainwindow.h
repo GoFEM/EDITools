@@ -45,6 +45,8 @@ class PeriodLayoutWindow;
 class ImpedanceValidityWindow;
 class SurveyAverageWindow;
 class RhoPlusOverlay;
+class SurveyHistory;
+class StationComparisonWindow;
 
 class MainWindow : public QMainWindow
 {
@@ -228,6 +230,9 @@ private:
   Ui::MainWindow *ui;
 
   std::shared_ptr<MTSurveyData> mtSurvey;
+  std::unique_ptr<SurveyHistory> history;
+  StationComparisonWindow *stationComparison = nullptr;
+  void restoreSurveyView();
   std::map<std::string, MTSurveyData> mtResponses;
   std::vector<std::shared_ptr<MTDataPlot>> plotHandlers;
   std::shared_ptr<MapPlot> mapHandler;
@@ -246,6 +251,7 @@ private:
 
   QLabel *coordinateInfoLabel;
   QComboBox *mapCoordinateSwitch;
+  QCheckBox *mapCenterUtm;
   QCheckBox *mapStationNames;
   QAction *linkTensorMasksAction;
   SurveyCoordinates mapCoordinates;

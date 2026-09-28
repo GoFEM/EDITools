@@ -13,16 +13,18 @@ A simple GUI tool to work with large collections of [Magnetitelluric](https://en
 - Save/Load a project with all masking and settings preserved
 - Export selected data in supported inversion formats.
 - Overlay computed inversion responses on observed data.
+- Load, display and export topography, including optional DEM downloads.
 
 ## Dependencies
 
-- A C++14 compiler
+- A C++14 compiler (C++17 when using GDAL >= 3.9)
 - Qt >= 5.12 (Widgets, PrintSupport and Network)
 - Eigen >= 3
 - CMake >= 3.10
 - Boost >= 1.84
 - QCustomPlot >= 2.0
 - PROJ (UTM coordinate conversion)
+- GDAL >= 3.7 (GeoTIFF input, raster reprojection and export)
 
 ## Building
 
@@ -184,6 +186,35 @@ change the other entries in the starting tensor. Unmasking applies the same link
 For inverted selections, a mask takes precedence if multiple selected components
 give conflicting instructions for a shared dependent entry.
 
+### Edit history
+
+**Edit → Undo / Redo** shares one history across station plots, map masking and
+rho+ masking. It also covers error floors, station enable/disable, rename/delete,
+EDI additions, decimation, UTM settings and topography/elevation edits. A batch
+operation is one step; edits that leave the data unchanged add no step.
+
+**Edit → History…** lists the latest 20 operations. Select a step to move back
+or forward; a new edit after undo discards the redo branch. **Open original
+survey** opens an independent copy of the survey as it was loaded in this
+session, for comparison. History is kept in memory and starts afresh when a
+project is loaded. Project files save the current survey, not the undo history.
+Resampling opens a separate survey with its own history and retains its source.
+
+### Neighbouring-station comparison
+
+**Data → Compare neighbouring stations…** overlays the stations selected in the
+main station list. With one station selected, it chooses that reference and its
+nearest enabled neighbours. Change **Reference** and click **Nearest** to choose
+a different group; the count specifies neighbours in addition to the reference.
+Distances use WGS84 geodesics and handle the date line.
+
+Each station has one visibility checkbox; clicking its marker on the comparison
+map toggles the same selection. Choose a component of resistivity/phase, tipper,
+or phase tensor. Colours identify stations, **Errors** shows their effective
+uncertainties, and phases retain their stored convention. Masked or missing
+samples remain gaps. Disabled stations are excluded; stations without locations
+can still be checked manually. This comparison does not change data or masks.
+
 ### Impedance validity and rho+
 
 Open **Data → Impedance validity / Rho+…** to compare a station's measured
@@ -248,9 +279,8 @@ masking both resistivity and phase for those component/periods. A **Zxy** candid
 also masks **Zxx**, and a **Zyx** candidate also masks **Zyy**, at the same period.
 This polarization pairing applies even when **Data → Link Z / PT masks** is off;
 that option independently controls PT masking. Tippers remain unchanged.
-Refitting does not trigger further rejection. **Undo masks** restores
-only changes from the last application, including paired diagonals and linked PT masks, while keeping
-earlier masks intact. Preview is enabled by default and automatically refreshes
+Refitting does not trigger further rejection. **Undo** uses the shared survey
+history to restore the latest edit, including paired diagonals and linked PT masks. Preview is enabled by default and automatically refreshes
 when navigating stations or changing the threshold, components or fit settings.
 Turning it off hides candidates and disables single-station Apply.
 
@@ -258,9 +288,8 @@ Turning it off hides candidates and disables single-station Apply.
 applies one masking pass with the current threshold, main-data errors, grid density
 and Z/PT linking setting. Disabled stations and unavailable or unstable fits are
 skipped and counted in the summary. All fits finish before any masks change;
-**Cancel** leaves the survey unchanged. **Undo masks** restores the entire last
-batch or single-station operation. Navigating stations preserves undo; other
-data edits clear it. Automatic preview never applies additional masking passes.
+**Cancel** leaves the survey unchanged. Each completed batch is one step in
+the shared history. Navigating stations preserves undo; other edits add their own steps. Automatic preview never applies additional masking passes.
 
 ### Survey impedance averages
 
@@ -569,10 +598,86 @@ describes the resampling operation, before subsequent edits or masking.
 
 ### Coordinates and export
 
+#### Topography
+
+Open **Coordinates → Topography…**, or **Topography…** beside the station map.
+Load one or more single-band **GeoTIFFs**, or choose **Copernicus GLO-30** or
+**USGS 3DEP** and click **Download**. Downloads occur only on request. The default
+area covers the survey plus a 5 km margin; change the margin and click
+**Survey extent**, or edit the absolute UTM bounds directly. **Cell size** sets
+the output spacing, not the source resolution. Grids are limited to 16 million
+cells. Large areas need coarser spacing.
+
+- [Copernicus GLO-30 Public](https://registry.opendata.aws/copernicus-dem/)
+  provides approximately 30 m surface elevations, including vegetation and
+  buildings. The public cloud collection uses the 2021 release; some tiles are
+  unavailable. The app downloads at most 16 one-degree tiles per request and
+  asks you to accept the linked dataset licence. Heights use EGM2008. Required
+  attribution and licence notices accompany numeric exports and PDF maps.
+- [USGS 3DEP](https://www.usgs.gov/3d-elevation-program/about-3dep-products-services)
+  provides US bare-earth elevations from sources of varying resolution. The
+  app requests numeric elevation GeoTIFFs from the National Map service, with
+  a default output spacing of 10 m. Service requests are limited to 8000 rows
+  or columns. Products are free without use restrictions. The service combines
+  source datasets: verify the applicable vertical datum before changing station
+  heights or using elevations in a model.
+- Local files must have a coordinate reference system and geotransform. Confirm
+  **Input units** and **Vertical datum**; file units can also be read automatically.
+  Unknown units require an explicit choice. The app converts heights to metres
+  and reprojects horizontally into the survey's WGS84/UTM zone. It performs no
+  vertical datum conversion. Missing coverage remains missing. Overlapping files
+  use the first valid raster value in the selected input order.
+
+**Show**, **Colours**, **Hillshade** and **Contours** control the background on the
+station, period and fit-statistics maps. Choose a palette, elevation range,
+opacity and contour interval. **Auto** restores the loaded grid's elevation
+range. Hover over controls for details. Survey PDF export has a separate
+**Topography** checkbox and uses these display settings on its maps, including
+combined phase-tensor/induction maps. Rendering and PDF export never download
+terrain data.
+
+**GeoTIFF…** exports a clipped, projected elevation raster with absolute UTM
+coordinates, survey-origin metadata, positive-up heights in metres, NoData, source attribution and
+vertical-datum metadata. **XYZ…** exports valid cell centres as
+`northing_offset easting_offset height`, subtracting the survey's UTM origin.
+Choose positive-up elevation or positive-down depth. Its header records the
+column order, units, UTM EPSG code, origin, vertical datum and source. Export
+uses the current bounds and cell size; it preserves missing coverage. Failed
+or canceled exports preserve existing destination files.
+
+Loading a DEM does not change station elevations. **Station heights…** previews
+the current elevation, sampled DEM height and difference for every station.
+Uncheck any stations to preserve, confirm the vertical datum, then **Apply**.
+Stations outside usable coverage stay unchanged. Response tensors and masks
+are unaffected.
+
+The clipped grid and its display settings are embedded in `.mtd` projects, so
+reopening and exporting work offline without the original files. Downloads are
+cached in the application's standard local cache directory under `dem`; no DEM
+tiles are bundled with the repository. Automatic exports contain dataset
+metadata, not local source/cache paths. The editable **Credit** field is public
+text included in exports.
+
 Use **Coordinates → Convert latitude/longitude to UTM…** to project the loaded
-station locations using WGS84. The tool suggests one zone and hemisphere for
-the survey; both can be changed. Check **Center coordinates on the survey**
-to subtract the midpoint of the stations' projected bounds. The origin easting
+station locations using WGS84. The default zone and hemisphere come from the
+midpoint of the geographic survey extent, using the shortest longitude arc
+across the date line. Existing choices are retained when reopening the dialog.
+The preview overlays nominal zone boundaries, including Norway and Svalbard,
+and identifies stations outside the selected zone or hemisphere. Choose a zone
+with the controls, a comparison-table row, or a double-click on the map.
+
+The comparison table shows maximum absolute local scale error at stations and
+across a sampled 33 × 33 grid covering the survey extent. The extent result is
+an estimate, not a guaranteed bound. The adjustable **Reference** highlights
+larger errors without preventing a valid choice; 0.1% equals 1 metre per
+kilometre. The station table also shows signed scale error and grid convergence.
+These describe projection effects on the reference ellipsoid; terrain-height
+effects are not included. A common projection keeps coordinates continuous
+across zone boundaries, but wide surveys can still have substantial distortion.
+
+Check **Center UTM** in the dialog or beside the main map coordinate selector
+to subtract the midpoint of the stations' projected bounds. This changes the
+shared survey origin, without changing the zone or its distortion. The origin easting
 and northing are shown in selectable fields, with a **Copy origin** button.
 They also remain visible below the map and are recorded in receiver-file comments.
 Both receiver exporters always write UTM coordinates, choosing an uncentered
@@ -601,6 +706,20 @@ All 24 scalar types are supported, including apparent resistivity and phase.
 Phases retain their impedance quadrant, independent of plot wrapping. Missing
 or masked data are omitted, valid zeros are preserved, and invalid errors stop
 export with a diagnostic. Resistivity/phase data require `Distortion estimate = false`.
+
+Both export dialogs show a live validation preview before writing. Tabs list
+exactly the stations, periods and scalar components that will be exported,
+including effective uncertainty ranges. The summary counts omitted data and
+shows units, sign choices, projection and origin. Invalid selections, coordinates
+or errors prevent export; hover for the full coordinate description. Previewing
+and exporting do not change the survey's saved coordinates.
+
+Both formats use the same data preparation and validation. GoFEM keeps complex
+real/imaginary pairs together and uses positive-up receiver elevation; native
+output uses positive-down elevation. Valid zero tippers are retained, and tipper
+errors retain measured uncertainty when it exceeds the configured floor.
+Period selection is exact, close-frequency collisions are diagnosed, and receiver
+companions contain only stations with exported observations.
 
 **Every data export writes a plain frequency file**: sorted distinct frequencies
 in Hz, one number per line, with no header. It contains only frequencies for

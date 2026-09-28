@@ -1,4 +1,5 @@
 #include "include/SurveyCoordinates.h"
+#include "include/UTMAnalysis.h"
 #include <proj.h>
 #include <algorithm>
 #include <cmath>
@@ -19,20 +20,11 @@ void validate(const std::array<double, 3> &p)
 
 SurveyCoordinates SurveyCoordinates::suggested(const std::vector<std::array<double, 3>> &points)
 {
-  if(points.empty()) throw std::runtime_error("Load a survey before converting coordinates.");
-  // Circular longitude mean also handles surveys straddling the date line.
-  double latitude = 0, sine = 0, cosine = 0;
-  const double radians = std::acos(-1.) / 180.;
-  for(const auto &p: points) {
-    validate(p);
-    latitude += p[0] / points.size();
-    sine += std::sin(p[1] * radians); cosine += std::cos(p[1] * radians);
-  }
-  const double longitude = std::atan2(sine, cosine) / radians;
+  const auto bounds=UTM::extent(points);
   SurveyCoordinates result;
   result.utm = true;
-  result.zone = std::max(1, std::min(60, int(std::floor((longitude + 180.) / 6.)) + 1));
-  result.north = latitude >= 0.;
+  result.zone = UTM::zoneAt(bounds.latitude(),bounds.longitude());
+  result.north = bounds.latitude() >= 0.;
   return result;
 }
 

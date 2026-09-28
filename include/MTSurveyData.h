@@ -34,12 +34,15 @@
 #include "SurveyCoordinates.h"
 #include "MTResponseData.h"
 #include "PeriodResamplingInfo.h"
+#include "Topography.h"
 
 class MTSurveyData
 {
 public:
   MTSurveyData() = default;
   explicit MTSurveyData(const std::string &survey_name);
+  // Replace survey state while preserving references to stations whose names remain.
+  void restore(const MTSurveyData &state);
 
   std::string get_survey_name() const;
   const PeriodResampling::Info &resampling_info() const { return m_resampling_info; }
@@ -65,6 +68,8 @@ public:
   const SurveyCoordinates &coordinates() const { return m_coordinates; }
   void set_coordinates(const SurveyCoordinates &coordinates);
   void ensure_utm_coordinates();
+  Topography::State &topography() { return m_topography; }
+  const Topography::State &topography() const { return m_topography; }
 
   std::string closest_station_name(const double &lat, const double &lon) const;
 
@@ -105,17 +110,20 @@ private:
       else if(Archive::is_loading::value) m_response_observations.clear();
       if(version >= 3) ar & m_resampling_info & m_resampling_source;
       else if(Archive::is_loading::value) { m_resampling_info = {}; m_resampling_source.reset(); }
+      if(version >= 4) ar & m_topography;
+      else if(Archive::is_loading::value) m_topography = {};
   }
 
 private:
   std::string m_survey_name;
   std::map<std::string, MTStationData> m_stations_data;
   SurveyCoordinates m_coordinates;
+  Topography::State m_topography;
   std::vector<MTResponseData::Scalar> m_response_observations;
   PeriodResampling::Info m_resampling_info;
   std::shared_ptr<MTSurveyData> m_resampling_source;
 };
 
-BOOST_CLASS_VERSION(MTSurveyData, 3)
+BOOST_CLASS_VERSION(MTSurveyData, 4)
 
 #endif // MT_SURVEY_DATA_H

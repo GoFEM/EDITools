@@ -22,6 +22,10 @@ project(EDITools LANGUAGES CXX)
 
 find_package(Qt5 5.12 REQUIRED COMPONENTS Widgets PrintSupport Network)
 find_package(PROJ REQUIRED CONFIG)
+find_package(GDAL REQUIRED CONFIG)
+if(GDAL_VERSION VERSION_LESS 3.7)
+  message(FATAL_ERROR "GDAL >= 3.7 is required for DEM support.")
+endif()
 find_package(Boost REQUIRED CONFIG COMPONENTS serialization filesystem system)
 
 set(QCUSTOMPLOT_PATH "${QCUSTOMPLOT_PATH}" CACHE PATH "Directory containing qcustomplot.cpp and qcustomplot.h")
@@ -40,19 +44,25 @@ add_library(editools_data STATIC
   src/ImpedanceAnalysis.cc
   src/MTStationData.cc
   src/NativeMT.cc
+  src/SurveyExport.cc
   src/MTResponseData.cc
   src/FitStatistics.cc
   src/MTMapData.cc
   src/PeriodResampling.cc
   src/EDIPeriodMerge.cc
   src/SurveyCoordinates.cc
+  src/UTMAnalysis.cc
+  src/Topography.cc
   src/MTSurveyData.cc
   src/EDIFileReader.cc
 )
 target_compile_features(editools_data PUBLIC cxx_std_14)
+if(GDAL_VERSION VERSION_GREATER_EQUAL 3.9)
+  target_compile_features(editools_data PUBLIC cxx_std_17)
+endif()
 target_include_directories(editools_data PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(editools_data SYSTEM PRIVATE ${EIGEN_PATH})
-target_link_libraries(editools_data PUBLIC Boost::serialization PROJ::proj PRIVATE Boost::filesystem Boost::system)
+target_link_libraries(editools_data PUBLIC Boost::serialization PROJ::proj PRIVATE Boost::filesystem Boost::system GDAL::GDAL)
 
 # QCustomPlot is shared by the application and every graphical test.
 add_library(editools_qcustomplot STATIC "${QCUSTOMPLOT_PATH}/qcustomplot.cpp" "${QCUSTOMPLOT_PATH}/qcustomplot.h")
@@ -61,6 +71,7 @@ target_include_directories(editools_qcustomplot SYSTEM PUBLIC ${QCUSTOMPLOT_PATH
 target_link_libraries(editools_qcustomplot PUBLIC Qt5::Widgets Qt5::PrintSupport)
 
 add_library(editools_ui STATIC
+  src/SurveyHistory.cc
   src/MTDataPlot.cc
   src/RhoPlusOverlay.cc
   src/ApparentResistivityPlot.cc
@@ -71,9 +82,13 @@ add_library(editools_ui STATIC
   src/OsmTiles.cc
   src/OsmBasemap.cc
   src/MapBackground.cc
+  src/TopographyLayer.cc
+  TopographyDialog.cpp
   src/MapPlot.cc
   ExportGOFEMDialog.cpp
   ExportNativeMTDialog.cpp
+  ExportPreview.cpp
+  StationComparisonWindow.cpp
   SurveyCoordinatesDialog.cpp
   FitStatisticsWindow.cpp
   PeriodMapWindow.cpp
@@ -99,6 +114,18 @@ target_link_libraries(main PRIVATE editools_ui)
 
 include(CTest)
 if(BUILD_TESTING)
+  add_executable(survey_workflow_test tests/survey_workflow_test.cc)
+  target_link_libraries(survey_workflow_test PRIVATE editools_ui)
+  add_test(NAME survey_workflow COMMAND survey_workflow_test)
+  set_tests_properties(survey_workflow PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
+  add_executable(utm_analysis_test tests/utm_analysis_test.cc)
+  target_link_libraries(utm_analysis_test PRIVATE editools_ui)
+  add_test(NAME utm_analysis COMMAND utm_analysis_test)
+  set_tests_properties(utm_analysis PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
+  add_executable(topography_test tests/topography_test.cc)
+  target_link_libraries(topography_test PRIVATE editools_ui GDAL::GDAL)
+  add_test(NAME topography COMMAND topography_test)
+  set_tests_properties(topography PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
   add_executable(impedance_analysis_test tests/impedance_analysis_test.cc)
   target_link_libraries(impedance_analysis_test PRIVATE editools_data)
   add_test(NAME impedance_analysis COMMAND impedance_analysis_test)

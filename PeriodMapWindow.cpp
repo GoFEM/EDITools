@@ -229,6 +229,7 @@ void PeriodMapWindow::setData(const std::shared_ptr<MTSurveyData> &data,
     }
     dataset->setCurrentIndex(std::max(0, dataset->findData(selected)));
   }
+  background->setTopography(survey ? survey->topography() : Topography::State{});
   if(survey) {
     const auto stationNames = survey->get_stations_names();
     const auto geographic = survey->geographic_locations();

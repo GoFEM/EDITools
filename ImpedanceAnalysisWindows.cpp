@@ -1,6 +1,7 @@
 #include "ImpedanceAnalysisWindows.h"
 #include "include/ImpedanceAnalysis.h"
 #include "include/MTSurveyData.h"
+#include "include/SurveyHistory.h"
 #include "include/MTDataPlot.h"
 #include "include/ToolTips.h"
 #include "qcustomplot.h"
@@ -162,14 +163,14 @@ struct ImpedanceValidityWindow::Impl {
     StationEdits(const MTStationData &s, std::vector<MaskEdit> changes)
       : name(s.name()), edits(std::move(changes)), state(s) {}
   };
-  std::vector<StationEdits> undoEdits;
+  SurveyHistory localHistory{[this] { notifyMasksChanged(); }};
+  SurveyHistory *history = &localHistory;
   bool maskable() const { return quantity->currentData().toInt()==-1; }
   void clearPreview() {
     for(auto &s:series) s.candidates.clear();
     previewEdits.clear(); previewState.reset(); apply->setEnabled(false);
     maskStatus->setText(QObject::tr("Preview checked components."));
   }
-  void clearUndo() { undoEdits.clear(); undo->setEnabled(false); }
   void invalidate() {
     ++generation;
     clearPreview(); preview->setEnabled(maskable() && (showXY->isChecked() || showYX->isChecked()));
@@ -207,7 +208,7 @@ struct ImpedanceValidityWindow::Impl {
     ToolTips::set(preview,QObject::tr("Automatically highlight candidates when stations, components or fit settings change. Requires a converged, grid-stable XY/YX fit. Preview never changes masks."));
     ToolTips::set(apply,QObject::tr("Mask the previewed component/periods in one pass, including both resistivity and phase. Each Zxy candidate also masks Zxx; each Zyx candidate also masks Zyy at the same period. Respects Data → Link Z / PT masks; when linked, all PT entries at each candidate period are masked. Tippers are unchanged. No repeated automatic rejection."));
     ToolTips::set(applyAll,QObject::tr("Fit the checked XY/YX components independently at every enabled station using the current threshold, grid density and main-data errors, then apply one masking pass. Zxy also masks Zxx; Zyx also masks Zyy. Disabled stations and unavailable or unstable fits are skipped. Cancel stops the batch without changing any masks. Undo restores the whole batch."));
-    ToolTips::set(undo,QObject::tr("Restore only masks changed by the last single-station or all-stations operation, including paired diagonal and linked PT entries. Earlier masks remain masked. Navigation preserves undo; other data edits clear it."));
+    ToolTips::set(undo,QObject::tr("Undo the most recent survey edit. When opened from the main window, this uses the shared Edit history, including edits made in other windows."));
     maskControls->addStretch(); layout->addLayout(maskControls);
     maskStatus=new QLabel(w); maskStatus->setObjectName("validityMaskStatus"); maskStatus->setWordWrap(true); layout->addWidget(maskStatus);
     clearPreview();
@@ -236,6 +237,7 @@ struct ImpedanceValidityWindow::Impl {
     QObject::connect(applyAll,&QPushButton::clicked,w,[this]{ applyAllMasks(); });
     QObject::connect(apply,&QPushButton::clicked,w,[this]{ applyMasks(); });
     QObject::connect(undo,&QPushButton::clicked,w,[this]{ undoMasks(); });
+    QObject::connect(&history->stack(), &QUndoStack::canUndoChanged, w, [this](bool on) { undo->setEnabled(on); });
   }
   void calculate() {
     clearPreview(); series.clear(); values->setRowCount(0);
@@ -347,7 +349,7 @@ struct ImpedanceValidityWindow::Impl {
     unsigned count=0; for(const auto &entry:series) count+=entry.candidates.size();
     const auto changes=previewEdits;
     for(const auto &edit:changes) s.set_data_mask(edit.type,edit.frequency,false,false);
-    undoEdits.clear(); undoEdits.emplace_back(s,changes); undo->setEnabled(true);
+    history->record(QObject::tr("Rho+ masks"));
     notifyMasksChanged();
     maskStatus->setText(QObject::tr("Masked %1 off-diagonal points and their paired diagonals in one pass.").arg(count));
   }
@@ -397,23 +399,14 @@ struct ImpedanceValidityWindow::Impl {
     for(auto &entry:pending) {
       auto &s=source->get_station_data(entry.name);
       for(const auto &edit:entry.edits) s.set_data_mask(edit.type,edit.frequency,false,false);
-      entry.state=MaskState(s);
     }
     const auto changed=pending.size();
-    if(changed) { undoEdits=std::move(pending); undo->setEnabled(true); notifyMasksChanged(); }
+    if(changed) { history->record(QObject::tr("Rho+ masks (all stations)")); notifyMasksChanged(); }
     maskStatus->setText(QObject::tr("Masked %1 off-diagonal points across %2 stations · %3 diagonal masks · %4 linked PT masks · %5 disabled stations · %6 skipped fits")
       .arg(candidates).arg(changed).arg(diagonals).arg(linked).arg(disabled).arg(skipped));
   }
   void undoMasks() {
-    if(undoEdits.empty() || !survey) return;
-    for(const auto &entry:undoEdits) if(!survey->is_station_present(entry.name) || !entry.state.matches(survey->get_station_data(entry.name))) {
-      clearUndo(); maskStatus->setText(QObject::tr("Data changed; undo is no longer available.")); return;
-    }
-    for(const auto &entry:undoEdits) {
-      auto &s=survey->get_station_data(entry.name);
-      for(const auto &edit:entry.edits) s.set_data_mask(edit.type,edit.frequency,true,false);
-    }
-    clearUndo(); notifyMasksChanged(); maskStatus->setText(QObject::tr("Previous masks restored."));
+    history->stack().undo();
   }
   void draw() {
     plots.clear();
@@ -462,6 +455,14 @@ ImpedanceValidityWindow::ImpedanceValidityWindow(QWidget *parent, std::function<
   setObjectName("impedanceValidityWindow"); setWindowTitle(tr("Impedance validity — rho+")); resize(1150,780);
 }
 ImpedanceValidityWindow::~ImpedanceValidityWindow() = default;
+void ImpedanceValidityWindow::setHistory(SurveyHistory *history) {
+  if(!history || history == impl->history) return;
+  disconnect(&impl->history->stack(), nullptr, this, nullptr);
+  impl->history=history;
+  impl->undo->setText(tr("Undo"));
+  impl->undo->setEnabled(history->stack().canUndo());
+  connect(&history->stack(), &QUndoStack::canUndoChanged, this, [this](bool on) { impl->undo->setEnabled(on); });
+}
 void ImpedanceValidityWindow::setFitOptions(const RhoPlusOptions &options) {
   const QSignalBlocker densityBlock(impl->density);
   impl->density->setValue(options.intervalsPerDecade);
@@ -474,8 +475,8 @@ void ImpedanceValidityWindow::setLinkTensorMasks(bool linked) {
 }
 void ImpedanceValidityWindow::setData(const std::shared_ptr<MTSurveyData> &survey, const QString &selected) {
   const QString previous=selected.isEmpty()?impl->station->currentText():selected;
-  if(!impl->editingMasks) impl->clearUndo();
   const QSignalBlocker block(impl->station); impl->survey=survey; impl->station->clear();
+  if(!impl->editingMasks && impl->history == &impl->localHistory) impl->localHistory.reset(survey);
   if(survey) for(const auto &name:survey->get_stations_names()) impl->station->addItem(QString::fromStdString(name));
   if(impl->station->count()) impl->station->setCurrentIndex(std::max(0,impl->station->findText(previous)));
   impl->invalidate();

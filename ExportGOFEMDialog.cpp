@@ -19,22 +19,30 @@
 
 #include "ExportGOFEMDialog.h"
 #include "ui_ExportGOFEMDialog.h"
+#include "ExportPreview.h"
+#include "include/MTSurveyData.h"
+#include <QPushButton>
+#include <QTimer>
 
-ExportGOFEMDialog::ExportGOFEMDialog(std::vector<double> periods, QWidget *parent) :
+ExportGOFEMDialog::ExportGOFEMDialog(const MTSurveyData &data, QWidget *parent) :
   QDialog(parent),
   ui(new Ui::ExportGOFEMDialog),
-  m_periods(periods)
+  survey(data),
+  m_periods(data.get_unique_periods())
 {
   ui->setupUi(this);
 
-  for(double period: periods)
+  for(double period: m_periods)
     ui->periodListWidget->addItem(QString("%1").arg(period));
 
-//  for(int i = 0; i < ui->periodListWidget->count(); ++i)
-//  {
-//      QListWidgetItem* item = ui->periodListWidget->item(i);
-//      item->setSelected(true);
-//  }
+  preview=new ExportPreview(this);
+  ui->gridLayout_4->addWidget(preview,0,2,4,1);
+  auto *timer=new QTimer(this);timer->setSingleShot(true);
+  connect(timer,&QTimer::timeout,this,&ExportGOFEMDialog::updatePreview);
+  auto changed=[timer] { timer->start(0); };
+  connect(ui->periodListWidget,&QListWidget::itemSelectionChanged,this,changed);
+  for(auto *box:findChildren<QCheckBox*>())connect(box,&QCheckBox::toggled,this,changed);
+  ui->periodListWidget->selectAll();updatePreview();resize(1020,610);
 }
 
 ExportGOFEMDialog::~ExportGOFEMDialog()
@@ -101,55 +109,16 @@ std::vector<double> ExportGOFEMDialog::getSelectedPeriods() const
   return selected_periods;
 }
 
-void ExportGOFEMDialog::on_impGroupBox_toggled(bool on)
-{
-  if(on)
-  {
-    ui->zxxCheckBox->setChecked(true);
-    ui->zxyCheckBox->setChecked(true);
-    ui->zyxCheckBox->setChecked(true);
-    ui->zyyCheckBox->setChecked(true);
-  }
-  else
-  {
-    ui->zxxCheckBox->setChecked(false);
-    ui->zxyCheckBox->setChecked(false);
-    ui->zyxCheckBox->setChecked(false);
-    ui->zyyCheckBox->setChecked(false);
-  }
+namespace {
+void checkComponents(QGroupBox *group, bool on) {
+  for(auto *box:group->findChildren<QCheckBox*>())box->setChecked(on);
 }
-
-void ExportGOFEMDialog::on_ptGroupBox_toggled(bool on)
-{
-  if(on)
-  {
-    ui->pxxCheckBox->setChecked(true);
-    ui->pxyCheckBox->setChecked(true);
-    ui->pyxCheckBox->setChecked(true);
-    ui->pyyCheckBox->setChecked(true);
-  }
-  else
-  {
-    ui->pxxCheckBox->setChecked(false);
-    ui->pxyCheckBox->setChecked(false);
-    ui->pyxCheckBox->setChecked(false);
-    ui->pyyCheckBox->setChecked(false);
-  }
 }
-
-void ExportGOFEMDialog::on_tipperGroupBox_toggled(bool on)
-{
-  if(on)
-  {
-    ui->tzxCheckBox->setChecked(true);
-    ui->tzyCheckBox->setChecked(true);
-  }
-  else
-  {
-    ui->tzxCheckBox->setChecked(false);
-    ui->tzyCheckBox->setChecked(false);
-  }
-}
+void ExportGOFEMDialog::on_impGroupBox_toggled(bool on) { checkComponents(ui->impGroupBox,on); }
+void ExportGOFEMDialog::on_ptGroupBox_toggled(bool on) { checkComponents(ui->ptGroupBox,on); }
+void ExportGOFEMDialog::on_tipperGroupBox_toggled(bool on) { checkComponents(ui->tipperGroupBox,on); }
+void ExportGOFEMDialog::on_rhoGroupBox_toggled(bool on) { checkComponents(ui->rhoGroupBox,on); }
+void ExportGOFEMDialog::on_phaseGroupBox_toggled(bool on) { checkComponents(ui->phaseGroupBox,on); }
 
 void ExportGOFEMDialog::on_periodListWidget_itemSelectionChanged()
 {
@@ -157,38 +126,12 @@ void ExportGOFEMDialog::on_periodListWidget_itemSelectionChanged()
   ui->statusLabel->setText(QString("Selected periods: %1").arg(selected.size()));
 }
 
-void ExportGOFEMDialog::on_rhoGroupBox_toggled(bool on)
-{
-  if(on)
-  {
-    ui->rxxCheckBox->setChecked(true);
-    ui->rxyCheckBox->setChecked(true);
-    ui->ryxCheckBox->setChecked(true);
-    ui->ryyCheckBox->setChecked(true);
-  }
-  else
-  {
-    ui->rxxCheckBox->setChecked(false);
-    ui->rxyCheckBox->setChecked(false);
-    ui->ryxCheckBox->setChecked(false);
-    ui->ryyCheckBox->setChecked(false);
-  }
+void ExportGOFEMDialog::updatePreview() {
+  NativeMT::Options options;options.types=getSelectedDataTypes();options.periods=getSelectedPeriods();
+  ui->buttonBox->button(QDialogButtonBox::Ok)->setEnabled(preview->update(survey,options,SurveyExport::Format::GoFEM));
 }
 
-void ExportGOFEMDialog::on_phaseGroupBox_toggled(bool on)
-{
-  if(on)
-  {
-    ui->phixxCheckBox->setChecked(true);
-    ui->phixyCheckBox->setChecked(true);
-    ui->phiyxCheckBox->setChecked(true);
-    ui->phiyyCheckBox->setChecked(true);
-  }
-  else
-  {
-    ui->phixxCheckBox->setChecked(false);
-    ui->phixyCheckBox->setChecked(false);
-    ui->phiyxCheckBox->setChecked(false);
-    ui->phiyyCheckBox->setChecked(false);
-  }
+void ExportGOFEMDialog::accept() {
+  updatePreview();
+  if(ui->buttonBox->button(QDialogButtonBox::Ok)->isEnabled()) QDialog::accept();
 }

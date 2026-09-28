@@ -7,6 +7,8 @@
 class MTSurveyData;
 class QListWidget;
 class QCheckBox;
+class ExportPreview;
+class QPushButton;
 
 class ExportNativeMTDialog : public QDialog
 {
@@ -16,6 +18,10 @@ public:
 
 private:
   void exportFiles();
+  void updatePreview();
+  NativeMT::Options options() const;
+  ExportPreview *preview;
+  QPushButton *save;
   MTSurveyData &survey;
   QString directory, exported_file;
   QListWidget *periods, *types;

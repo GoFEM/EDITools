@@ -26,6 +26,8 @@
 
 #include <set>
 
+class MTSurveyData;
+class ExportPreview;
 namespace Ui {
 class ExportGOFEMDialog;
 }
@@ -35,8 +37,10 @@ class ExportGOFEMDialog : public QDialog
   Q_OBJECT
 
 public:
-  explicit ExportGOFEMDialog(std::vector<double> periods, QWidget *parent = nullptr);
+  explicit ExportGOFEMDialog(const MTSurveyData &survey, QWidget *parent = nullptr);
+  const ExportPreview &exportPreview() const { return *preview; }
   ~ExportGOFEMDialog();
+  void accept() override;
 
   std::vector<RealDataType> getSelectedDataTypes() const;
   std::vector<double> getSelectedPeriods() const;
@@ -52,6 +56,9 @@ private slots:
 
 private:
   Ui::ExportGOFEMDialog *ui;
+  ExportPreview *preview;
+  const MTSurveyData &survey;
+  void updatePreview();
 
   std::vector<double> m_periods;
 };

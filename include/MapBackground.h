@@ -2,11 +2,13 @@
 #define EDITOOLS_MAP_BACKGROUND_H
 
 #include "SurveyCoordinates.h"
+#include "Topography.h"
 #include "qcustomplot.h"
 #include <functional>
 #include <QToolButton>
 
 namespace Osm { class Basemap; }
+class TopographyLayer;
 // A nonselectable layer below data/grid. Survives clearItems/clearPlottables and
 // does not participate in axis rescaling. Owned by its QCustomPlot.
 class MapBackground : public QCPLayerable {
@@ -15,6 +17,7 @@ public:
   explicit MapBackground(QCustomPlot *plot);
   void setCoordinates(const SurveyCoordinates &coordinates, double unitsPerMetre = 1.);
   void setLayers(int layers);
+  void setTopography(const Topography::State &state);
   int layers() const { return enabled; }
   static QString dataDirectory();
   static int availableLayers();
@@ -27,6 +30,7 @@ private:
   struct Segment { QPolygonF points; QRectF bounds; };
   void prepare(int dataset);
   Osm::Basemap *osm;
+  TopographyLayer *terrain;
   SurveyCoordinates coordinates;
   double scale = 1.;
   int enabled = 0;

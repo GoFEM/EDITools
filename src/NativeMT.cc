@@ -208,6 +208,7 @@ Export encode(const std::vector<Observation> &rows, const Receivers &receivers,
   validate_keys(rows);
   Export result;
   result.observations = rows;
+  result.coordinate_description = description;
   std::set<double> frequencies;
   std::set<std::tuple<std::string, double, RealDataType>> keys;
   for(const auto &row: rows) {
@@ -314,7 +315,12 @@ struct NativeMTStationAccess {
         value = s.Rho.at(c).at(f); error = s.Rho_err.at(c).at(f);
       } else {
         const auto z = s.Z.at(c).at(f);
-        if(std::isnan(z.real()) || std::isnan(z.imag())) return Missing;
+        // Explicit scalar phases are valid even when no impedance was supplied.
+        // Derived phases retain atan2's quadrant; a zero impedance has no phase.
+        if(std::isnan(z.real()) || std::isnan(z.imag())) {
+          value = s.Phs.at(c).at(f); error = s.Phs_err.at(c).at(f);
+          return std::isnan(value) ? Missing : Available;
+        }
         require(std::isfinite(z.real()) && std::isfinite(z.imag()), "Non-finite impedance used to derive phase: " + s.name());
         if(z == std::complex<double>(0., 0.)) return UndefinedPhase;
         value = std::atan2(z.imag(), z.real()) * 180. / std::acos(-1.);

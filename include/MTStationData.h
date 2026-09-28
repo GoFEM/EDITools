@@ -120,11 +120,6 @@ public:
 
   std::set<RealDataType> active_types() const;
 
-  void write(std::ofstream &ofs,
-             const std::vector<RealDataType> &types,
-             const std::vector<double> &selected_periods,
-             std::set<double> *written_frequencies = nullptr) const;
-
   // Calculates RMS with other stations
   double rms(const MTStationData &other) const;
 

@@ -17,6 +17,7 @@
 #include <QSpinBox>
 #include <QEventLoop>
 #include <QLineEdit>
+#include <QLabel>
 #include <QListWidget>
 #include <QPushButton>
 #include <QTreeWidget>
@@ -1422,6 +1423,30 @@ void workflow(const QString &directory)
   select_station(window, "S01");
   auto *stationMap = widget<QCustomPlot>(window, "mapPlot");
   const auto firstPosition = stationMap->graph(0)->data()->constBegin()->value;
+  auto *mapMode = widget<QComboBox>(window, "mapCoordinateSwitch");
+  auto *centerUtm = widget<QCheckBox>(window, "mapCenterUtm");
+  auto *originInfo = widget<QLabel>(window, "mapCoordinateInfo");
+  check(!centerUtm->isEnabled(), "Geographic map enabled UTM centering");
+  mapMode->setCurrentIndex(1);
+  check(centerUtm->isEnabled() && !centerUtm->isChecked(), "UTM centering unavailable");
+  const auto expectedCoordinates = SurveyCoordinates::calculate(survey->geographic_locations(), 33, true, true);
+  centerUtm->setChecked(true);
+  const QString expectedOrigin = QString::number(expectedCoordinates.origin_easting, 'f', 3);
+  check(originInfo->text().contains(expectedOrigin) &&
+        originInfo->text().contains(QString::number(expectedCoordinates.origin_northing, 'f', 3)),
+        "Centered map omitted actual UTM origin");
+  check(std::abs(stationMap->graph(0)->data()->constBegin()->value) < 10000., "Map did not subtract origin");
+  widget<QAction>(window,"actionUndo")->trigger();
+  check(!centerUtm->isChecked() && originInfo->text().contains("Origin E: 0.000 m"), "Shared undo did not restore map origin");
+  widget<QAction>(window,"actionRedo")->trigger();
+  check(centerUtm->isChecked() && originInfo->text().contains(expectedOrigin), "Shared redo did not restore map origin");
+  centerUtm->setChecked(false);
+  check(originInfo->text().contains("Origin E: 0.000 m") &&
+        std::abs(stationMap->graph(0)->data()->constBegin()->value) > 100000., "Absolute UTM not restored");
+  centerUtm->setChecked(true);
+  mapMode->setCurrentIndex(0);
+  check(!centerUtm->isEnabled() && centerUtm->isChecked() && originInfo->text().contains(expectedOrigin),
+        "Geographic view lost shared survey origin");
   widget<QCheckBox>(window, "stationMapNames")->setChecked(true);
   check(stationMap->itemCount() == 2 && widget<QAction>(window, "actionShow_station_names")->isChecked(),
         "Map name checkbox and menu action are out of sync");
@@ -1602,6 +1627,9 @@ void workflow(const QString &directory)
   MainWindow restored;
   file_action(restored, "actionLoad_project", {project});
   check(!widget<QAction>(restored, "actionLink_tensor_masks")->isChecked(), "Project lost independent masking option");
+  check(widget<QCheckBox>(restored, "mapCenterUtm")->isChecked() &&
+        widget<QLabel>(restored, "mapCoordinateInfo")->text().contains(expectedOrigin),
+        "Project reload lost centered origin");
   check(widget<QCheckBox>(restored, "stationMapNames")->isChecked() &&
         widget<QCustomPlot>(restored, "mapPlot")->itemCount() == 2, "Project lost station-name visibility");
   auto *restoredList = widget<QListWidget>(restored, "responsesList");

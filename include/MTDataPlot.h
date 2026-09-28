@@ -73,6 +73,7 @@ public:
   virtual void set_observed_data(MTStationData &data, bool rescaleAxes = true) = 0;
   virtual void set_predicted_data(const MTStationData &data, bool rescaleAxes = false) = 0;
   void clear_predicted_data();
+  void clear_observed_data();
 
   void set_associated_plot(MTDataPlot &plot);
 

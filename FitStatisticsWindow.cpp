@@ -273,6 +273,8 @@ void FitStatisticsWindow::setData(const std::shared_ptr<MTSurveyData> &data,
                                  const std::map<std::string, MTSurveyData> &loaded)
 {
   survey = data;
+  backgroundA->setTopography(survey ? survey->topography() : Topography::State{});
+  backgroundB->setTopography(survey ? survey->topography() : Topography::State{});
   std::map<QString, Qt::CheckState> states;
   for(int i = 0; i < responseList->topLevelItemCount(); ++i) {
     const auto *item = responseList->topLevelItem(i);

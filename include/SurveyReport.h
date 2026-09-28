@@ -31,6 +31,7 @@ struct Options {
   std::vector<double> mapPeriods;
   bool useMapSettings = false;
   int mapLayers = 0;
+  bool topography = true;
   MapDisplaySettings mapSettings;
   std::array<Axis, 4> axes;
   std::array<std::array<bool, 4>, 4> components{{{{true, true, true, true}}, {{true, true, true, true}},
