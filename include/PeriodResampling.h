@@ -19,7 +19,10 @@ std::vector<double> validate_periods(std::vector<double> periods);
 std::vector<double> logarithmic_grid(double minimum, double maximum, unsigned pointsPerDecade);
 std::vector<Sample> layout(const MTStationData &station, unsigned component);
 // Returns an independent survey; source data and an interpolation audit are embedded in it.
+// An empty selection resamples all stations. Otherwise only selected stations
+// change, retaining the survey name and every unselected station unchanged.
 std::shared_ptr<MTSurveyData> resample(const MTSurveyData &source,
-                                     const std::vector<double> &periods, const Options &options);
+                                     const std::vector<double> &periods, const Options &options,
+                                     const std::set<std::string> &selection = {});
 }
 #endif

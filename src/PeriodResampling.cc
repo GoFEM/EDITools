@@ -117,10 +117,14 @@ struct PeriodResamplingAccess {
       }
     }
   }
-  static std::shared_ptr<MTSurveyData> run(const MTSurveyData &source, const std::vector<double> &targets, const Options &options) {
+  static std::shared_ptr<MTSurveyData> run(const MTSurveyData &source, const std::vector<double> &targets,
+                                        const Options &options, const std::set<std::string> &selection) {
     auto result = std::make_shared<MTSurveyData>(source);
-    result->m_survey_name = source.get_survey_name() + " (resampled)";
-    result->m_response_observations.clear();
+    if(selection.empty()) result->m_survey_name = source.get_survey_name() + " (resampled)";
+    auto &rows = result->m_response_observations;
+    rows.erase(std::remove_if(rows.begin(), rows.end(), [&](const MTResponseData::Scalar &row) {
+      return selection.empty() || selection.count(row.receiver);
+    }), rows.end());
     result->m_resampling_source = std::make_shared<MTSurveyData>(source);
     result->m_resampling_info = {};
     auto &info = result->m_resampling_info;
@@ -129,6 +133,7 @@ struct PeriodResamplingAccess {
     std::set<double> frequencies;
     for(double p: targets) frequencies.insert(1. / p);
     for(auto &entry: result->m_stations_data) {
+      if(!selection.empty() && !selection.count(entry.first)) continue;
       const auto &input = source.get_station_data(entry.first);
       std::array<std::vector<Point>, 10> series;
       bool hasImpedance = false;
@@ -249,11 +254,15 @@ std::vector<Sample> layout(const MTStationData &station, unsigned c) {
     result.push_back({p.period, !station.active() || !p.enabled ? Status::Masked : (finite(p.value) ? Status::Existing : Status::Missing)});
   return result;
 }
-std::shared_ptr<MTSurveyData> resample(const MTSurveyData &source, const std::vector<double> &periods, const Options &options) {
+std::shared_ptr<MTSurveyData> resample(const MTSurveyData &source, const std::vector<double> &periods,
+                                     const Options &options, const std::set<std::string> &selection) {
   const auto targets = validate_periods(periods);
   if(!std::isfinite(options.maximumRatio) || options.maximumRatio <= 1.) throw std::invalid_argument("Maximum bounding-period ratio must exceed 1.");
   if(source.n_stations() == 0) throw std::invalid_argument("Load a survey before resampling.");
-  if(static_cast<double>(source.n_stations()) * targets.size() > 200000.) throw std::invalid_argument("Preview exceeds 200000 station-period cells; reduce the target grid.");
-  return PeriodResamplingAccess::run(source, targets, options);
+  for(const auto &name: selection) if(!source.is_station_present(name))
+    throw std::invalid_argument("Selected station is not present in the survey.");
+  const auto count = selection.empty() ? source.n_stations() : selection.size();
+  if(static_cast<double>(count) * targets.size() > 200000.) throw std::invalid_argument("Preview exceeds 200000 station-period cells; reduce the target grid.");
+  return PeriodResamplingAccess::run(source, targets, options, selection);
 }
 }

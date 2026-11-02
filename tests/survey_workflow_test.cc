@@ -9,12 +9,14 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
+#include <QFileDialog>
 #include <QLabel>
 #include <QListWidget>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QTableWidget>
 #include <QTemporaryDir>
+#include <QTimer>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -218,6 +220,78 @@ void comparisonChecks(const std::shared_ptr<MTSurveyData> &survey) {
   window.setData({});
   check(plot->graphCount() == 0, "Unloading leaves comparison curves");
 }
+void exportNameChecks(const QString &directory) {
+  auto survey = fixture(directory);
+  survey->rename_station("A", "001");
+  survey->rename_station("B", "2B");
+  survey->rename_station("C", "S_001");
+  NativeMT::Options options;
+  options.types = {RealZxy, ImagZxy}; options.periods = {.1, 1.};
+  for(auto format: {SurveyExport::Format::Native, SurveyExport::Format::GoFEM}) {
+    const auto original = SurveyExport::prepare(*survey, options, format);
+    check(original.receivers.count("001") && original.receivers.count("2B") && original.name_mapping_text.empty(),
+          "Digit-leading names must export unchanged by default");
+    options.compatible_names = true;
+    const auto aliased = SurveyExport::prepare(*survey, options, format);
+    check(aliased.original_names.at("S_001_2") == "001" && aliased.original_names.at("S_2B") == "2B" &&
+          aliased.receivers.count("S_001"), "Aliases collided with an existing station name");
+    check(aliased.name_mapping_text.find("\"001\",\"S_001_2\"") != std::string::npos,
+          "Name mapping companion missing");
+    std::istringstream data(aliased.data_text), receivers(aliased.receiver_text);
+    const auto rows = MTResponseData::read(data, format == SurveyExport::Format::Native ?
+                                         MTResponseData::Format::Native : MTResponseData::Format::GoFEM);
+    const auto positions = NativeMT::read_receivers(receivers);
+    check(rows.size() == original.observations.size(), "Aliasing lost observations");
+    for(const auto &row: rows) {
+      const auto it = aliased.original_names.find(row.receiver);
+      const auto name = it == aliased.original_names.end() ? row.receiver : it->second;
+      check(positions.at(row.receiver) == original.receivers.at(name), "Receiver alias changed coordinates");
+      bool found = false;
+      for(const auto &before: original.observations)
+        if(before.receiver == name && before.frequency == row.frequency && before.type == row.type)
+          found = before.value == row.value && before.error == row.error;
+      check(found, "Aliasing changed data or uncertainties");
+    }
+    options.compatible_names = false;
+  }
+  survey->rename_station("2B", "2 B,\"x\"");
+  ExportNativeMTDialog dialog(*survey, {});
+  auto *preview = control<ExportPreview>(dialog, "exportPreview");
+  auto *save = dialog.findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Save);
+  check(!save->isEnabled() && control<QLabel>(dialog, "exportSummary")->text().contains("Use compatible names"),
+        "Invalid names should offer a remedy");
+  auto *names = control<QCheckBox>(dialog, "exportCompatibleNames");
+  names->setChecked(true); QApplication::processEvents();
+  check(save->isEnabled() && preview->result().original_names.at("S_2_B__x_") == "2 B,\"x\"",
+        "Compatible-name option did not unblock export");
+  check(preview->result().name_mapping_text.find("\"2 B,\"\"x\"\"\"") != std::string::npos,
+        "Mapping CSV did not escape the original name");
+  check(survey->is_station_present("001") && survey->is_station_present("2 B,\"x\""),
+        "Export preview renamed project stations");
+  const auto path = directory + "/aliased.data";
+  QTimer::singleShot(0, [&] {
+    auto *chooser = qobject_cast<QFileDialog *>(QApplication::activeModalWidget());
+    check(chooser, "Export file chooser missing");
+    chooser->selectFile(path);
+    QMetaObject::invokeMethod(chooser, "accept", Qt::DirectConnection);
+  });
+  check(saveSurveyExport(&dialog, preview->result(), SurveyExport::Format::Native, directory) == path,
+        "Aliased export was not saved");
+  for(const auto &entry: std::map<QString, std::string>{{path, preview->result().data_text},
+        {directory + "/aliased.recvs", preview->result().receiver_text},
+        {directory + "/aliased.freqs", preview->result().frequency_text},
+        {directory + "/aliased.names.csv", preview->result().name_mapping_text}}) {
+    QFile file(entry.first);
+    check(file.open(QIODevice::ReadOnly) && file.readAll().toStdString() == entry.second,
+          "Saved export companions differ from preview");
+  }
+  names->setChecked(false); QApplication::processEvents();
+  check(!save->isEnabled() && preview->result().observations.empty(), "Unchecked conversion left stale export");
+  ExportGOFEMDialog gofem(*survey);
+  control<QCheckBox>(gofem, "exportCompatibleNames")->setChecked(true); QApplication::processEvents();
+  check(gofem.findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->isEnabled() &&
+        gofem.exportPreview().result().original_names.size() == 2, "GoFEM alias control did not refresh preview");
+}
 } // namespace
 int main(int argc, char **argv) {
   QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
@@ -229,6 +303,7 @@ int main(int argc, char **argv) {
     historyChecks(survey);
     exportChecks(survey);
     comparisonChecks(survey);
+    exportNameChecks(directory.path());
   } catch (const std::exception &e) {
     std::cerr << e.what() << '\n';
     return 1;

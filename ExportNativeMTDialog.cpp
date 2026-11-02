@@ -93,6 +93,7 @@ ExportNativeMTDialog::ExportNativeMTDialog(MTSurveyData &data, const QString &pa
   auto *timer=new QTimer(this); timer->setSingleShot(true);
   connect(timer,&QTimer::timeout,this,&ExportNativeMTDialog::updatePreview);
   auto changed=[timer] { timer->start(0); };
+  connect(preview,&ExportPreview::optionsChanged,this,changed);
   connect(periods,&QListWidget::itemSelectionChanged,this,changed);
   connect(types,&QListWidget::itemChanged,this,changed);
   for(auto *box:{conjugate,reverse_vertical,distortion})connect(box,&QCheckBox::toggled,this,changed);

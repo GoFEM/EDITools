@@ -1,6 +1,7 @@
 #include "ExportPreview.h"
 #include "include/MTSurveyData.h"
 #include <QFileDialog>
+#include <QCheckBox>
 #include <QFileInfo>
 #include <QHeaderView>
 #include <QLabel>
@@ -17,6 +18,14 @@ ExportPreview::ExportPreview(QWidget *parent) : QWidget(parent) {
   setObjectName("exportPreview");
   auto *layout = new QVBoxLayout(this);
   layout->setContentsMargins(0, 0, 0, 0);
+  compatibleNames = new QCheckBox(tr("Use compatible names"), this);
+  compatibleNames->setObjectName("exportCompatibleNames");
+  compatibleNames->setToolTip(tr("Use export-only aliases starting with a letter: e.g. 001 → S_001. "
+    "Replace unsupported characters with underscores and resolve duplicate aliases with numeric suffixes. "
+    "Project names stay unchanged. A .names.csv companion records changed names; calculated responses "
+    "must use the original names to match this project."));
+  layout->addWidget(compatibleNames);
+  connect(compatibleNames, &QCheckBox::toggled, this, &ExportPreview::optionsChanged);
   summary = new QLabel(this);
   summary->setObjectName("exportSummary");
   summary->setWordWrap(true);
@@ -33,7 +42,7 @@ ExportPreview::ExportPreview(QWidget *parent) : QWidget(parent) {
     tabs->addTab(t, title);
     return t;
   };
-  stations = table(tr("Stations"), {tr("Station"), tr("Scalars"), tr("Periods")});
+  stations = table(tr("Stations"), {tr("Station"), tr("Export name"), tr("Scalars"), tr("Periods")});
   stations->setObjectName("exportStations");
   periods = table(tr("Periods"), {tr("Period (s)"), tr("Scalars"), tr("Stations")});
   periods->setObjectName("exportPeriods");
@@ -57,7 +66,9 @@ bool ExportPreview::update(const MTSurveyData &survey, const NativeMT::Options &
   prepared = {};
   details->clear();
   try {
-    prepared = SurveyExport::prepare(survey, options, format);
+    auto effective = options;
+    effective.compatible_names = compatibleNames->isChecked();
+    prepared = SurveyExport::prepare(survey, effective, format);
     struct Count {
       size_t scalars = 0;
       std::set<double> frequencies;
@@ -82,9 +93,13 @@ bool ExportPreview::update(const MTSurveyData &survey, const NativeMT::Options &
       for (int c = 0; c < cells.size(); ++c)
         table->setItem(r, c, new QTableWidgetItem(cells[c]));
     };
-    for (const auto &entry : byStation)
-      append(stations, {QString::fromStdString(entry.first), QString::number(entry.second.scalars),
+    for (const auto &entry : byStation) {
+      const auto original = prepared.original_names.find(entry.first);
+      append(stations, {QString::fromStdString(original == prepared.original_names.end() ? entry.first : original->second),
+                        QString::fromStdString(entry.first), QString::number(entry.second.scalars),
                         QString::number(entry.second.frequencies.size())});
+    }
+    stations->setColumnHidden(1, prepared.original_names.empty());
     for (const auto &entry : byPeriod)
       append(periods, {QString::number(entry.first, 'g', 12), QString::number(entry.second.scalars),
                        QString::number(entry.second.names.size())});
@@ -119,6 +134,9 @@ bool ExportPreview::update(const MTSurveyData &survey, const NativeMT::Options &
         details->setText(details->text() + "\n" + line);
     for (const auto &warning : prepared.warnings)
       details->setText(details->text() + "\n" + QString::fromStdString(warning));
+    if(!prepared.original_names.empty())
+      details->setText(details->text() + tr("\n%1 renamed for export · mapping saved in .names.csv")
+                       .arg(prepared.original_names.size()));
     return true;
   } catch (const std::exception &e) {
     summary->setStyleSheet("color: #a45216");
@@ -139,8 +157,13 @@ QString saveSurveyExport(QWidget *parent, const NativeMT::Export &result, Survey
   const QFileInfo info(path);
   const QString base =
       format == SurveyExport::Format::Native ? info.absolutePath() + "/" + info.completeBaseName() : path;
-  const std::array<QString, 3> paths{{path, base + ".recvs", base + ".freqs"}};
-  if (paths[0] == paths[1] || paths[0] == paths[2])
+  std::vector<QString> paths{path, base + ".recvs", base + ".freqs"};
+  std::vector<std::string> texts{result.data_text, result.receiver_text, result.frequency_text};
+  if(!result.name_mapping_text.empty()) {
+    paths.push_back(base + ".names.csv");
+    texts.push_back(result.name_mapping_text);
+  }
+  if (std::set<QString>(paths.begin(), paths.end()).size() != paths.size())
     throw std::runtime_error("Observation filename conflicts with its companion files.");
   QStringList existing;
   for (unsigned i = 1; i < paths.size(); ++i)
@@ -149,8 +172,7 @@ QString saveSurveyExport(QWidget *parent, const NativeMT::Export &result, Survey
   if (!existing.empty() && QMessageBox::question(parent, QObject::tr("Replace companion files?"),
                                                  existing.join("\n")) != QMessageBox::Yes)
     return {};
-  const std::array<std::string, 3> texts{{result.data_text, result.receiver_text, result.frequency_text}};
-  std::array<std::unique_ptr<QSaveFile>, 3> files;
+  std::vector<std::unique_ptr<QSaveFile>> files(paths.size());
   for (unsigned i = 0; i < paths.size(); ++i) {
     files[i].reset(new QSaveFile(paths[i]));
     if (!files[i]->open(QIODevice::WriteOnly) ||

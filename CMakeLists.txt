@@ -42,6 +42,7 @@ add_library(editools_data STATIC
   src/Datum.cc
   src/MTSpectra.cc
   src/ImpedanceAnalysis.cc
+  src/PolarityAnalysis.cc
   src/MTStationData.cc
   src/NativeMT.cc
   src/SurveyExport.cc
@@ -71,6 +72,7 @@ target_include_directories(editools_qcustomplot SYSTEM PUBLIC ${QCUSTOMPLOT_PATH
 target_link_libraries(editools_qcustomplot PUBLIC Qt5::Widgets Qt5::PrintSupport)
 
 add_library(editools_ui STATIC
+  src/CommandRibbon.cc
   src/SurveyHistory.cc
   src/MTDataPlot.cc
   src/RhoPlusOverlay.cc
@@ -89,6 +91,7 @@ add_library(editools_ui STATIC
   ExportNativeMTDialog.cpp
   ExportPreview.cpp
   StationComparisonWindow.cpp
+  PolarityWindow.cpp
   SurveyCoordinatesDialog.cpp
   FitStatisticsWindow.cpp
   PeriodMapWindow.cpp
@@ -114,6 +117,14 @@ target_link_libraries(main PRIVATE editools_ui)
 
 include(CTest)
 if(BUILD_TESTING)
+  add_executable(polarity_test tests/polarity_test.cc)
+  target_link_libraries(polarity_test PRIVATE editools_ui)
+  add_test(NAME polarity COMMAND polarity_test)
+  set_tests_properties(polarity PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
+  add_executable(command_ribbon_test tests/command_ribbon_test.cc)
+  target_link_libraries(command_ribbon_test PRIVATE editools_ui)
+  add_test(NAME command_ribbon COMMAND command_ribbon_test)
+  set_tests_properties(command_ribbon PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
   add_executable(survey_workflow_test tests/survey_workflow_test.cc)
   target_link_libraries(survey_workflow_test PRIVATE editools_ui)
   add_test(NAME survey_workflow COMMAND survey_workflow_test)
@@ -155,7 +166,7 @@ if(BUILD_TESTING)
   target_link_libraries(osm_test PRIVATE editools_ui)
   add_test(NAME osm_basemap COMMAND osm_test)
 
-  add_executable(response_plot_test tests/response_plot_test.cc tests/period_resampling_test.cc Icons/icons.qrc)
+  add_executable(response_plot_test tests/response_plot_test.cc tests/period_resampling_test.cc tests/edi_import_interpolation_test.cc Icons/icons.qrc)
   set_target_properties(response_plot_test PROPERTIES AUTORCC ON)
   target_link_libraries(response_plot_test PRIVATE editools_ui)
   add_test(NAME response_plots COMMAND response_plot_test)

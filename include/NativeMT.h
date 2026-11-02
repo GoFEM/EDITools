@@ -29,6 +29,7 @@ struct Options {
   bool negative_time_convention = false;
   bool vertical_magnetic_up = false;
   bool distortion = false;
+  bool compatible_names = false; // Export aliases only; preserve station names in the survey.
 };
 struct Export {
   std::vector<Observation> observations;
@@ -36,6 +37,8 @@ struct Export {
   std::vector<double> frequencies;
   std::vector<std::string> warnings;
   std::string data_text, receiver_text, frequency_text, coordinate_description;
+  std::map<std::string, std::string> original_names; // Exported alias -> original, changed names only.
+  std::string name_mapping_text; // CSV companion when aliases are used.
   std::size_t masked = 0, missing = 0, undefined_phase = 0;
 };
 

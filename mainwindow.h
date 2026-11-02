@@ -47,6 +47,7 @@ class SurveyAverageWindow;
 class RhoPlusOverlay;
 class SurveyHistory;
 class StationComparisonWindow;
+class PolarityWindow;
 
 class MainWindow : public QMainWindow
 {
@@ -219,6 +220,9 @@ private:
   };
 
   void setupListContextMenu();
+  void setupRibbon();
+  void updateActionAvailability();
+  std::vector<QAction *> surveyActions;
   void loadResponseFiles(const QStringList &files);
   void createResponsesList();
   void refreshAnalysisWindows();
@@ -232,6 +236,7 @@ private:
   std::shared_ptr<MTSurveyData> mtSurvey;
   std::unique_ptr<SurveyHistory> history;
   StationComparisonWindow *stationComparison = nullptr;
+  PolarityWindow *polarity = nullptr;
   void restoreSurveyView();
   std::map<std::string, MTSurveyData> mtResponses;
   std::vector<std::shared_ptr<MTDataPlot>> plotHandlers;

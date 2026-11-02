@@ -40,8 +40,10 @@ ExportGOFEMDialog::ExportGOFEMDialog(const MTSurveyData &data, QWidget *parent) 
   auto *timer=new QTimer(this);timer->setSingleShot(true);
   connect(timer,&QTimer::timeout,this,&ExportGOFEMDialog::updatePreview);
   auto changed=[timer] { timer->start(0); };
+  connect(preview,&ExportPreview::optionsChanged,this,changed);
   connect(ui->periodListWidget,&QListWidget::itemSelectionChanged,this,changed);
-  for(auto *box:findChildren<QCheckBox*>())connect(box,&QCheckBox::toggled,this,changed);
+  for(auto *box:findChildren<QCheckBox*>())
+    if(!preview->isAncestorOf(box)) connect(box,&QCheckBox::toggled,this,changed);
   ui->periodListWidget->selectAll();updatePreview();resize(1020,610);
 }
 

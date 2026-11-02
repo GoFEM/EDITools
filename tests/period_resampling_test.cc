@@ -129,6 +129,23 @@ void period_resampling_tests(const QString &directory)
   near(scalar(restored.get_station_data("A"), RealZxy, 2.), 2.);
   near(scalar(restored.resampling_source()->get_station_data("A"), RealZxy, 4.), 3.);
   check(restored.resampling_info().records.size() == output->resampling_info().records.size(), "Resampling audit lost on save/load");
+  // Selected-station resampling powers import: preserve all existing station
+  // values, errors, masks, metadata and raw response rows for other stations.
+  const auto encoded = [](const MTStationData &s) {
+    std::ostringstream out; { boost::archive::binary_oarchive archive(out); archive << s; } return out.str();
+  };
+  const auto oldB = encoded(survey->get_station_data("B"));
+  const auto oldC = encoded(survey->get_station_data("C"));
+  auto selected = resample(*survey, periods, {4., true}, {"A", "D"});
+  check(selected->get_survey_name() == survey->get_survey_name(), "Selected resampling renamed the survey");
+  check(encoded(selected->get_station_data("B")) == oldB && encoded(selected->get_station_data("C")) == oldC,
+        "Selected resampling changed an existing station");
+  near(scalar(selected->get_station_data("A"), RealZxy, 2., .2), 2.);
+  for(const auto &row: selected->response_observations()) check(row.receiver != "A" && row.receiver != "D", "Stale selected-station rows retained");
+  check(!selected->response_observations().empty(), "Unselected raw response rows removed");
+  for(const auto &record: selected->resampling_info().records) check(record.station == "A" || record.station == "D", "Unchanged station included in interpolation audit");
+  check(selected->resampling_source()->get_station_data("A").frequencies().size() == 3, "Original incoming periods not retained");
+  rejects([&] { resample(*survey, periods, {}, {"unknown"}); });
   near(logarithmic_grid(1., 100., 2)[1], std::sqrt(10.));
   check(validate_periods({4., 1., 4.}) == std::vector<double>({1., 4.}), "Custom sorting/deduplication failed");
   check(resample(*survey, {1e-8, 1.1e-8}, {})->get_unique_periods().size() == 2,

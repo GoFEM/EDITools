@@ -8,7 +8,7 @@ A simple GUI tool to work with large collections of [Magnetitelluric](https://en
 - Visualize all transfer functions
 - Assign error floors (with a proper error propagation from impedances to derived quantities such as apparent resistivity, phase or phase tensor)
 - Decimate data
-- Save a PDF graphic of all plots
+- Export a PDF survey report or a PNG image of the current plots
 - Mask any data
 - Save/Load a project with all masking and settings preserved
 - Export selected data in supported inversion formats.
@@ -45,6 +45,21 @@ Run checks with `ctest --test-dir build/Release --output-on-failure`.
 
 ## Usage
 
+### Command ribbon
+
+The compact ribbon groups commands into **Survey**, **Edit**, **Analysis**,
+**Maps** and **Report**. Open project, Save, Undo and Redo stay available in the
+upper left. Component visibility controls remain beside their plots.
+
+Use the arrow or **Ctrl+F1** to collapse the commands; click a tab to expand them.
+**Interface → Classic menus** restores the menu bar. The layout, collapse state
+and selected tab are remembered between sessions. Existing keyboard shortcuts
+work in both layouts. Hover over a command for its description; tools that need
+survey data are disabled until a survey is loaded.
+
+The instructions below use ribbon labels. The classic menus expose the same
+commands and share their checked and enabled states.
+
 ### EDI import and nearby periods
 
 Both impedance (`MTSECT`) and seven-channel remote-reference spectra
@@ -62,8 +77,9 @@ After selecting EDI files, the import preview shows station/sample counts, the
 period range, the distinct-period count before and after merging, and a table
 of all periods involving new stations, including exact matches already shared
 across stations. The preview states when no merging is needed; click **Import**
-to keep those periods unchanged. **Merge close periods** is optional and off by default.
-The initial **Tolerance (%)** is **0.1**. Changing it updates the preview.
+to keep those periods unchanged. The period selector offers **Keep original**
+(default), **Merge close periods**, and **Interpolate to existing**.
+For merging, the initial **Tolerance (%)** is **0.1**. Changing it updates the preview.
 
 A group must satisfy `(maximum period - minimum period) / minimum period <
 tolerance / 100`; adjacent matches cannot form a chain spanning a wider range.
@@ -79,10 +95,33 @@ files remain unchanged. Duplicate station names are skipped and listed in the
 preview help. Canceling the preview or a file-read failure leaves the current
 survey and project association unchanged.
 
+When adding stations to an existing project, **Interpolate to existing** puts
+only the new stations on the union of valid periods already stored at existing
+sites, including disabled sites and masked periods. Existing station values,
+errors, masks and period layouts remain unchanged. This option is unavailable
+without an existing layout or when no usable target values can be produced.
+
+Interpolation uses the same engine as **Edit → Layout / resample**: real and
+imaginary transfer functions are interpolated against log(period), with no
+extrapolation and a default **Max gap ratio** of **2**. **Respect masks** is on
+by default. Errors use weighted endpoint standard errors; derived quantities
+are recalculated, and exact samples retain their values, errors and masks.
+The preview lists retained, interpolated, derived and unavailable values per
+target period; hover over unavailable counts for the reasons. Counts represent
+four complex Z components, two complex tippers and four real PT entries per
+new station, rather than independent scalar observations.
+
+Incoming samples outside the chosen layout are omitted from the imported
+curves. The project retains the complete pre-interpolation survey and an audit
+of the new stations. **Open source** and **Saved audit…** in the Period Layout
+window expose these after saving/reopening the project. The existing survey's
+earlier resampling history remains in that source snapshot. Canceling or
+switching back to **Keep original** discards the interpolation preview;
+**Undo** can reverse the accepted import.
+
 ### Computed responses
 
-Load the observed EDI data or an existing project, then use **File → Load
-responses…**. Select any mix of GoFEM and native MT inversion response files;
+Load the observed EDI data or an existing project, then use **Survey → Responses**. Select any mix of GoFEM and native MT inversion response files;
 the format is detected from their contents. Select a file in **Calculated
 responses** to overlay its curves on the selected station.
 The last selected filename in sorted order is displayed immediately.
@@ -116,7 +155,7 @@ original missing-value and error information, then save the project.
 
 ### Data fit analysis
 
-Open **Data → Data fit statistics…** for a separate comparison window. Check or
+Open **Analysis → Statistics / RMS** for a separate comparison window. Check or
 uncheck any loaded response to include it in the overall nRMS, period, component,
 station and normalized-residual plots. Each response keeps the same color across
 the comparison plots; the list shows its nRMS and matched/available scalar count.
@@ -167,7 +206,7 @@ with their selected direction, and toggling them preserves that projection.
 
 ### Linked impedance and phase-tensor masks
 
-**Data → Link Z / PT masks** is on by default and saved with the project.
+**Edit → Link Z / PT** is on by default and saved with the project.
 It links mask/unmask operations from plots (including inverted masking),
 station component controls, and period maps. Turning it off restores independent
 editing; toggling the option does not change existing masks. Tippers are independent.
@@ -193,7 +232,7 @@ rho+ masking. It also covers error floors, station enable/disable, rename/delete
 EDI additions, decimation, UTM settings and topography/elevation edits. A batch
 operation is one step; edits that leave the data unchanged add no step.
 
-**Edit → History…** lists the latest 20 operations. Select a step to move back
+**Edit → History** lists the latest 20 operations. Select a step to move back
 or forward; a new edit after undo discards the redo branch. **Open original
 survey** opens an independent copy of the survey as it was loaded in this
 session, for comparison. History is kept in memory and starts afresh when a
@@ -202,7 +241,7 @@ Resampling opens a separate survey with its own history and retains its source.
 
 ### Neighbouring-station comparison
 
-**Data → Compare neighbouring stations…** overlays the stations selected in the
+**Analysis → Neighbours** overlays the stations selected in the
 main station list. With one station selected, it chooses that reference and its
 nearest enabled neighbours. Change **Reference** and click **Nearest** to choose
 a different group; the count specifies neighbours in addition to the reference.
@@ -217,7 +256,7 @@ can still be checked manually. This comparison does not change data or masks.
 
 ### Impedance validity and rho+
 
-Open **Data → Impedance validity / Rho+…** to compare a station's measured
+Open **Analysis → Rho+ analysis** to compare a station's measured
 apparent resistivity and phase with fitted rho+ responses. Select the station;
 **XY / YX** shows both off-diagonal components together, with independent fits
 drawn as thin dashed lines in their component colors. The **XY** and **YX**
@@ -228,7 +267,7 @@ component explicitly. **YX**
 is shown as `−Zyx` to use the same sign convention as XY. Phase is not folded
 into the first quadrant, so anomalous phases remain visible.
 
-Use **Plot → Show rho+ guides** to overlay thin, dashed XY/YX fits on the main
+Use **Analysis → Rho+ guides** to overlay thin, dashed XY/YX fits on the main
 resistivity and phase plots in their component colors. They follow the existing
 component visibility and phase-wrapping controls and refresh after masking or
 unmasking, preserving the current axes. The guides cannot be selected for masking
@@ -277,7 +316,7 @@ counting shared PT changes once. Components without a stable fit are skipped
 and identified in the preview. **Apply masks** performs one pass,
 masking both resistivity and phase for those component/periods. A **Zxy** candidate
 also masks **Zxx**, and a **Zyx** candidate also masks **Zyy**, at the same period.
-This polarization pairing applies even when **Data → Link Z / PT masks** is off;
+This polarization pairing applies even when **Edit → Link Z / PT** is off;
 that option independently controls PT masking. Tippers remain unchanged.
 Refitting does not trigger further rejection. **Undo** uses the shared survey
 history to restore the latest edit, including paired diagonals and linked PT masks. Preview is enabled by default and automatically refreshes
@@ -293,7 +332,7 @@ the shared history. Navigating stations preserves undo; other edits add their ow
 
 ### Survey impedance averages
 
-Open **Data → Survey impedance averages…** to display station responses and
+Open **Analysis → Survey averages** to display station responses and
 their **Regional geometric mean**. Check stations in the list to include them;
 the two checkboxes above the plots control curve visibility. Disabled survey
 stations and masked or incomplete required components cannot contribute.
@@ -330,14 +369,64 @@ The table and CSV include the contributor count at each period, since changing
 station coverage can itself change a regional curve. The original survey and
 its station enable flags remain unchanged.
 
+### Polarity review
+
+Open **Analysis → Polarity review** (or **Data → Polarity review…** in classic
+menus) to flag likely station polarity reversals relative to nearby stations.
+The table shows reversed / matched period counts for XY and YX; hover for the
+usable-period count. **No flag** means the test did not identify a sustained
+reversal, not that the station is necessarily correct.
+
+Comparison uses the nearest five enabled stations within 100 km by default.
+Only unmasked samples with impedance SNR ≥ 3, or equivalent phase uncertainty,
+are used. Periods must agree within 0.1%; ambiguous duplicates are excluded,
+with no interpolation or extrapolation. Each period needs at least three
+neighbours and 75% agreement within the angular tolerance (default 30°).
+A candidate requires at least three matched periods, coverage of at least 60%
+of its usable periods and a near-180° reversal at 80% of matched periods.
+Distance, neighbour count and angular tolerance are adjustable.
+
+The plots show raw XY/YX phases without 180° folding, the neighbour consensus
+and a correction preview. **Suggest Ex / Ey** selects an electric-row hypothesis
+for flagged components; it does not modify data. Select the actual channels and
+click **Apply to station** after reviewing the preview and acquisition records.
+
+| Reversed channel | Quantities that change sign |
+| --- | --- |
+| Ex | Zxx, Zxy |
+| Ey | Zyx, Zyy |
+| Hx | Zxx, Zyx, Tzx, PTxy, PTyx |
+| Hy | Zxy, Zyy, Tzy, PTxy, PTyx |
+| Hz | Tzx, Tzy |
+
+Channel choices combine algebraically in the stored x/y basis:
+`Z' = De Z Dh`, `T' = sz T Dh`, and `PT' = Dh PT Dh`, with diagonal sign
+matrices `De` and `Dh`. Electric reversals therefore leave tippers and the
+phase tensor unchanged. Sign-reversed impedance phases shift by 180°;
+apparent resistivities, standard errors, error floors and masks are preserved.
+The correction applies at every stored period, including masked samples, so
+unmasking cannot bring back an uncorrected value. **Undo** restores the edit.
+Save the project to retain corrections; reports and data exports use the
+corrected observations. Original input files and loaded calculated responses
+are unchanged.
+
+This is a relative consistency test, not a diagnosis of wiring faults. It
+assumes comparable station orientations and conventions. It cannot identify
+a survey-wide common reversal, distinguish electric from magnetic channel
+reversal using off-diagonal phases alone, or detect Hz reversals automatically.
+Stations with insufficient overlap or no geographic positions remain available
+for manual correction. Real structure can also cause phase reversals; see
+[the dispersion-relation study](https://doi.org/10.1186/s40623-020-01273-4).
+The phase-tensor transformation follows its definition
+[PT = Re(Z)⁻¹ Im(Z)](https://doi.org/10.1111/j.1365-246X.2004.02281.X).
+
 ### Station, induction-vector and phase-tensor maps
 
 Use **Station names** below the small station map to show or hide its labels.
-The same option is available under **Plot → Show station names** and is saved
+The same option is available under **Maps → Station names** and is saved
 with the project. New sessions start with names hidden.
 
-Click **Maps…** beside that checkbox, or **Data → Induction / phase tensor
-maps…**, to open a separate map window. Choose **Observed data** or a loaded
+Click **Maps…** beside that checkbox, or **Maps → PT / induction**, to open a separate map window. Choose **Observed data** or a loaded
 computed response, then select a **Period (s)**; **Previous** and **Next** step
 through available periods. Layer checkboxes above the plot independently control
 phase tensors, real induction arrows, imaginary induction arrows and station
@@ -484,7 +573,7 @@ use the provider's required attribution and access terms. Restart after changes.
 
 ### Survey PDF report
 
-Use **File → Export survey report…** to create a landscape PDF with a survey
+Use **Report → Survey PDF** to create a landscape PDF with a survey
 overview, station pages, phase-tensor ellipse maps, and/or induction-vector maps.
 Each section can be selected independently. The overview includes a station map
 with station names, period coverage, full/partial/masked/missing period counts and, when selected,
@@ -526,7 +615,7 @@ Choose all stations or enabled stations, an optional loaded response overlay,
 error bars, and whether to include only the currently visible components.
 GoFEM and native inversion responses use the same report rendering. nRMS uses
 observed errors and all matched, enabled scalar data, independently of plot
-visibility. Fixed Y ranges from **Plot → Axis ranges** are retained on every
+visibility. Fixed Y ranges from **Report → Axis ranges** are retained on every
 station page, including response overlays and empty panels. Y axes set to
 autoscale and period axes scale to each station. Phase wrapping follows the
 main window. Station locator maps include all valid survey locations. Missing coordinates are
@@ -544,7 +633,7 @@ grid** includes estimates, while
 **Original on grid** counts retained source samples at the exact target periods;
 increased grid coverage does not mean additional measurements.
 
-Open **Data → Period layout / Resampling…** to inspect station periods on a
+Open **Edit → Layout / resample** to inspect station periods on a
 logarithmic axis. Choose an impedance, tipper or phase-tensor component to view
 its source samples, masks and missing values. The **Coverage** tab counts enabled
 stations at each period. **Station summary** lists coverage and gaps larger than
@@ -600,7 +689,7 @@ describes the resampling operation, before subsequent edits or masking.
 
 #### Topography
 
-Open **Coordinates → Topography…**, or **Topography…** beside the station map.
+Open **Maps → Topography**, or **Topography…** beside the station map.
 Load one or more single-band **GeoTIFFs**, or choose **Copernicus GLO-30** or
 **USGS 3DEP** and click **Download**. Downloads occur only on request. The default
 area covers the survey plus a 5 km margin; change the margin and click
@@ -658,7 +747,7 @@ tiles are bundled with the repository. Automatic exports contain dataset
 metadata, not local source/cache paths. The editable **Credit** field is public
 text included in exports.
 
-Use **Coordinates → Convert latitude/longitude to UTM…** to project the loaded
+Use **Maps → UTM / origin** to project the loaded
 station locations using WGS84. The default zone and hemisphere come from the
 midpoint of the geographic survey extent, using the shortest longitude arc
 across the date line. Existing choices are retained when reopening the dialog.
@@ -691,12 +780,11 @@ saved with the project. All stations, including disabled ones, define the
 center; changing masks does not move the origin. Original latitude/longitude
 are retained. Use the **Map coordinates: Lat/Lon / UTM** switch below the map
 to change the view without changing export coordinates or the saved UTM origin.
-Station selection and map labels follow the selected view. **Coordinates →
-Show latitude/longitude on map** is a shortcut to the geographic view.
+Station selection and map labels follow the selected view. **Maps → Geographic** is a shortcut to the geographic view.
 Elevations and response tensors are unchanged by this
 coordinate operation. Projection uses [PROJ](https://proj.org/en/stable/development/quickstart.html).
 
-**File → Export to MT Inversion…** exports selected observations and periods
+**Survey → Native MT** exports selected observations and periods
 to native data, receiver and frequency files. It uses the survey's UTM coordinates,
 automatically choosing an uncentered WGS84/UTM projection if none has been applied. The native receiver
 file uses `x = northing`, `y = easting`, `z = -elevation` (metres).
@@ -713,6 +801,15 @@ including effective uncertainty ranges. The summary counts omitted data and
 shows units, sign choices, projection and origin. Invalid selections, coordinates
 or errors prevent export; hover for the full coordinate description. Previewing
 and exporting do not change the survey's saved coordinates.
+
+Station names may start with digits. Names containing spaces or unsupported
+characters can be exported using **Use compatible names** in either export
+dialog. This optional conversion prefixes names such as `001` with `S_`, replaces
+unsupported characters with underscores, and adds suffixes to prevent collisions.
+The Stations tab shows original and exported names. Project names stay unchanged;
+a `.names.csv` companion records changed names. Use this mapping to restore
+original receiver names in calculated responses before loading them into the
+project for comparison.
 
 Both formats use the same data preparation and validation. GoFEM keeps complex
 real/imaginary pairs together and uses positive-up receiver elevation; native

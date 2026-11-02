@@ -327,6 +327,25 @@ void MTStationData::calculate_apparent_resistivity()
       Rho[i][fidx] = 1. / (mu0 * 2. * M_PI * freqs[fidx]) * pow(std::abs(Z[i][fidx]), 2.);
 }
 
+void MTStationData::reverse_polarity(const std::array<bool, 5> &channels)
+{
+  const auto sign = [&channels](unsigned i) { return channels[i] ? -1 : 1; };
+  for(unsigned c = 0; c < 4; ++c) {
+    const int zsign = sign(c / 2) * sign(2 + c % 2);
+    const int ptsign = sign(2 + c / 2) * sign(2 + c % 2);
+    for(unsigned f = 0; f < freqs.size(); ++f) {
+      if(zsign < 0) {
+        Z[c][f] = -Z[c][f];
+        if(std::isfinite(Phs[c][f])) Phs[c][f] = std::remainder(Phs[c][f] + 180., 360.);
+      }
+      if(ptsign < 0) PT[c][f] = -PT[c][f];
+    }
+  }
+  for(unsigned c = 0; c < 2; ++c)
+    if(sign(4) * sign(2 + c) < 0)
+      for(auto &value : T[c]) value = -value;
+}
+
 void MTStationData::calculate_phase()
 {
   for(unsigned i = 0; i < Rho.size(); ++i)

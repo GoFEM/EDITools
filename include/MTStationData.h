@@ -111,6 +111,11 @@ public:
   // Does not change impedance/tipper errors or assign an error floor.
   void propagate_rho_phase_error();
 
+  // Sensor sign correction in the stored x/y basis, at every period (including
+  // masked samples). Errors, error floors, masks and apparent resistivity stay
+  // unchanged. Phi transforms as Dh Phi Dh; electric reversals cancel in Phi.
+  void reverse_polarity(const std::array<bool, 5> &channels); // Ex, Ey, Hx, Hy, Hz
+
   // Optional UI linkage follows Phi = Re(Z)^-1 Im(Z): a complex Z component
   // relates to every PT entry, and any PT entry to all complex Z components.
   // Apply only to the opposite tensor, without recursive propagation.

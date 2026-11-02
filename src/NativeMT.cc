@@ -18,7 +18,22 @@ void valid_name(const std::string &name)
 {
   require(!name.empty() && name.find_first_not_of(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-") == std::string::npos,
-    "Receiver name must use only A-Z, a-z, 0-9, underscore, dot or hyphen: " + name);
+    "Receiver name must use only A-Z, a-z, 0-9, underscore, dot or hyphen: " + name +
+    ". Enable 'Use compatible names' in the export preview.");
+}
+std::string compatible_name(std::string name)
+{
+  const std::string letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+  const auto allowed = letters + "0123456789_.-";
+  for(char &ch: name) if(allowed.find(ch) == std::string::npos) ch = '_';
+  if(name.empty() || letters.find(name.front()) == std::string::npos) name = "S_" + name;
+  return name;
+}
+std::string csv(const std::string &value)
+{
+  std::string result = "\"";
+  for(char ch: value) { if(ch == '"') result += '"'; result += ch; }
+  return result + '"';
 }
 double number(const std::string &token)
 {
@@ -355,6 +370,30 @@ Export prepare(const std::vector<const MTStationData *> &stations, const Options
     require(selected.emplace(period, frequency).second, "Duplicate selected period.");
   }
   std::vector<Observation> rows;
+  // Reserve unchanged names first so aliases never take another station's name.
+  std::map<std::string, std::string> names;
+  std::set<std::string> used;
+  for(const auto *station: stations) {
+    require(station != nullptr, "Invalid station.");
+    if(!options.compatible_names || compatible_name(station->name()) == station->name())
+      used.insert(station->name());
+  }
+  for(const auto *station: stations) {
+    const auto &original = station->name();
+    if(names.count(original)) continue;
+    std::string name = options.compatible_names ? compatible_name(original) : original;
+    if(name != original) {
+      const auto base = name;
+      for(unsigned suffix = 2; used.count(name); ++suffix) name = base + '_' + std::to_string(suffix);
+      used.insert(name);
+    }
+    names[original] = name;
+  }
+  Receivers receivers;
+  for(const auto &entry: names) {
+    const auto position = options.receivers.find(entry.first);
+    if(position != options.receivers.end()) receivers[entry.second] = position->second;
+  }
   std::size_t masked = 0, missing = 0, undefined = 0;
   for(const auto *station: stations) {
     require(station != nullptr, "Invalid station.");
@@ -376,11 +415,19 @@ Export prepare(const std::vector<const MTStationData *> &stations, const Options
           value = -value;
         if(options.vertical_magnetic_up && std::string(m.observable).find("induction_") == 0)
           value = -value;
-        rows.push_back({selection->second, station->name(), type, value, error});
+        rows.push_back({selection->second, names.at(station->name()), type, value, error});
       }
     }
   }
-  Export result = encode(rows, options.receivers, options.coordinate_description, options.distortion);
+  Export result = encode(rows, receivers, options.coordinate_description, options.distortion);
+  for(const auto &entry: names)
+    if(entry.first != entry.second && result.receivers.count(entry.second))
+      result.original_names[entry.second] = entry.first;
+  if(!result.original_names.empty()) {
+    result.name_mapping_text = "original_name,exported_name\n";
+    for(const auto &entry: result.original_names)
+      result.name_mapping_text += csv(entry.second) + ',' + csv(entry.first) + '\n';
+  }
   result.masked = masked; result.missing = missing; result.undefined_phase = undefined;
   return result;
 }

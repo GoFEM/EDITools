@@ -43,6 +43,7 @@
 #include <sstream>
 
 void period_resampling_tests(const QString &directory);
+void edi_import_interpolation_tests(const QString &directory);
 
 namespace {
 void check(bool ok, const std::string &message)
@@ -119,6 +120,7 @@ void write_edi(const QString &path, const std::vector<double> &frequencies)
 }
 void edi_import_tests(const QString &directory)
 {
+  edi_import_interpolation_tests(directory);
   const auto a = directory + "/EDI_A.edi", b = directory + "/EDI_B.edi", c = directory + "/EDI_C.edi";
   write_edi(a, {1., .1}); write_edi(b, {1. / 1.0005, .1}); write_edi(c, {1. / 1.0013});
   std::vector<std::string> paths{a.toStdString(), b.toStdString(), c.toStdString()};
@@ -173,7 +175,7 @@ void edi_import_tests(const QString &directory)
   check(aligned.get_station_data("EDI_A").frequencies()==std::vector<double>({1.,.1}),"Aligned review changed frequencies");
 
   MainWindow window;
-  auto import = [&](const QStringList &files, bool accept, bool mergePeriods) {
+  auto import = [&](const QStringList &files, bool accept, int periodMode) {
     QTimer timer; bool reviewed = false;
     QObject::connect(&timer, &QTimer::timeout, [&] {
       for(auto *top: QApplication::topLevelWidgets()) if(auto *name = qobject_cast<QInputDialog *>(top)) {
@@ -181,10 +183,10 @@ void edi_import_tests(const QString &directory)
       }
       auto *dialog = window.findChild<QDialog *>("ediImportDialog");
       if(!dialog || !dialog->isVisible()) return;
-      check(!widget<QCheckBox>(*dialog, "ediMergePeriods")->isChecked(), "EDI merging must be opt-in");
+      check(widget<QComboBox>(*dialog, "ediPeriodMode")->currentIndex() == 0, "EDI period changes must be opt-in");
       check(widget<QDoubleSpinBox>(*dialog, "ediPeriodTolerance")->value() == .1, "Default EDI tolerance must be 0.1%");
       check(widget<QLabel>(*dialog, "ediImportSummary")->text().contains("distinct periods"), "Import period statistics missing");
-      widget<QCheckBox>(*dialog, "ediMergePeriods")->setChecked(mergePeriods);
+      widget<QComboBox>(*dialog, "ediPeriodMode")->setCurrentIndex(periodMode);
       reviewed = true; timer.stop(); if(accept) dialog->accept(); else dialog->reject();
     });
     timer.start(0); file_action(window, "actionLoad_EDI", files); check(reviewed, "EDI import did not show review dialog");
@@ -201,6 +203,18 @@ void edi_import_tests(const QString &directory)
   import({c}, true, false); list->setCurrentRow(2);
   check(list->count() == 3 && widget<QCustomPlot>(window, "plot11")->graph(1)->data()->constBegin()->key == 1.0013,
         "Keep-original import changed a period");
+  const auto interpolatedPath = directory + "/EDI_interpolated.edi";
+  write_edi(interpolatedPath, {2., 1., .5, .1});
+  import({interpolatedPath}, false, 2);
+  check(list->count() == 3, "Canceled interpolation added a station");
+  import({interpolatedPath}, true, 2);
+  auto matches = list->findItems("EDI_interpolated", Qt::MatchExactly);
+  check(matches.size() == 1, "Interpolated station missing"); list->setCurrentItem(matches.front());
+  auto data = widget<QCustomPlot>(window, "plot11")->graph(1)->data();
+  check(data->size() == 3 && std::abs(data->constBegin()->key - 1.) < 1e-12 &&
+        std::abs((data->constBegin()+1)->key - 1.0013) < 1e-12, "Import did not use the existing-period union");
+  widget<QAction>(window, "actionUndo")->trigger(); check(list->count() == 3, "Cannot undo interpolated import");
+  widget<QAction>(window, "actionRedo")->trigger(); check(list->count() == 4, "Cannot redo interpolated import");
 }
 QByteArray read_report(const QString &path)
 {

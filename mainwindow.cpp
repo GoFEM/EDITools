@@ -60,8 +60,11 @@
 #include "ExportNativeMTDialog.h"
 #include "ExportPreview.h"
 #include "StationComparisonWindow.h"
+#include "PolarityWindow.h"
 #include "SurveyCoordinatesDialog.h"
 #include "include/SurveyHistory.h"
+#include "include/CommandRibbon.h"
+#include <QStyle>
 #include <QUndoView>
 #include <QVBoxLayout>
 #include "FitStatisticsWindow.h"
@@ -145,7 +148,7 @@ MainWindow::MainWindow(QWidget *parent) :
   plotHandlers[1]->set_associated_plot(*plotHandlers[0]);
   rhoPlusAction = ui->menuPlot->addAction(tr("Show rho+ guides"));
   rhoPlusAction->setObjectName("actionShow_rho_plus"); rhoPlusAction->setCheckable(true);
-  const auto rhoPlusHelp = tr("Thin dashed XY/YX rho+ fits in the component colors. Fits use enabled, unmasked observations and refresh after masking. Component checkboxes also hide the guides. These are 1-D consistency guides, not automatic validity judgments. Change grid density in Data → Impedance validity / Rho+…");
+  const auto rhoPlusHelp = tr("Thin dashed XY/YX rho+ fits in the component colors. Fits use enabled, unmasked observations and refresh after masking. Component checkboxes also hide the guides. These are 1-D consistency guides, not automatic validity judgments. Change grid density in the Rho+ analysis window.");
   rhoPlusAction->setToolTip(rhoPlusHelp); ui->menuPlot->setToolTipsVisible(true);
   rhoPlusOverlay.reset(new RhoPlusOverlay(plot11,plot12,[this,rhoPlusHelp](const QString &status) {
     rhoPlusAction->setToolTip(rhoPlusHelp + (status.isEmpty()?QString():"\n\n"+status));
@@ -177,10 +180,16 @@ MainWindow::MainWindow(QWidget *parent) :
   mapStationNames = new QCheckBox(tr("Station names"), mapControls);
   mapStationNames->setObjectName("stationMapNames");
   mapActions->addWidget(mapStationNames);
-  mapActions->addWidget(MapBackground::button(mapControls, 0, [this](int layers) { mapBackground->setLayers(layers); ui->mapPlot->replot(); }));
+  auto *layersButton = MapBackground::button(mapControls, 0, [this](int layers) { mapBackground->setLayers(layers); ui->mapPlot->replot(); });
+  mapActions->addWidget(layersButton);
+  auto *layersAction = ui->menuCoordinates->addAction(tr("Map layers…"));
+  layersAction->setObjectName("actionMap_layers");
+  layersAction->setMenu(layersButton->menu());
+  layersAction->setToolTip(layersButton->toolTip());
   auto *terrainButton = new QPushButton(tr("Topography…"),mapControls);
   terrainButton->setObjectName("openTopography");mapActions->addWidget(terrainButton);
   connect(terrainButton,&QPushButton::clicked,topography,&QAction::trigger);
+  connect(topography, &QAction::changed, terrainButton, [terrainButton, topography] { terrainButton->setEnabled(topography->isEnabled()); });
   mapActions->addStretch();
   auto *mapsButton = new QPushButton(tr("Maps…"), mapControls);
   mapsButton->setObjectName("openPeriodMaps");
@@ -188,7 +197,8 @@ MainWindow::MainWindow(QWidget *parent) :
   mapActions->addWidget(mapsButton);
   mapControlsLayout->addLayout(mapActions);
   connect(mapStationNames, &QCheckBox::toggled, ui->actionShow_station_names, &QAction::setChecked);
-  connect(mapsButton, &QPushButton::clicked, this, &MainWindow::on_actionPeriod_maps_triggered);
+  connect(mapsButton, &QPushButton::clicked, ui->actionPeriod_maps, &QAction::trigger);
+  connect(ui->actionPeriod_maps, &QAction::changed, mapsButton, [this, mapsButton] { mapsButton->setEnabled(ui->actionPeriod_maps->isEnabled()); });
   auto *periodLayoutAction = ui->menuData->addAction(tr("Period layout / Resampling…"));
   periodLayoutAction->setObjectName("actionPeriod_layout");
   connect(periodLayoutAction, &QAction::triggered, this, &MainWindow::openPeriodLayout);
@@ -203,6 +213,14 @@ MainWindow::MainWindow(QWidget *parent) :
     stationComparison->show();stationComparison->raise();stationComparison->activateWindow();
   });
   auto *validityAction = ui->menuData->addAction(tr("Impedance validity / Rho+…"));
+  auto *polarityAction = ui->menuData->addAction(tr("Polarity review…"));
+  polarityAction->setObjectName("actionPolarity_review");
+  polarityAction->setToolTip(tr("Review likely polarity reversals against neighbouring stations, preview channel corrections and apply with Undo support."));
+  connect(polarityAction, &QAction::triggered, this, [this] {
+    if(!polarity) polarity = new PolarityWindow(this, *history, [this] { updatePlots(false); refreshAnalysisWindows(); });
+    polarity->setData(mtSurvey, ui->stationList->currentItem() ? ui->stationList->currentItem()->text() : QString());
+    polarity->show(); polarity->raise(); polarity->activateWindow();
+  });
   validityAction->setObjectName("actionImpedance_validity");
   connect(validityAction, &QAction::triggered, this, [this] {
     if(!impedanceValidity) impedanceValidity = new ImpedanceValidityWindow(this, [this](const ImpedanceAnalysis::RhoPlusOptions &options) {
@@ -287,7 +305,59 @@ MainWindow::MainWindow(QWidget *parent) :
 
   lastDirectory = QSettings().value("lastDirectory", QDir::homePath()).toString();
 
+  setupRibbon();
   this->showMaximized();
+}
+
+void MainWindow::setupRibbon()
+{
+  const auto command = [this](const char *name, const QString &label, bool needsSurvey = false) {
+    auto *action = findChild<QAction *>(QLatin1String(name));
+    Q_ASSERT(action);
+    action->setIconText(label);
+    if(needsSurvey) surveyActions.push_back(action);
+    return action;
+  };
+  const auto icon = [this](QAction *action, const char *theme, QStyle::StandardPixmap fallback) {
+    action->setIcon(QIcon::fromTheme(QLatin1String(theme), style()->standardIcon(fallback)));
+    return action;
+  };
+  auto *open = icon(command("actionLoad_project", tr("Open")), "document-open", QStyle::SP_DialogOpenButton);
+  auto *save = icon(command("actionSave_project", tr("Save"), true), "document-save", QStyle::SP_DialogSaveButton);
+  auto *undo = icon(command("actionUndo", tr("Undo")), "edit-undo", QStyle::SP_ArrowBack);
+  auto *redo = icon(command("actionRedo", tr("Redo")), "edit-redo", QStyle::SP_ArrowForward);
+  const std::vector<CommandRibbon::Page> pages{
+    {tr("&Survey"), {
+      {tr("Project"), {open, save}},
+      {tr("Import"), {command("actionLoad_EDI", tr("EDI files")), command("actionLoad_responses", tr("Responses"))}},
+      {tr("Export data"), {command("actionExport_native_MT", tr("Native MT"), true), command("actionExport_in_GoFEM", tr("GoFEM"), true)}}}},
+    {tr("&Edit"), {
+      {tr("History"), {undo, redo, command("actionSurvey_history", tr("History"))}},
+      {tr("Masks"), {command("actionActivate_masking_mode", tr("Masking mode")), command("actionLink_tensor_masks", tr("Link Z / PT"))}},
+      {tr("Periods"), {command("actionPeriod_layout", tr("Layout / resample"), true), command("actionDecimate", tr("Decimate"), true)}},
+      {tr("Errors"), {command("actionSet_error_floor", tr("Error floors"), true)}}}},
+    {tr("&Analysis"), {
+      {tr("Validity"), {command("actionImpedance_validity", tr("Rho+ analysis"), true), command("actionShow_rho_plus", tr("Rho+ guides")), command("actionPolarity_review", tr("Polarity review"), true)}},
+      {tr("Compare"), {command("actionCompare_stations", tr("Neighbours"), true), command("actionSurvey_averages", tr("Survey averages"), true)}},
+      {tr("Data fit"), {command("actionFit_statistics", tr("Statistics / RMS"), true)}}}},
+    {tr("&Maps"), {
+      {tr("Coordinates"), {command("actionConvert_UTM", tr("UTM / origin"), true), command("actionGeographic_coordinates", tr("Geographic"), true)}},
+      {tr("Survey maps"), {command("actionPeriod_maps", tr("PT / induction"), true), command("actionShow_station_names", tr("Station names"))}},
+      {tr("Background"), {command("actionMap_layers", tr("Map layers")), command("actionTopography", tr("Topography"), true)}}}},
+    {tr("&Report"), {
+      {tr("Export figures"), {command("actionExport_survey_report", tr("Survey PDF"), true), command("actionSave_as_PDF", tr("Plot image"))}},
+      {tr("Plot display"), {command("actionPlot_axis_ranges", tr("Axis ranges")), command("actionShow_error_bars", tr("Error bars")),
+        command("actionPhase_wrap", tr("Wrap phase")), command("actionTipper_arrows", tr("Tipper arrows"))}}}}
+  };
+  new CommandRibbon(*this, {open, save, undo, redo}, pages, ui->actionAbout_EDI_Tools);
+  updateActionAvailability();
+}
+
+void MainWindow::updateActionAvailability()
+{
+  const bool hasData = mtSurvey && mtSurvey->n_stations();
+  for(auto *action : surveyActions) action->setEnabled(hasData);
+  ui->actionSave_as_PDF->setEnabled(hasData && ui->stationList->currentItem());
 }
 
 void MainWindow::exportSurveyReport()
@@ -484,6 +554,7 @@ void MainWindow::updatePlots(bool rescaleAxes)
 {
   // Designer-connected actions can fire while the plots are being constructed.
   if(!rhoPlusOverlay) return;
+  updateActionAvailability();
   rhoPlusOverlay->hide();
   QListWidgetItem* item = ui->stationList->currentItem();
   if(item == nullptr) {
@@ -1157,12 +1228,14 @@ void MainWindow::on_actionFit_statistics_triggered()
 
 void MainWindow::refreshAnalysisWindows()
 {
+  updateActionAvailability();
   if(fitStatistics) fitStatistics->setData(mtSurvey, mtResponses);
   if(periodMaps) periodMaps->setData(mtSurvey, mtResponses);
   if(periodLayout) periodLayout->setData(mtSurvey);
   if(impedanceValidity) impedanceValidity->setData(mtSurvey);
   if(surveyAverage) surveyAverage->setData(mtSurvey);
   if(stationComparison) stationComparison->setData(mtSurvey);
+  if(polarity) polarity->setData(mtSurvey);
 }
 
 void MainWindow::openPeriodLayout()
