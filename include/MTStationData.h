@@ -80,9 +80,10 @@ public:
                 const std::vector<double> &values,
                 const std::vector<double> &errors);
 
-  std::vector<std::vector<bool>> impedance_mask() const;
-  std::vector<std::vector<bool>> tipper_mask() const;
-  std::vector<std::vector<bool>> phase_tensor_mask() const;
+  // Plot masks suppress disabled stations; editors can request stored flags.
+  std::vector<std::vector<bool>> impedance_mask(bool includeInactive = false) const;
+  std::vector<std::vector<bool>> tipper_mask(bool includeInactive = false) const;
+  std::vector<std::vector<bool>> phase_tensor_mask(bool includeInactive = false) const;
 
   // Initialize all arrays and masks, replacing any previously loaded samples.
   void set_size(const unsigned n_frequencies, bool missing_values = false);

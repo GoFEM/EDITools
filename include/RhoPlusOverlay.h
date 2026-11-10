@@ -20,6 +20,7 @@ private:
   struct Component {
     std::vector<ImpedanceAnalysis::Sample> input, response;
     bool pending = false;
+    bool provisional = false;
     QString status;
   };
   QCustomPlot *rho, *phase;

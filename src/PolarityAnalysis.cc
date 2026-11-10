@@ -1,6 +1,7 @@
 #include "include/PolarityAnalysis.h"
 #include "include/MTSurveyData.h"
 #include "include/SurveyGeometry.h"
+#include "include/PhaseStatistics.h"
 #include <algorithm>
 #include <stdexcept>
 
@@ -37,24 +38,8 @@ const Sample *match(const Curve &curve, double frequency) {
   const auto next = std::next(first);
   return next != curve.end() && next->frequency <= frequency * 1.001 ? nullptr : &*first;
 }
-double separation(double a, double b) { return std::abs(std::remainder(a - b, 360.)); }
-bool consensus(const std::vector<double> &phases, double tolerance, double &phase, unsigned &count) {
-  if(phases.size() < 3) return false;
-  // Circular medoid is robust to one reversed neighbour and the +/-180° seam.
-  auto centre = std::min_element(phases.begin(), phases.end(), [&](double a, double b) {
-    double da = 0., db = 0.;
-    for(double value : phases) { da += separation(a, value); db += separation(b, value); }
-    return da < db;
-  });
-  std::complex<double> sum{};
-  count = 0;
-  for(double value : phases) if(separation(value, *centre) <= tolerance) {
-    sum += std::polar(1., value * pi / 180.); ++count;
-  }
-  if(count < 3 || count < .75 * phases.size()) return false;
-  phase = std::arg(sum) * 180. / pi;
-  return true;
-}
+using PhaseStatistics::separation;
+using PhaseStatistics::consensus;
 }
 bool Component::supported() const { return points.size() >= 3 && points.size() >= .6 * usable; }
 bool Component::candidate() const { return supported() && reversed >= .8 * points.size(); }

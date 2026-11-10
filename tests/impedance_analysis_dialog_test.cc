@@ -1,6 +1,7 @@
 #include "ImpedanceAnalysisWindows.h"
 #include "include/MTSurveyData.h"
 #include "include/MTDataPlot.h"
+#include "include/RhoPlusOverlay.h"
 #include "qcustomplot.h"
 #include <QApplication>
 #include <QCheckBox>
@@ -29,6 +30,56 @@ template<class T> T *control(QWidget &w,const char *name) { auto *v=w.findChild<
 void settle() {
   QElapsedTimer timer; timer.start();
   while(timer.elapsed()<250) { QApplication::processEvents(QEventLoop::AllEvents,25); QThread::msleep(5); }
+}
+void overlayRefits() {
+  using namespace ImpedanceAnalysis;
+  const double pi = std::acos(-1.), mu = 4e-7*pi;
+  MTStationData station; station.set_name("REFIT"); station.set_size(24, true);
+  std::set<double> frequencies;
+  for(unsigned i = 0; i < 24; ++i) frequencies.insert(1. / std::pow(10., -3. + i*7./23));
+  station.set_frequencies(frequencies);
+  for(double f : frequencies) {
+    const auto top = std::sqrt(std::complex<double>(0., 2*pi*f*mu*10.)), bottom = std::sqrt(std::complex<double>(0., 2*pi*f*mu*1000.));
+    const auto k = std::tanh(std::sqrt(std::complex<double>(0., 2*pi*f*mu/10.))*1500.);
+    const auto z = top*(bottom + top*k)/(top + bottom*k); const double error = .001*std::abs(z);
+    station.set_data(f, {RealZxy, ImagZxy, RealZyx, ImagZyx}, {z.real(), z.imag(), -z.real(), -z.imag()}, {error, error, error, error});
+  }
+  station.calculate_apparent_resistivity(); station.calculate_phase(); station.set_error_floor(0.);
+  QCustomPlot rho, phase; QString status;
+  RhoPlusOverlay overlay(&rho, &phase, [&](const QString &text) { status = text; });
+  const std::array<bool, 4> visible{{false, true, true, false}};
+  RhoPlusOptions options; options.intervalsPerDecade = 4;
+  auto refresh = [&] { overlay.update(&station, true, true, visible, visible, options); settle(); };
+  refresh();
+  auto *xy = control<QCPCurve>(rho, "rhoPlusXY");
+  const auto provisional = rhoPlus(curve(station, Quantity::XY), options);
+  check(!provisional.gridStable && !provisional.response.empty(), "Regression fixture no longer exercises provisional fits");
+  check(xy->visible() && xy->pen().style() == Qt::DotLine && status.contains("provisional"), "Provisional rho+ disappeared without an explanation");
+  check(rhoPlusOutliers(provisional, 3.).empty(), "Provisional guide enabled automatic masking");
+  const auto original = station;
+  station.set_data_mask(RealZxy, station.frequencies().front(), false);
+  station.set_data_mask(RealZxy, station.frequencies()[10], false);
+  station.set_data_mask(RealZxy, station.frequencies().back(), false);
+  refresh();
+  auto input = curve(station, Quantity::XY);
+  input.erase(std::remove_if(input.begin(), input.end(), [](const Sample &s) { return !s.usable(); }), input.end());
+  check(input.size() == 21, "Masked impedance entered the fit");
+  const auto expected = rhoPlus(input, options);
+  check(xy->visible() && xy->data()->size() == int(expected.response.size()) && status.contains("21 unmasked samples"), "Masked station lost its refitted guide");
+  unsigned i = 0;
+  for(auto point = xy->data()->constBegin(); point != xy->data()->constEnd(); ++point, ++i) {
+    check(std::abs(point->key - expected.response[i].period) < 1e-10*expected.response[i].period &&
+          std::abs(point->value / expected.response[i].resistivity() - 1.) < 1e-10, "Guide differs from fit of the unmasked subset");
+  }
+  station.mask_type(RealZxy, false);
+  for(unsigned j = 0; j < 2; ++j) station.set_data_mask(RealZxy, station.frequencies()[j], true);
+  refresh(); check(!xy->visible() && xy->data()->isEmpty() && status.contains("at least three"), "Insufficient data retained a stale guide");
+  check(control<QCPCurve>(rho, "rhoPlusYX")->visible(), "Masking XY removed the independent YX guide");
+  station = original; options.intervalsPerDecade = 12; refresh();
+  check(xy->visible() && xy->pen().style() == Qt::DashLine, "Restoring masks did not restore the stable rho+ guide");
+  overlay.update(nullptr, true, true, visible, visible, options); settle();
+  check(!xy->visible(), "Empty selection retained rho+ guide");
+  refresh(); check(xy->visible(), "Returning to the station lost cached rho+ guide");
 }
 void masking(const std::shared_ptr<MTSurveyData> &original, const QString &previewDirectory) {
   auto survey=std::make_shared<MTSurveyData>(*original);
@@ -290,6 +341,7 @@ int main(int argc,char **argv) {
     masking(survey,argc>1 ? QString::fromLocal8Bit(argv[1]) : QString());
     batchMasking(survey);
     dataErrors(survey);
+    overlayRefits();
     std::cout<<"Impedance analysis dialog checks passed.\n";
   } catch(const std::exception &e) { std::cerr<<e.what()<<'\n'; return 1; }
 }

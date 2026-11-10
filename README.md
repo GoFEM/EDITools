@@ -225,12 +225,99 @@ change the other entries in the starting tensor. Unmasking applies the same link
 For inverted selections, a mask takes precedence if multiple selected components
 give conflicting instructions for a shared dependent entry.
 
+### Group masking
+
+Select stations with Ctrl-click or Shift-click, then open **Edit → Group masking**
+or **Group masking…** in the station context menu. Choose **Mask** or **Unmask**,
+components, and all periods, an inclusive range, periods outside that range, or
+individual stored periods. Ctrl+A selects all entries in the period list.
+Individual periods match exactly; nearby periods are not merged or interpolated.
+
+The preview shows matching periods and changes to Z, tipper and PT masks per
+station, including linked components. **Link Z / PT** starts with the main setting
+and can be overridden for this operation. Links affect only the opposite tensor;
+tippers stay independent. Component choices here are explicit and independent of
+main-plot visibility. Selected disabled stations are included without enabling them.
+Counts describe mask flags, including flags for missing values; unmasking does not
+create data. **Apply** makes one undoable edit; **Cancel** leaves masks unchanged.
+
+Four plots overlay all selected stations: apparent resistivity, stored phase
+(without wrapping), real/imaginary tippers and phase tensor. Component colours
+match the main plots. Grey crosses mark existing masks; large red circled crosses
+show points to mask, and green circles show points to unmask. These markers use
+the same edit plan as the table, including linked components. Missing values
+remain gaps and have no marker; nonpositive resistivity cannot appear on a log axis.
+Hover over points to identify stations. Each plot has component visibility
+checkboxes, independent of the masking choices. Drag or scroll to inspect the
+curves; period axes stay synchronized and **Fit view** restores the overview.
+
+### Auto masking
+
+Use the **Auto mask** ribbon tab (or the **Auto mask** classic menu). **Preview**
+marks candidates with red circles directly on the main station plots, including
+tipper lines or arrow anchors. **Previous / Next** switches stations without
+changing the selected batch. **Apply** masks the current preview; **Apply + next**
+also advances. **Apply to selected** evaluates the selected enabled sites with
+the same settings and applies them in one Undo step. Cancelling that calculation
+applies nothing. Unselected sites can provide neighbour references but are not edited.
+
+The ribbon has independent check and component switches for **XY**, **YX**, **Tzx**
+and **Tzy**. **Settings** opens the shared threshold editor; **Detailed review**
+provides per-point checkboxes, scores, plots and CSV export for selected or all
+enabled sites. Checks are **Rho+ / dispersion**, **Period outliers**, **Neighbours**,
+and **Uncertainty**. Disabled checks are not evaluated.
+**Minimum flags** defaults to one: any enabled check can nominate points for review.
+Increase it to require agreement; this can exclude noisy points that only fail the
+uncertainty check. Main-plot previews refresh after station, mask or setting changes.
+Detailed review clears old suggestions until **Analyze** runs again.
+
+- Rho+ uses the existing joint resistivity/phase fit and propagated main-data
+  errors. Only converged, grid-stable fits contribute. Dispersion consistency is
+  included in this check, rather than counted again as an independent test.
+  Rho+ does not apply to tippers and never supplies a tipper vote.
+- Period outliers use a robust trend in log period, excluding the tested point,
+  with two reference samples on each side. Neither endpoints nor masked/missing
+  reference samples or excessive period gaps are bridged. Resistivity and circular
+  phase residuals share one vote, with measured errors and reference scatter.
+  Tippers use real/imaginary residuals without logarithms or phase wrapping.
+- Neighbours compares uniquely matched periods among nearby enabled sites,
+  including sites outside the target selection. It requires at least three
+  neighbours and 75% phase agreement. Distance, period tolerance, angular departure
+  and agreement limits are adjustable. Impedance amplitude differences do not
+  contribute. Tippers compare complex values with an adjustable minimum offset
+  (default 0.05) and agreement distance (0.1).
+- Uncertainty flags poorly resolved data, including endpoints, when the main-data
+  one-sigma resistivity error exceeds 50% of resistivity or the phase error exceeds
+  15°. Both limits are adjustable in **Settings**. Its score is the larger error /
+  limit ratio, and its threshold defaults to 1×. This check catches noisy data whose
+  large errors suppress normalized residuals; it does not change those errors.
+  Tippers use an absolute error limit (default 0.05), so small or zero amplitudes
+  with small errors are not rejected merely for their relative error.
+
+The three consistency checks default to 3 sigma. These are standardized residuals for screening,
+not calibrated probabilities: genuine spatial or multidimensional structure can
+also disagree with these models. In particular, amplitude–phase dispersion
+relations require additional assumptions beyond causality; see the
+[dispersion-relation study](https://link.springer.com/article/10.1186/s40623-020-01273-4).
+This tool does not implement a general 3-D Kramers–Kronig validity test.
+
+Review scores and hover explanations in the table; check or uncheck individual
+suggestions while viewing the plotted mask plan. **Flagged only** includes every
+point flagged by any check, even if it falls below **Minimum flags**. **CSV…** saves
+settings, scores, reasons and choices without source paths. **Pair diagonals** adds
+Zxx for checked Zxy points and Zyy for Zyx; **Link Z / PT** adds PT masks. Both can be
+disabled. Impedance/PT and tipper edits remain independent. A tipper candidate
+masks both real and imaginary parts of that component only. **Apply checked** changes only the reviewed masks
+in one Undo step; preview and analysis never alter data, errors or error floors.
+
 ### Edit history
 
 **Edit → Undo / Redo** shares one history across station plots, map masking and
 rho+ masking. It also covers error floors, station enable/disable, rename/delete,
 EDI additions, decimation, UTM settings and topography/elevation edits. A batch
 operation is one step; edits that leave the data unchanged add no step.
+Select several stations and choose **Delete** from their context menu to remove
+them together. One **Undo** restores the whole selection.
 
 **Edit → History** lists the latest 20 operations. Select a step to move back
 or forward; a new edit after undo discards the redo branch. **Open original
@@ -273,7 +360,12 @@ component visibility and phase-wrapping controls and refresh after masking or
 unmasking, preserving the current axes. The guides cannot be selected for masking
 and can be shown alongside loaded responses. They use the main data's propagated
 errors. Grid density comes from the validity window; this setting and guide visibility are saved in
-the project. Unconverged or grid-sensitive fits are omitted from the main plots.
+the project. Every fit uses only the remaining unmasked, enabled samples with
+valid propagated errors. Finite provisional fits remain visible as dotted lines
+when convergence or grid refinement checks fail; hover over **Rho+ guides** for
+each component's status and fitted sample count. Such fits cannot drive automatic
+masking. Fewer than three usable samples, invalid errors, or no finite response
+leave no guide; the tooltip explains why. No previous fit is reused after masks change.
 
 The native C++ implementation uses the bounded spectral representation of
 log admittance from [Parker and Booker (1996)](https://doi.org/10.1016/S0031-9201(96)03191-3).

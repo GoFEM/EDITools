@@ -61,6 +61,8 @@
 #include "ExportPreview.h"
 #include "StationComparisonWindow.h"
 #include "PolarityWindow.h"
+#include "GroupMaskDialog.h"
+#include "AutoMaskWorkflow.h"
 #include "SurveyCoordinatesDialog.h"
 #include "include/SurveyHistory.h"
 #include "include/CommandRibbon.h"
@@ -148,7 +150,7 @@ MainWindow::MainWindow(QWidget *parent) :
   plotHandlers[1]->set_associated_plot(*plotHandlers[0]);
   rhoPlusAction = ui->menuPlot->addAction(tr("Show rho+ guides"));
   rhoPlusAction->setObjectName("actionShow_rho_plus"); rhoPlusAction->setCheckable(true);
-  const auto rhoPlusHelp = tr("Thin dashed XY/YX rho+ fits in the component colors. Fits use enabled, unmasked observations and refresh after masking. Component checkboxes also hide the guides. These are 1-D consistency guides, not automatic validity judgments. Change grid density in the Rho+ analysis window.");
+  const auto rhoPlusHelp = tr("Thin XY/YX rho+ fits in the component colors: dashed for stable fits, dotted for provisional fits. Fits use enabled, unmasked observations and refresh after masking. Component checkboxes also hide the guides. These are 1-D consistency guides, not automatic validity judgments. Change grid density in the Rho+ analysis window.");
   rhoPlusAction->setToolTip(rhoPlusHelp); ui->menuPlot->setToolTipsVisible(true);
   rhoPlusOverlay.reset(new RhoPlusOverlay(plot11,plot12,[this,rhoPlusHelp](const QString &status) {
     rhoPlusAction->setToolTip(rhoPlusHelp + (status.isEmpty()?QString():"\n\n"+status));
@@ -248,6 +250,28 @@ MainWindow::MainWindow(QWidget *parent) :
     if(periodMaps) periodMaps->setLinkTensorMasks(on);
     if(impedanceValidity) impedanceValidity->setLinkTensorMasks(on);
   });
+  auto *groupMasks = edit->addAction(tr("Group masking…"));
+  groupMasks->setObjectName("actionGroup_masking");
+  groupMasks->setToolTip(tr("Mask or unmask chosen periods and components across the selected stations, with one Undo step."));
+  connect(groupMasks, &QAction::triggered, this, [this] {
+    if(!mtSurvey) return;
+    std::set<std::string> names;
+    for(const auto *item : ui->stationList->selectedItems()) names.insert(item->text().toStdString());
+    if(names.empty() || !editGroupMasks(this, *mtSurvey, names, linkTensorMasksAction->isChecked())) return;
+    history->record(tr("Group masking"));
+    updatePlots(false); refreshAnalysisWindows();
+  });
+  autoMaskWorkflow = new AutoMaskWorkflow(*this, *history, plotHandlers, linkTensorMasksAction);
+  connect(autoMaskWorkflow, &AutoMaskWorkflow::masksApplied, this, [this] { updatePlots(false); refreshAnalysisWindows(); });
+  connect(autoMaskWorkflow, &AutoMaskWorkflow::navigateRequested, this, [this](int direction) {
+    const int row = ui->stationList->currentRow() + direction;
+    if(row >= 0 && row < ui->stationList->count()) ui->stationList->setCurrentRow(row, QItemSelectionModel::NoUpdate);
+  });
+  auto *autoMenu = new QMenu(tr("Auto mask"), this); ui->menuBar->insertMenu(ui->menuData->menuAction(), autoMenu);
+  for(const char *name : {"actionAuto_mask_preview", "actionAuto_mask_settings", "actionAuto_masking", "actionAuto_mask_previous", "actionAuto_mask_next",
+       "actionAuto_mask_apply", "actionAuto_mask_apply_next", "actionAuto_mask_selected", "actionAuto_mask_check0", "actionAuto_mask_check1",
+       "actionAuto_mask_check2", "actionAuto_mask_check3", "actionAuto_mask_XY", "actionAuto_mask_YX", "actionAuto_mask_Tzx", "actionAuto_mask_Tzy", "actionAuto_mask_pair"})
+    autoMenu->addAction(findChild<QAction *>(name));
   auto *reportAction = ui->menuFile->addAction(tr("Export survey report…"));
   reportAction->setObjectName("actionExport_survey_report");
   connect(reportAction, &QAction::triggered, this, &MainWindow::exportSurveyReport);
@@ -333,9 +357,15 @@ void MainWindow::setupRibbon()
       {tr("Export data"), {command("actionExport_native_MT", tr("Native MT"), true), command("actionExport_in_GoFEM", tr("GoFEM"), true)}}}},
     {tr("&Edit"), {
       {tr("History"), {undo, redo, command("actionSurvey_history", tr("History"))}},
-      {tr("Masks"), {command("actionActivate_masking_mode", tr("Masking mode")), command("actionLink_tensor_masks", tr("Link Z / PT"))}},
+      {tr("Masks"), {command("actionActivate_masking_mode", tr("Masking mode")), command("actionLink_tensor_masks", tr("Link Z / PT")), command("actionGroup_masking", tr("Group masking"), true)}},
       {tr("Periods"), {command("actionPeriod_layout", tr("Layout / resample"), true), command("actionDecimate", tr("Decimate"), true)}},
       {tr("Errors"), {command("actionSet_error_floor", tr("Error floors"), true)}}}},
+    {tr("Auto &mask"), {
+      {tr("Preview"), {command("actionAuto_mask_preview", tr("Preview")), command("actionAuto_mask_settings", tr("Settings")), command("actionAuto_masking", tr("Detailed review"))}},
+      {tr("Station"), {command("actionAuto_mask_previous", tr("Previous")), command("actionAuto_mask_next", tr("Next")), command("actionAuto_mask_apply", tr("Apply")), command("actionAuto_mask_apply_next", tr("Apply + next"))}},
+      {tr("Batch"), {command("actionAuto_mask_selected", tr("Apply to selected")), command("actionAuto_mask_pair", tr("Pair diagonals")), command("actionLink_tensor_masks", tr("Link Z / PT"))}},
+      {tr("Checks"), {command("actionAuto_mask_check0", tr("Rho+")), command("actionAuto_mask_check1", tr("Period outliers")), command("actionAuto_mask_check2", tr("Neighbours")), command("actionAuto_mask_check3", tr("Uncertainty"))}},
+      {tr("Components"), {command("actionAuto_mask_XY", tr("XY")), command("actionAuto_mask_YX", tr("YX")), command("actionAuto_mask_Tzx", tr("Tzx")), command("actionAuto_mask_Tzy", tr("Tzy"))}}}},
     {tr("&Analysis"), {
       {tr("Validity"), {command("actionImpedance_validity", tr("Rho+ analysis"), true), command("actionShow_rho_plus", tr("Rho+ guides")), command("actionPolarity_review", tr("Polarity review"), true)}},
       {tr("Compare"), {command("actionCompare_stations", tr("Neighbours"), true), command("actionSurvey_averages", tr("Survey averages"), true)}},
@@ -357,7 +387,14 @@ void MainWindow::updateActionAvailability()
 {
   const bool hasData = mtSurvey && mtSurvey->n_stations();
   for(auto *action : surveyActions) action->setEnabled(hasData);
+  if(auto *action = findChild<QAction *>("actionGroup_masking"))
+    action->setEnabled(hasData && !ui->stationList->selectedItems().isEmpty());
   ui->actionSave_as_PDF->setEnabled(hasData && ui->stationList->currentItem());
+  if(autoMaskWorkflow) {
+    std::set<std::string> selected;
+    for(const auto *item : ui->stationList->selectedItems()) selected.insert(item->text().toStdString());
+    autoMaskWorkflow->setSelection(selected);
+  }
 }
 
 void MainWindow::exportSurveyReport()
@@ -557,6 +594,7 @@ void MainWindow::updatePlots(bool rescaleAxes)
   updateActionAvailability();
   rhoPlusOverlay->hide();
   QListWidgetItem* item = ui->stationList->currentItem();
+  if(autoMaskWorkflow) autoMaskWorkflow->setData(mtSurvey, item ? item->text() : QString());
   if(item == nullptr) {
     for(auto &plot: plotHandlers) plot->clear_observed_data();
     rhoPlusOverlay->update(nullptr,rhoPlusAction->isChecked(),ui->actionPhase_wrap->isChecked(),
@@ -631,12 +669,13 @@ void MainWindow::maskDataType(bool on)
   refreshAnalysisWindows();
 }
 
-void MainWindow::deleteStation()
+void MainWindow::deleteStations()
 {
-  auto *item = ui->stationList->currentItem();
-  if(!item || !mtSurvey) return;
-  mtSurvey->remove_station(item->text().toStdString());
-  history->record(tr("Delete station"));
+  const auto selected = ui->stationList->selectedItems();
+  if(selected.isEmpty() || !mtSurvey) return;
+  for(const auto *item : selected)
+    mtSurvey->remove_station(item->text().toStdString());
+  history->record(tr("Delete %n station(s)", nullptr, selected.size()));
   restoreSurveyView();
 }
 
@@ -644,10 +683,17 @@ void MainWindow::restoreSurveyView()
 {
   const auto *item = ui->stationList->currentItem();
   const QString selected = item ? item->text() : QString();
-  createStationsList();
-  const auto matches = ui->stationList->findItems(selected, Qt::MatchExactly);
-  if(!matches.isEmpty()) ui->stationList->setCurrentItem(matches.front());
-  else if(ui->stationList->count()) ui->stationList->setCurrentRow(0);
+  std::set<QString> selection;
+  for(const auto *entry : ui->stationList->selectedItems()) selection.insert(entry->text());
+  {
+    const QSignalBlocker blocker(ui->stationList);
+    createStationsList();
+    const auto matches = ui->stationList->findItems(selected, Qt::MatchExactly);
+    if(!matches.isEmpty()) ui->stationList->setCurrentItem(matches.front(), QItemSelectionModel::NoUpdate);
+    else if(ui->stationList->count()) ui->stationList->setCurrentRow(0, QItemSelectionModel::NoUpdate);
+    for(int i = 0; i < ui->stationList->count(); ++i)
+      ui->stationList->item(i)->setSelected(selection.count(ui->stationList->item(i)->text()) || (selected.isEmpty() && selection.empty() && i == 0));
+  }
   updateMap(); updatePlots(false); refreshAnalysisWindows();
 }
 
@@ -888,6 +934,7 @@ void MainWindow::on_actionDecimate_triggered()
 
 void MainWindow::on_stationList_itemSelectionChanged()
 {
+  updateActionAvailability();
   if(!mtSurvey) return;
   std::vector<std::array<double, 3>> geographic;
 
@@ -1017,7 +1064,11 @@ void MainWindow::setupListContextMenu()
 {
   listContextMenu = new QMenu(this);
   QMenu* mask_menu = listContextMenu->addMenu(tr("Mask"));
-  listContextMenu->addAction(tr("Delete"), this, &MainWindow::deleteStation);
+  listContextMenu->addAction(findChild<QAction *>("actionGroup_masking"));
+  listContextMenu->addAction(findChild<QAction *>("actionAuto_masking"));
+  auto *remove = listContextMenu->addAction(tr("Delete"), this, &MainWindow::deleteStations);
+  remove->setObjectName("actionDelete_stations");
+  remove->setToolTip(tr("Delete all selected stations. Undo restores them together."));
   listContextMenu->addAction(tr("Rename"), this, &MainWindow::renameStation);
 
   std::vector<RealDataType> types = {RealZxx, RealZxy, RealZyx, RealZyy,

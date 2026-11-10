@@ -508,10 +508,40 @@ void MTDataPlot::mask_selected_data(bool on)
 
 void MTDataPlot::clear_observed_data()
 {
+  set_mask_preview({});
   m_data = nullptr;
   for(int i=0; i<m_plot->graphCount(); ++i) m_plot->graph(i)->data()->clear();
   for(auto *bars: m_errorBars) bars->data()->clear();
   m_plot->replot();
+}
+
+void MTDataPlot::set_mask_preview(const std::vector<std::pair<RealDataType, double>> &edits)
+{
+  for(auto *item : m_maskPreview) m_plot->removeItem(item);
+  m_maskPreview.clear();
+  // The first four graphs hold observed components, including arrow anchors.
+  // Read their displayed values so phase wrapping and tipper arrow mode match.
+  for(int i = 0; i < std::min(4, m_plot->graphCount()); ++i) {
+    auto *graph = m_plot->graph(i); if(!graph->visible()) continue;
+    const auto types = get_graph_data_types(graph);
+    std::set<double> periods;
+    for(const auto &edit : edits) for(auto type : types) {
+      const bool z = (edit.first >= RealZxx && edit.first <= ImagZyy) &&
+                     ((type >= RhoZxx && type <= PhsZyy) || (type >= RealZxx && type <= ImagZyy));
+      const bool t = (edit.first == RealTzx || edit.first == RealTzy) &&
+                     (type == RealTzx || type == RealTzy || type == ImagTzx || type == ImagTzy);
+      if(edit.first == type || ((z || t) && type_to_column_table.at(edit.first) == type_to_column_table.at(type))) periods.insert(1./edit.second);
+    }
+    for(double period : periods) {
+      auto point = graph->data()->findBegin(period, false);
+      if(point == graph->data()->constEnd() || std::abs(point->key-period) > 1e-12*period || !std::isfinite(point->value)) continue;
+      auto *marker = new QCPItemTracer(m_plot); marker->setObjectName("autoMaskMarker");
+      marker->setStyle(QCPItemTracer::tsCircle); marker->setSize(12); marker->setPen(QPen(QColor("#DC2626"), 2));
+      marker->setSelectable(false); marker->position->setType(QCPItemPosition::ptPlotCoords);
+      marker->position->setCoords(point->key, point->value); m_maskPreview.push_back(marker);
+    }
+  }
+  m_plot->replot(QCustomPlot::rpQueuedReplot);
 }
 
 void MTDataPlot::maskSelectedData()

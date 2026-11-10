@@ -42,6 +42,7 @@ add_library(editools_data STATIC
   src/Datum.cc
   src/MTSpectra.cc
   src/ImpedanceAnalysis.cc
+  src/AutoMask.cc
   src/PolarityAnalysis.cc
   src/MTStationData.cc
   src/NativeMT.cc
@@ -92,6 +93,11 @@ add_library(editools_ui STATIC
   ExportPreview.cpp
   StationComparisonWindow.cpp
   PolarityWindow.cpp
+  GroupMaskDialog.cpp
+  AutoMaskDialog.cpp
+  AutoMaskSettings.cpp
+  AutoMaskWorkflow.cpp
+  GroupMaskPlots.cpp
   SurveyCoordinatesDialog.cpp
   FitStatisticsWindow.cpp
   PeriodMapWindow.cpp
@@ -117,6 +123,10 @@ target_link_libraries(main PRIVATE editools_ui)
 
 include(CTest)
 if(BUILD_TESTING)
+  add_executable(auto_mask_test tests/auto_mask_test.cc)
+  target_link_libraries(auto_mask_test PRIVATE editools_ui)
+  add_test(NAME auto_mask COMMAND auto_mask_test)
+  set_tests_properties(auto_mask PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
   add_executable(polarity_test tests/polarity_test.cc)
   target_link_libraries(polarity_test PRIVATE editools_ui)
   add_test(NAME polarity COMMAND polarity_test)
@@ -166,7 +176,7 @@ if(BUILD_TESTING)
   target_link_libraries(osm_test PRIVATE editools_ui)
   add_test(NAME osm_basemap COMMAND osm_test)
 
-  add_executable(response_plot_test tests/response_plot_test.cc tests/period_resampling_test.cc tests/edi_import_interpolation_test.cc Icons/icons.qrc)
+  add_executable(response_plot_test tests/response_plot_test.cc tests/period_resampling_test.cc tests/edi_import_interpolation_test.cc tests/group_mask_test.cc Icons/icons.qrc)
   set_target_properties(response_plot_test PROPERTIES AUTORCC ON)
   target_link_libraries(response_plot_test PRIVATE editools_ui)
   add_test(NAME response_plots COMMAND response_plot_test)

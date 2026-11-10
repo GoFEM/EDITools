@@ -104,7 +104,7 @@ void integration()
   classic->setChecked(false);
   collapsed->setChecked(false);
   auto *tabs = control<QTabBar>(*ribbon, "ribbonTabs");
-  check(tabs->count() == 5, "Five workflow tabs");
+  check(tabs->count() == 6, "Six workflow tabs including auto masking");
   for(auto *top : window.menuBar()->actions())
     for(auto *action : top->menu()->actions()) {
       if(action->isSeparator() || action->objectName() == "actionAbout_EDI_Tools") continue;

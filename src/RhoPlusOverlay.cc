@@ -1,5 +1,6 @@
 #include "include/RhoPlusOverlay.h"
 #include "include/MTDataPlot.h"
+#include <algorithm>
 #include <cmath>
 
 namespace {
@@ -59,10 +60,15 @@ void RhoPlusOverlay::calculate() {
     fit.pending=false;
     try {
       const auto result=ImpedanceAnalysis::rhoPlus(fit.input,options);
-      if(result.converged && result.gridStable) {
+      if(!result.response.empty() && std::all_of(result.response.begin(), result.response.end(), [](const ImpedanceAnalysis::Sample &s) {
+           return s.usable() && std::isfinite(s.resistivity()) && s.resistivity() > 0.;
+         })) {
         fit.response=result.response;
-        fit.status=QObject::tr("nRMS %1").arg(result.normalizedRms,0,'g',3);
-      } else fit.status=QObject::tr("fit omitted; check convergence in the validity window");
+        fit.provisional = !result.converged || !result.gridStable;
+        fit.status=QObject::tr("%1 unmasked samples · nRMS %2").arg(result.observed.size()).arg(result.normalizedRms,0,'g',3);
+        if(!result.converged) fit.status += QObject::tr(" · provisional: solver limit");
+        else if(!result.gridStable) fit.status += QObject::tr(" · provisional: grid-sensitive; increase resolution");
+      } else fit.status=QObject::tr("No finite rho+ response; check the validity window.");
     } catch(const std::exception &e) { fit.status=QString::fromUtf8(e.what()); }
   }
   draw();
@@ -77,6 +83,10 @@ void RhoPlusOverlay::draw() {
       phaseValues.push_back(sample.phase() - (c==2 && !phaseWrap ? 180. : 0.));
     }
     rhoLines[c]->setData(periods,rhoValues); phaseLines[c]->setData(periods,phaseValues);
+    for(auto *line : {rhoLines[c], phaseLines[c]}) {
+      auto pen = line->pen(); pen.setStyle(fit.provisional ? Qt::DotLine : Qt::DashLine); line->setPen(pen);
+      line->setProperty("fitStatus", fit.status);
+    }
     const bool available=enabled && supported(c) && !fit.response.empty();
     rhoLines[c]->setVisible(available && rhoVisible[c]); phaseLines[c]->setVisible(available && phaseVisible[c]);
     if(enabled && supported(c)) status.push_back(names[c]+": "+fit.status);

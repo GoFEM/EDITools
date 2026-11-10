@@ -74,6 +74,7 @@ public:
   virtual void set_predicted_data(const MTStationData &data, bool rescaleAxes = false) = 0;
   void clear_predicted_data();
   void clear_observed_data();
+  void set_mask_preview(const std::vector<std::pair<RealDataType, double>> &edits);
 
   void set_associated_plot(MTDataPlot &plot);
 
@@ -141,6 +142,7 @@ protected:
   std::array<bool, 4> m_componentVisible{{true, true, true, true}};
   bool m_errorBarsVisible = true;
   bool m_linkTensorMasks = true;
+  std::vector<QCPItemTracer *> m_maskPreview;
 };
 
 #endif

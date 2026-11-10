@@ -44,6 +44,7 @@
 
 void period_resampling_tests(const QString &directory);
 void edi_import_interpolation_tests(const QString &directory);
+void group_mask_tests(const QString &directory);
 
 namespace {
 void check(bool ok, const std::string &message)
@@ -1235,6 +1236,78 @@ void period_maps(const QString &directory)
         "Map masked a nearby frequency instead of the selected frequency");
 }
 
+void station_selection_edits(const QString &directory)
+{
+  group_mask_tests(directory);
+  auto survey = std::make_shared<MTSurveyData>();
+  const auto data = directory + "/delete-stations.gofem", project = directory + "/delete-stations.mtd";
+  std::string rows;
+  for(const auto *name : {"A", "B", "C"})
+    rows += std::string("RealZxy 1 Plane_wave ") + name + " .002 .0001\nImagZxy 1 Plane_wave " + name + " .003 .0001\n";
+  write(data, rows); survey->load_from_gofem(data.toStdString());
+  for(const auto &name : survey->get_stations_names()) survey->get_station_data(name).set_position({{55., 9., 100.}});
+  {
+    std::ofstream file(project.toStdString(), std::ios::binary);
+    boost::archive::binary_oarchive archive(file); archive << survey << std::map<std::string, MTSurveyData>{};
+  }
+  MainWindow window;
+  file_action(window, "actionLoad_project", {project});
+  auto *list = widget<QListWidget>(window, "stationList");
+  auto *remove = widget<QAction>(window, "actionDelete_stations");
+  auto *undo = widget<QAction>(window, "actionUndo");
+  auto *redo = widget<QAction>(window, "actionRedo");
+  auto *map = widget<QCustomPlot>(window, "mapPlot");
+  list->setCurrentRow(1); list->clearSelection();
+  remove->trigger();
+  check(list->count() == 3 && !undo->isEnabled(), "Empty selection deleted the current station");
+  list->item(0)->setSelected(true); list->item(2)->setSelected(true);
+  remove->trigger();
+  check(list->count() == 1 && list->item(0)->text() == "B" && map->graph(0)->dataCount() == 1,
+        "Delete did not remove exactly the selected stations and update the map");
+  undo->trigger();
+  check(list->count() == 3 && map->graph(0)->dataCount() == 3 && !undo->isEnabled(),
+        "Batch deletion was not restored in one undo step");
+  redo->trigger();
+  check(list->count() == 1 && list->item(0)->text() == "B", "Redo did not repeat batch deletion");
+  list->selectAll(); remove->trigger();
+  check(list->count() == 0 && map->graph(0)->dataCount() == 0 &&
+        !widget<QAction>(window, "actionExport_native_MT")->isEnabled(), "Deleting the last station left stale survey state");
+  remove->trigger(); undo->trigger();
+  check(list->count() == 1 && list->item(0)->text() == "B", "Empty deletion added an undo step");
+  undo->trigger(); list->selectAll(); remove->trigger();
+  check(list->count() == 0, "Delete all left stations behind");
+  undo->trigger(); check(list->count() == 3, "Undo did not restore all deleted stations");
+  list->clearSelection();
+  auto *groupMask = widget<QAction>(window, "actionGroup_masking");
+  check(!groupMask->isEnabled(), "Group masking enabled without selected stations");
+  list->item(0)->setSelected(true); list->item(2)->setSelected(true);
+  QTimer::singleShot(0, [&] {
+    auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+    check(dialog && dialog->objectName() == "groupMaskDialog", "Group masking action did not open dialog");
+    check(widget<QCheckBox>(*dialog, "groupMaskLink")->isChecked(), "Group dialog ignored the main linkage setting");
+    widget<QCheckBox>(*dialog, "groupMaskLink")->setChecked(false);
+    widget<QCheckBox>(*dialog, "groupMaskZxy")->setChecked(true);
+    check(widget<QTableWidget>(*dialog, "groupMaskPreview")->rowCount() == 2, "Group dialog ignored selected station scope");
+    const auto artifacts = qEnvironmentVariable("EDITOOLS_TEST_ARTIFACT_DIR");
+    if(!artifacts.isEmpty()) { QApplication::processEvents(); dialog->grab().save(artifacts + "/group-mask.png"); }
+    widget<QPushButton>(*dialog, "groupMaskApply")->click();
+  });
+  groupMask->trigger();
+  check(list->selectedItems().size() == 2 && widget<QAction>(window, "actionLink_tensor_masks")->isChecked(),
+        "Group masking changed selection or global linkage");
+  const auto masked = [&](MainWindow &view, const QString &name) {
+    select_station(view, name); return widget<QCustomPlot>(view, "plot11")->graph(5)->dataCount();
+  };
+  check(masked(window, "A") == 1 && masked(window, "C") == 1 && masked(window, "B") == 0, "Group edit did not refresh the correct station plots");
+  undo->trigger();
+  check(!undo->isEnabled() && masked(window, "A") == 0 && masked(window, "C") == 0, "Group masking was not one Undo step");
+  redo->trigger();
+  check(masked(window, "A") == 1 && masked(window, "C") == 1, "Group mask redo failed");
+  widget<QAction>(window, "actionSave_project")->trigger();
+  MainWindow restored; file_action(restored, "actionLoad_project", {project});
+  check(masked(restored, "A") == 1 && masked(restored, "C") == 1 && masked(restored, "B") == 0, "Project lost group masking");
+}
+
 void resampling_project_workflow(const QString &directory)
 {
   auto survey = std::make_shared<MTSurveyData>();
@@ -1895,7 +1968,7 @@ int main(int argc, char **argv)
   try {
     check(directory.isValid(), "No temporary directory");
     if(argc >= 3) real_run(argv[1], argv[2], argc >= 4 ? argv[3] : QString(), argc >= 5 && QString(argv[4]) == "mixed");
-    else { rho_plus_overlay(directory.path()); map_backgrounds(directory.path()); linked_mask_tests(directory.path()); edi_import_tests(directory.path()); statistics(directory.path()); gofem_responses(directory.path()); period_maps(directory.path()); period_resampling_tests(directory.path()); resampling_project_workflow(directory.path()); survey_reports(directory.path()); workflow(directory.path()); }
+    else { station_selection_edits(directory.path()); rho_plus_overlay(directory.path()); map_backgrounds(directory.path()); linked_mask_tests(directory.path()); edi_import_tests(directory.path()); statistics(directory.path()); gofem_responses(directory.path()); period_maps(directory.path()); period_resampling_tests(directory.path()); resampling_project_workflow(directory.path()); survey_reports(directory.path()); workflow(directory.path()); }
     std::cout << "Response import, curves and project workflow checks passed.\n";
   } catch(const std::exception &e) {
     std::cerr << e.what() << '\n';

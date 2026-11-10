@@ -48,6 +48,7 @@ class RhoPlusOverlay;
 class SurveyHistory;
 class StationComparisonWindow;
 class PolarityWindow;
+class AutoMaskWorkflow;
 
 class MainWindow : public QMainWindow
 {
@@ -64,7 +65,7 @@ private slots:
   void stationSelected(const QCPDataSelection &selection);
 
   void maskDataType(bool on);
-  void deleteStation();
+  void deleteStations();
   void renameStation();
 
   void on_actionLoad_EDI_triggered();
@@ -265,6 +266,7 @@ private:
   PeriodLayoutWindow *periodLayout = nullptr;
   ImpedanceValidityWindow *impedanceValidity = nullptr;
   SurveyAverageWindow *surveyAverage = nullptr;
+  AutoMaskWorkflow *autoMaskWorkflow = nullptr;
   QAction *rhoPlusAction;
   std::unique_ptr<RhoPlusOverlay> rhoPlusOverlay;
   ImpedanceAnalysis::RhoPlusOptions rhoPlusOptions;

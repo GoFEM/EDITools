@@ -175,9 +175,9 @@ void MTStationData::set_data(double frequency,
   Z_err_floor = Z_err;
 }
 
-std::vector<std::vector<bool>> MTStationData::impedance_mask() const
+std::vector<std::vector<bool>> MTStationData::impedance_mask(bool includeInactive) const
 {
-  if(is_active)
+  if(is_active || includeInactive)
     return Z_mask;
   else
   {
@@ -189,7 +189,7 @@ std::vector<std::vector<bool>> MTStationData::impedance_mask() const
   }
 }
 
-std::vector<std::vector<bool> > MTStationData::tipper_mask() const
+std::vector<std::vector<bool> > MTStationData::tipper_mask(bool includeInactive) const
 {
   std::vector<std::vector<bool>> mask(4);
   mask[0] = T_mask[0];
@@ -197,7 +197,7 @@ std::vector<std::vector<bool> > MTStationData::tipper_mask() const
   mask[2] = T_mask[0];
   mask[3] = T_mask[1];
 
-  if(!is_active)
+  if(!is_active && !includeInactive)
   {
     for(auto &m: mask)
       std::fill(m.begin(), m.end(), false);
@@ -206,9 +206,9 @@ std::vector<std::vector<bool> > MTStationData::tipper_mask() const
   return mask;
 }
 
-std::vector<std::vector<bool> > MTStationData::phase_tensor_mask() const
+std::vector<std::vector<bool> > MTStationData::phase_tensor_mask(bool includeInactive) const
 {
-  if(is_active)
+  if(is_active || includeInactive)
     return PT_mask;
   else
   {
