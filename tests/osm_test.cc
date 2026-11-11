@@ -76,6 +76,7 @@ void policy() {
   check(Osm::cachePolicy({}, {}, {}, {}, now).expires == now.addDays(7), "Missing headers need seven-day caching");
   check(Osm::cachePolicy("public, max-age=3600", {}, "Fri, 25 Sep 2026 11:50:00 GMT", "900", now).expires == now.addSecs(2700), "Date/Age not subtracted");
   check(Osm::cachePolicy({}, "Fri, 25 Sep 2026 13:00:00 GMT", "Fri, 25 Sep 2026 11:00:00 GMT", {}, now).expires == now.addSecs(3600), "Expires ignored");
+  check(Osm::cachePolicy({}, "Fri, 25 Sep 2026 14:00:00 +0100", {}, {}, now).expires == now.addSecs(3600), "Numeric date zone ignored");
   check(Osm::cachePolicy("max-age=3600, no-cache", {}, {}, {}, now).expires == now, "no-cache must revalidate");
   check(Osm::cachePolicy({}, "0", {}, {}, now).expires == now, "Invalid Expires must count as expired");
   check(Osm::cachePolicy("no-store", {}, {}, {}, now).noStore, "no-store ignored");

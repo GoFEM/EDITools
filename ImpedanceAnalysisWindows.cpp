@@ -96,14 +96,14 @@ void exportTable(QWidget *parent, QTableWidget *t, const QString &suggestion) {
   if(path.isEmpty()) return;
   QSaveFile file(path);
   if(!file.open(QIODevice::WriteOnly | QIODevice::Text)) { QMessageBox::warning(parent,QObject::tr("Export analysis"),file.errorString()); return; }
-  QTextStream out(&file); out.setCodec("UTF-8"); out.setLocale(QLocale::c());
+  QTextStream out(&file); out.setEncoding(QStringConverter::Utf8); out.setLocale(QLocale::c());
   for(int c=0;c<t->columnCount();++c) { if(c) out << ','; out << '"' << t->horizontalHeaderItem(c)->text() << '"'; } out << '\n';
   for(int r=0;r<t->rowCount();++r) {
     for(int c=0;c<t->columnCount();++c) {
       if(c) out << ',';
       const auto *item=t->item(r,c); if(!item) continue;
       const auto value=item->data(Qt::UserRole);
-      if(value.type()==QVariant::String) out << '"' << QString(value.toString()).replace('"',"\"\"") << '"';
+      if(value.metaType().id()==QMetaType::QString) out << '"' << QString(value.toString()).replace('"',"\"\"") << '"';
       else if(std::isfinite(value.toDouble())) out << QString::number(value.toDouble(),'g',17);
     }
     out << '\n';

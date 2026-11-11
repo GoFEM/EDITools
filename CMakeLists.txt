@@ -17,10 +17,15 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
-cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 project(EDITools LANGUAGES CXX)
 
-find_package(Qt5 5.12 REQUIRED COMPONENTS Widgets PrintSupport Network)
+if(MSVC)
+  add_compile_options(/utf-8)
+  add_definitions(-DNOMINMAX -D_USE_MATH_DEFINES)
+endif()
+
+find_package(Qt6 6.8 REQUIRED COMPONENTS Widgets PrintSupport Network)
 find_package(PROJ REQUIRED CONFIG)
 find_package(GDAL REQUIRED CONFIG)
 if(GDAL_VERSION VERSION_LESS 3.7)
@@ -70,9 +75,11 @@ target_link_libraries(editools_data PUBLIC Boost::serialization PROJ::proj PRIVA
 add_library(editools_qcustomplot STATIC "${QCUSTOMPLOT_PATH}/qcustomplot.cpp" "${QCUSTOMPLOT_PATH}/qcustomplot.h")
 set_target_properties(editools_qcustomplot PROPERTIES AUTOMOC ON)
 target_include_directories(editools_qcustomplot SYSTEM PUBLIC ${QCUSTOMPLOT_PATH})
-target_link_libraries(editools_qcustomplot PUBLIC Qt5::Widgets Qt5::PrintSupport)
+target_link_libraries(editools_qcustomplot PUBLIC Qt6::Widgets Qt6::PrintSupport)
 
 add_library(editools_ui STATIC
+  Icons/icons.qrc
+  src/CommandIcons.cc
   src/CommandRibbon.cc
   src/SurveyHistory.cc
   src/MTDataPlot.cc
@@ -113,16 +120,21 @@ add_library(editools_ui STATIC
   mainwindow.ui
   ExportGOFEMDialog.ui
 )
-set_target_properties(editools_ui PROPERTIES AUTOMOC ON AUTOUIC ON)
-target_link_libraries(editools_ui PUBLIC editools_data editools_qcustomplot Qt5::Network)
+set_target_properties(editools_ui PROPERTIES AUTOMOC ON AUTOUIC ON AUTORCC ON)
+target_link_libraries(editools_ui PUBLIC editools_data editools_qcustomplot Qt6::Network)
 
-# Keep resources on the executables so static-library linking cannot discard them.
-add_executable(main main.cpp Icons/icons.qrc)
-set_target_properties(main PROPERTIES AUTORCC ON)
+add_executable(main main.cpp)
+if(WIN32)
+  set_target_properties(main PROPERTIES WIN32_EXECUTABLE ON)
+endif()
 target_link_libraries(main PRIVATE editools_ui)
 
 include(CTest)
 if(BUILD_TESTING)
+  add_executable(runtime_test tests/runtime_test.cc)
+  target_link_libraries(runtime_test PRIVATE Qt6::Widgets Qt6::Network)
+  add_test(NAME runtime COMMAND runtime_test)
+  set_tests_properties(runtime PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
   add_executable(auto_mask_test tests/auto_mask_test.cc)
   target_link_libraries(auto_mask_test PRIVATE editools_ui)
   add_test(NAME auto_mask COMMAND auto_mask_test)
@@ -176,8 +188,7 @@ if(BUILD_TESTING)
   target_link_libraries(osm_test PRIVATE editools_ui)
   add_test(NAME osm_basemap COMMAND osm_test)
 
-  add_executable(response_plot_test tests/response_plot_test.cc tests/period_resampling_test.cc tests/edi_import_interpolation_test.cc tests/group_mask_test.cc Icons/icons.qrc)
-  set_target_properties(response_plot_test PROPERTIES AUTORCC ON)
+  add_executable(response_plot_test tests/response_plot_test.cc tests/period_resampling_test.cc tests/edi_import_interpolation_test.cc tests/group_mask_test.cc)
   target_link_libraries(response_plot_test PRIVATE editools_ui)
   add_test(NAME response_plots COMMAND response_plot_test)
 

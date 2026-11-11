@@ -140,7 +140,7 @@ struct Datum
     SurveyMethod method;
     ForwardType calculator_type;
     RealDataType type;
-    double value, stderr;
+    double value, standard_error;
     DatumStatus status;
     unsigned linear_index;
 

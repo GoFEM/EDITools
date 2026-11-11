@@ -31,50 +31,57 @@ const char *name(Quantity q) {
 bool Sample::usable() const { return std::isfinite(period) && period > 0. && finite(impedance) && std::abs(impedance) > 0.; }
 double Sample::resistivity() const { return usable() ? std::norm(impedance) * period / (2. * pi * mu) : NAN; }
 double Sample::phase() const { return usable() ? std::arg(impedance) * 180. / pi : NAN; }
-std::vector<Sample> curve(const MTStationData &station, Quantity quantity) {
+Sample sample(const MTStationData &station, Quantity quantity, unsigned f) {
+  Sample sample;
+  if(f >= station.frequencies().size()) return sample;
+  const double frequency = station.frequencies()[f];
+  if(!std::isfinite(frequency) || frequency <= 0.) return sample;
+  sample.period = 1. / frequency;
   const std::array<RealDataType, 4> re{{RealZxx, RealZxy, RealZyx, RealZyy}}, im{{ImagZxx, ImagZxy, ImagZyx, ImagZyy}};
+  const std::array<RealDataType, 4> rho{{RhoZxx, RhoZxy, RhoZyx, RhoZyy}}, phase{{PhsZxx, PhsZxy, PhsZyx, PhsZyy}};
+  std::array<Complex, 4> z; std::array<double, 4> errors; std::array<bool, 4> valid;
+  for(unsigned c = 0; c < 4; ++c) {
+    double r = NAN, i = NAN, e = NAN, ei = NAN;
+    valid[c] = station.scalar_value(re[c], f, r, e) && station.scalar_value(im[c], f, i, ei);
+    z[c] = {r, i}; errors[c] = e;
+  }
+  const unsigned component = unsigned(quantity);
+  if(component < 4) {
+    if(valid[component]) { sample.impedance = (quantity == Quantity::YX ? -1. : 1.) * z[component]; sample.error = errors[component];
+      double value;
+      station.scalar_value(rho[component], f, value, sample.rhoError);
+      station.scalar_value(phase[component], f, value, sample.phaseError); }
+  } else {
+    const bool all = std::all_of(valid.begin(), valid.end(), [](bool v) { return v; });
+    std::array<Complex, 4> derivative{};
+    if(quantity == Quantity::Berdichevsky && valid[1] && valid[2]) {
+      sample.impedance = (z[1] - z[2]) * .5; derivative[1] = .5; derivative[2] = -.5;
+    } else if(all && quantity == Quantity::SSQ) {
+      sample.impedance = root((z[0]*z[0] + z[1]*z[1] + z[2]*z[2] + z[3]*z[3]) * .5);
+      if(sample.usable()) for(unsigned c = 0; c < 4; ++c) derivative[c] = z[c] / (2. * sample.impedance);
+    } else if(all && quantity == Quantity::Determinant) {
+      sample.impedance = root(z[0]*z[3] - z[1]*z[2]);
+      if(sample.usable()) derivative = {{z[3], -z[2], -z[1], z[0]}};
+      if(sample.usable()) for(auto &d: derivative) d /= 2. * sample.impedance;
+    }
+    if(sample.usable()) {
+      double variance = 0.;
+      for(unsigned c = 0; c < 4; ++c) if(std::abs(derivative[c]) > 0.) {
+        if(!std::isfinite(errors[c]) || errors[c] < 0.) { variance = NAN; break; }
+        variance += std::norm(derivative[c]) * errors[c] * errors[c];
+      }
+      sample.error = std::sqrt(variance);
+      const double relative=sample.error/std::abs(sample.impedance);
+      sample.rhoError=2.*sample.resistivity()*relative; sample.phaseError=relative*180./pi;
+    }
+  }
+  return sample;
+}
+std::vector<Sample> curve(const MTStationData &station, Quantity quantity) {
   std::vector<Sample> result;
-  std::vector<dvector> rho, rhoErrors, phase, phaseErrors;
-  station.get_apparent_resistivity(rho,rhoErrors); station.get_phase(phase,phaseErrors);
   for(unsigned f = 0; f < station.frequencies().size(); ++f) {
-    const double frequency = station.frequencies()[f];
-    if(!std::isfinite(frequency) || frequency <= 0.) continue;
-    Sample sample; sample.period = 1. / frequency;
-    std::array<Complex, 4> z; std::array<double, 4> errors; std::array<bool, 4> valid;
-    for(unsigned c = 0; c < 4; ++c) {
-      double r = NAN, i = NAN, e = NAN, ei = NAN;
-      valid[c] = station.scalar_value(re[c], f, r, e) && station.scalar_value(im[c], f, i, ei);
-      z[c] = {r, i}; errors[c] = e;
-    }
-    const unsigned component = unsigned(quantity);
-    if(component < 4) {
-      if(valid[component]) { sample.impedance = (quantity == Quantity::YX ? -1. : 1.) * z[component]; sample.error = errors[component];
-        sample.rhoError=rhoErrors[component][f]; sample.phaseError=phaseErrors[component][f]; }
-    } else {
-      const bool all = std::all_of(valid.begin(), valid.end(), [](bool v) { return v; });
-      std::array<Complex, 4> derivative{};
-      if(quantity == Quantity::Berdichevsky && valid[1] && valid[2]) {
-        sample.impedance = (z[1] - z[2]) * .5; derivative[1] = .5; derivative[2] = -.5;
-      } else if(all && quantity == Quantity::SSQ) {
-        sample.impedance = root((z[0]*z[0] + z[1]*z[1] + z[2]*z[2] + z[3]*z[3]) * .5);
-        if(sample.usable()) for(unsigned c = 0; c < 4; ++c) derivative[c] = z[c] / (2. * sample.impedance);
-      } else if(all && quantity == Quantity::Determinant) {
-        sample.impedance = root(z[0]*z[3] - z[1]*z[2]);
-        if(sample.usable()) derivative = {{z[3], -z[2], -z[1], z[0]}};
-        if(sample.usable()) for(auto &d: derivative) d /= 2. * sample.impedance;
-      }
-      if(sample.usable()) {
-        double variance = 0.;
-        for(unsigned c = 0; c < 4; ++c) if(std::abs(derivative[c]) > 0.) {
-          if(!std::isfinite(errors[c]) || errors[c] < 0.) { variance = NAN; break; }
-          variance += std::norm(derivative[c]) * errors[c] * errors[c];
-        }
-        sample.error = std::sqrt(variance);
-        const double relative=sample.error/std::abs(sample.impedance);
-        sample.rhoError=2.*sample.resistivity()*relative; sample.phaseError=relative*180./pi;
-      }
-    }
-    result.push_back(sample);
+    auto value = sample(station, quantity, f);
+    if(value.period > 0.) result.push_back(value);
   }
   std::sort(result.begin(), result.end(), [](const Sample &a, const Sample &b) { return a.period < b.period; });
   return result;

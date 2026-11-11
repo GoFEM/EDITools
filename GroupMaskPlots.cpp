@@ -52,10 +52,10 @@ GroupMaskPlots::GroupMaskPlots(QWidget *parent, const MTSurveyData &survey, cons
     visibility->addStretch(); grid->addWidget(panel, pane / 2, pane % 2);
     connect(plot, &QCustomPlot::mouseMove, this, [plot](QMouseEvent *event) {
       int index;
-      auto *graph = plot->plottableAt<QCPGraph>(event->pos(), false, &index);
+      auto *graph = plot->plottableAt<QCPGraph>(event->position(), false, &index);
       if(!graph || index < 0 || index >= graph->dataCount()) { QToolTip::hideText(); return; }
       const auto point = graph->data()->at(index);
-      QToolTip::showText(event->globalPos(), tr("%1\n%2 s · %3").arg(graph->name()).arg(point->key, 0, 'g', 12).arg(point->value, 0, 'g', 8), plot);
+      QToolTip::showText(event->globalPosition().toPoint(), tr("%1\n%2 s · %3").arg(graph->name()).arg(point->key, 0, 'g', 12).arg(point->value, 0, 'g', 8), plot);
     });
   }
   // Cache original curves once. Mask previews only replace the change markers.

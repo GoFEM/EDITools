@@ -12,6 +12,7 @@
 #include <QStandardPaths>
 #include <QTemporaryFile>
 #include <QTimer>
+#include <QTimeZone>
 #include <algorithm>
 #include <tuple>
 
@@ -19,7 +20,13 @@ namespace Osm {
 namespace {
 constexpr qint64 week = 7 * 24 * 60 * 60;
 constexpr quint32 magic = 0x4544494f;
-QDateTime httpDate(const QByteArray &value) { return QDateTime::fromString(QString::fromLatin1(value), Qt::RFC2822Date).toUTC(); }
+QDateTime httpDate(const QByteArray &value) {
+  const auto text = QString::fromLatin1(value);
+  // HTTP uses a named GMT zone, which Qt 6's RFC 2822 parser rejects.
+  auto date = QDateTime::fromString(text, "ddd, dd MMM yyyy HH:mm:ss t");
+  if(!date.isValid()) date = QDateTime::fromString(text, Qt::RFC2822Date);
+  return date.toUTC();
+}
 bool validTile(const Tile &t) { return t.z >= 0 && t.z <= 19 && t.x >= 0 && t.y >= 0 && t.x < (1 << t.z) && t.y < (1 << t.z); }
 QImage decode(const QByteArray &png) {
   if(png.size() > 1024 * 1024) return {};
@@ -92,7 +99,7 @@ std::shared_ptr<TileStore::Entry> TileStore::entry(const Tile &tile) {
     quint32 signature; qint64 expiry;
     input >> signature >> expiry >> value->etag >> value->modified >> value->control >> value->expiresHeader >> value->png;
     if(input.status() == QDataStream::Ok && signature == magic) {
-      value->image = decode(value->png); value->expires = QDateTime::fromMSecsSinceEpoch(expiry, Qt::UTC);
+      value->image = decode(value->png); value->expires = QDateTime::fromMSecsSinceEpoch(expiry, QTimeZone::UTC);
     }
     if(value->image.isNull()) *value = Entry{};
   }

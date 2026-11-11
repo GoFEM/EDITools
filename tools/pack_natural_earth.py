@@ -64,3 +64,12 @@ if __name__ == '__main__':
         metadata['url'] = f'https://naturalearth.s3.amazonaws.com/10m_{category}/ne_10m_{name}.zip'
         manifest[layer] = metadata
     (destination / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+    (destination / 'LICENSE.txt').write_text(
+        'Natural Earth 1:10-million map data\n\n'
+        'Natural Earth map data are in the public domain and may be used, modified\n'
+        'and redistributed, including commercially. Attribution is optional.\n\n'
+        'Terms: https://www.naturalearthdata.com/about/terms-of-use/\n'
+        'Source URLs, versions and checksums: manifest.json\n\n'
+        'Geometry is converted to float32 and compressed without simplification.\n'
+        'These generalized maps may omit small features. Political boundaries\n'
+        "follow Natural Earth's default de facto representation.\n")

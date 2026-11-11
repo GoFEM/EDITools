@@ -1,8 +1,10 @@
 #include "include/CommandRibbon.h"
+#include "include/CommandIcons.h"
 #include "mainwindow.h"
 #include <QApplication>
 #include <QKeyEvent>
 #include <QMenuBar>
+#include <QPalette>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSettings>
@@ -36,6 +38,40 @@ void key(QWidget &window, int code, Qt::KeyboardModifiers modifiers)
   QApplication::sendEvent(&window, &press);
   QApplication::sendEvent(&window, &release);
   QApplication::processEvents();
+}
+void iconRendering()
+{
+  const auto original = QApplication::palette();
+  const auto icon = commandIcon("folder-open");
+  check(!icon.isNull(), "Bundled SVG resource available");
+  auto palette = original;
+  const auto verify = [&](QIcon::Mode mode, QColor expected, qreal scale) {
+    const auto pixmap = icon.pixmap(QSize(20, 20), scale, mode);
+    check(pixmap.size() == QSize(20 * scale, 20 * scale), "High DPI icon resolution");
+    const auto image = pixmap.toImage();
+    bool ink = false, transparent = false;
+    for(int y = 0; y < image.height(); ++y)
+      for(int x = 0; x < image.width(); ++x) {
+        const auto pixel = image.pixelColor(x, y);
+        transparent |= pixel.alpha() == 0;
+        if(pixel.alpha() > 250) {
+          ink = true;
+          check(pixel.rgb() == expected.rgb(), "Icon uses current palette colour");
+        }
+      }
+    check(ink && transparent, "Icon contains visible glyph and transparent background");
+  };
+  palette.setColor(QPalette::Active, QPalette::ButtonText, QColor(25, 30, 40));
+  QApplication::setPalette(palette);
+  verify(QIcon::Normal, QColor(25, 30, 40), 1);
+  palette.setColor(QPalette::Active, QPalette::ButtonText, QColor(235, 240, 250));
+  palette.setColor(QPalette::Disabled, QPalette::ButtonText, QColor(100, 110, 120));
+  palette.setColor(QPalette::Active, QPalette::HighlightedText, Qt::white);
+  QApplication::setPalette(palette);
+  verify(QIcon::Normal, QColor(235, 240, 250), 2);
+  verify(QIcon::Disabled, QColor(100, 110, 120), 1);
+  verify(QIcon::Selected, Qt::white, 1);
+  QApplication::setPalette(original);
 }
 void presentation()
 {
@@ -89,8 +125,8 @@ void presentation()
   QApplication::processEvents();
   auto *scroll = qobject_cast<QScrollArea *>(body->currentWidget());
   check(scroll && scroll->horizontalScrollBar()->maximum() > 0, "Commands scroll in narrow windows");
-  auto *interface = control<QToolButton>(*ribbon, "ribbonInterface");
-  check(interface->mapTo(&window, interface->rect().topRight()).x() < window.width(), "Interface remains reachable at narrow width");
+  auto *interfaceButton = control<QToolButton>(*ribbon, "ribbonInterface");
+  check(interfaceButton->mapTo(&window, interfaceButton->rect().topRight()).x() < window.width(), "Interface remains reachable at narrow width");
   classic->setChecked(true);
   collapsed->setChecked(true);
 }
@@ -109,9 +145,12 @@ void integration()
     for(auto *action : top->menu()->actions()) {
       if(action->isSeparator() || action->objectName() == "actionAbout_EDI_Tools") continue;
       button(*ribbon, action);
+      if(!action->icon().isNull())
+        check(!action->icon().pixmap(20, 20).isNull(), "Menu and ribbon command glyph loads");
       check(window.actions().contains(action), "Command shortcut registered on main window");
     }
   check(control<QAction>(window, "actionLoad_EDI")->isEnabled(), "Import available without survey");
+  check(!control<QAction>(window, "actionLoad_EDI")->icon().isNull(), "Import has a command icon");
   check(!control<QAction>(window, "actionSave_project")->isEnabled(), "Save needs survey");
   check(!control<QAction>(window, "actionImpedance_validity")->isEnabled(), "Analysis needs survey");
   check(!control<QAction>(window, "actionUndo")->isEnabled(), "Empty history disables undo");
@@ -137,7 +176,7 @@ int main(int argc, char **argv)
   QTemporaryDir settings;
   QSettings::setDefaultFormat(QSettings::IniFormat);
   QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settings.path());
-  try { presentation(); integration(); }
+  try { iconRendering(); presentation(); integration(); }
   catch(const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }
   return 0;
 }

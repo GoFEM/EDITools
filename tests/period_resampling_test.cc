@@ -19,7 +19,7 @@
 namespace {
 using namespace PeriodResampling;
 void check(bool value, const char *message) { if(!value) throw std::runtime_error(message); }
-void near(double a, double b) { check(std::abs(a - b) < 1e-10 * std::max({1., std::abs(a), std::abs(b)}), "Resampling numeric mismatch"); }
+void checkNear(double a, double b) { check(std::abs(a - b) < 1e-10 * std::max({1., std::abs(a), std::abs(b)}), "Resampling numeric mismatch"); }
 template<class T> T *widget(QWidget &parent, const char *name) {
   auto *result = parent.findChild<T *>(name); check(result, name); return result;
 }
@@ -30,7 +30,7 @@ unsigned index(const MTStationData &station, double p) {
 double scalar(const MTStationData &station, RealDataType type, double p, double expectedError = -1.) {
   double value, error;
   check(station.scalar_value(type, index(station, p), value, error), "Expected valid resampled scalar");
-  if(expectedError >= 0.) near(error, expectedError);
+  if(expectedError >= 0.) checkNear(error, expectedError);
   return value;
 }
 Status status(const MTSurveyData &survey, const std::string &name, unsigned component, double p) {
@@ -74,16 +74,16 @@ void period_resampling_tests(const QString &directory)
   const std::vector<double> periods{.5, 1., 2., 4., 10., 100., 200.};
   auto output = resample(*survey, periods, {4., true});
   const auto &a = output->get_station_data("A");
-  near(scalar(a, RealZxy, 2., .2), 2.); near(scalar(a, ImagZxy, 2., .2), 3.);
-  near(scalar(a, PTxx, 2.), 2.); near(scalar(a, PTyy, 2.), 1.5);
-  near(scalar(a, PhsZxy, 2.), std::atan2(3., 2.) * 180. / std::acos(-1.));
-  near(scalar(a, RhoZxy, 2.), 13. / (4e-7 * std::acos(-1.) * std::acos(-1.)));
-  near(scalar(a, RealTzx, 2.), 0.);
-  near(scalar(output->get_station_data("D"), RealZxy, 2., .2), 2.);
-  near(scalar(output->get_station_data("D"), RealTzx, 2., .7), 0.);
+  checkNear(scalar(a, RealZxy, 2., .2), 2.); checkNear(scalar(a, ImagZxy, 2., .2), 3.);
+  checkNear(scalar(a, PTxx, 2.), 2.); checkNear(scalar(a, PTyy, 2.), 1.5);
+  checkNear(scalar(a, PhsZxy, 2.), std::atan2(3., 2.) * 180. / std::acos(-1.));
+  checkNear(scalar(a, RhoZxy, 2.), 13. / (4e-7 * std::acos(-1.) * std::acos(-1.)));
+  checkNear(scalar(a, RealTzx, 2.), 0.);
+  checkNear(scalar(output->get_station_data("D"), RealZxy, 2., .2), 2.);
+  checkNear(scalar(output->get_station_data("D"), RealTzx, 2., .7), 0.);
   check(status(*output, "D", 1, 2.) == Status::Interpolated && status(*output, "D", 4, 2.) == Status::Existing,
         "Existing component at a period prevented filling another component's small gap");
-  near(scalar(output->get_station_data("C"), PTxx, 2., .2), 3.);
+  checkNear(scalar(output->get_station_data("C"), PTxx, 2., .2), 3.);
   check(status(*output, "A", 1, 2.) == Status::Interpolated && status(*output, "A", 6, 2.) == Status::Derived,
         "Wrong interpolation/derivation provenance");
   check(status(*output, "A", 1, .5) == Status::Outside && status(*output, "A", 1, 200.) == Status::Outside,
@@ -101,7 +101,7 @@ void period_resampling_tests(const QString &directory)
   check(status(*blocked, "A", 1, 2.) == Status::Masked && status(*blocked, "A", 1, 4.) == Status::Masked,
         "Masked sample was replaced or bridged");
   auto copied = blocked->get_station_data("A"); copied.set_data_mask(RealZxy, .25, true);
-  near(scalar(copied, RealZxy, 4., .3), 3.); // Exact masked samples retain their original values/errors.
+  checkNear(scalar(copied, RealZxy, 4., .3), 3.); // Exact masked samples retain their original values/errors.
   auto bridge = resample(*survey, {2., 4.}, {100., false});
   check(status(*bridge, "A", 1, 2.) == Status::Interpolated && status(*bridge, "A", 1, 4.) == Status::Masked,
         "Optional mask bridging changed exact masked samples");
@@ -126,8 +126,8 @@ void period_resampling_tests(const QString &directory)
   { boost::archive::binary_oarchive archive(saved); archive << *output; }
   MTSurveyData restored;
   { boost::archive::binary_iarchive archive(saved); archive >> restored; }
-  near(scalar(restored.get_station_data("A"), RealZxy, 2.), 2.);
-  near(scalar(restored.resampling_source()->get_station_data("A"), RealZxy, 4.), 3.);
+  checkNear(scalar(restored.get_station_data("A"), RealZxy, 2.), 2.);
+  checkNear(scalar(restored.resampling_source()->get_station_data("A"), RealZxy, 4.), 3.);
   check(restored.resampling_info().records.size() == output->resampling_info().records.size(), "Resampling audit lost on save/load");
   // Selected-station resampling powers import: preserve all existing station
   // values, errors, masks, metadata and raw response rows for other stations.
@@ -140,13 +140,13 @@ void period_resampling_tests(const QString &directory)
   check(selected->get_survey_name() == survey->get_survey_name(), "Selected resampling renamed the survey");
   check(encoded(selected->get_station_data("B")) == oldB && encoded(selected->get_station_data("C")) == oldC,
         "Selected resampling changed an existing station");
-  near(scalar(selected->get_station_data("A"), RealZxy, 2., .2), 2.);
+  checkNear(scalar(selected->get_station_data("A"), RealZxy, 2., .2), 2.);
   for(const auto &row: selected->response_observations()) check(row.receiver != "A" && row.receiver != "D", "Stale selected-station rows retained");
   check(!selected->response_observations().empty(), "Unselected raw response rows removed");
   for(const auto &record: selected->resampling_info().records) check(record.station == "A" || record.station == "D", "Unchanged station included in interpolation audit");
   check(selected->resampling_source()->get_station_data("A").frequencies().size() == 3, "Original incoming periods not retained");
   rejects([&] { resample(*survey, periods, {}, {"unknown"}); });
-  near(logarithmic_grid(1., 100., 2)[1], std::sqrt(10.));
+  checkNear(logarithmic_grid(1., 100., 2)[1], std::sqrt(10.));
   check(validate_periods({4., 1., 4.}) == std::vector<double>({1., 4.}), "Custom sorting/deduplication failed");
   check(resample(*survey, {1e-8, 1.1e-8}, {})->get_unique_periods().size() == 2,
         "Common layout collapsed distinct short-period samples");
@@ -165,7 +165,7 @@ void period_resampling_tests(const QString &directory)
   widget<QPushButton>(window, "layoutPreview")->click();
   check(apply->isEnabled() && widget<QTableWidget>(window, "layoutCounts")->item(0, 4)->text() == "1", "Preview count disagrees with backend");
   apply->click(); check(applied && applied->resampling_info().periods == periods, "Apply lost the preview grid");
-  near(scalar(applied->get_station_data("A"), RealZxy, 2.), 2.);
+  checkNear(scalar(applied->get_station_data("A"), RealZxy, 2.), 2.);
   widget<QComboBox>(window, "layoutGroup")->setCurrentIndex(1);
   check(apply->isEnabled(), "Display filter invalidated a valid preview");
   widget<QDoubleSpinBox>(window, "layoutMaximumRatio")->setValue(2.);

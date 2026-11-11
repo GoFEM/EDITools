@@ -10,6 +10,7 @@
 #include <QFile>
 #include <QDir>
 #include <QStandardPaths>
+#include <QCoreApplication>
 #include <QtEndian>
 #include <QMenu>
 #include <QToolButton>
@@ -62,6 +63,11 @@ const std::vector<QPolygonF> &geometry(int dataset) {
 QString MapBackground::dataDirectory() {
   const auto override = qEnvironmentVariable("EDITOOLS_MAP_DATA_DIR");
   if(!override.isEmpty()) return override;
+  const QDir executable(QCoreApplication::applicationDirPath());
+  for(const auto &relative : {QStringLiteral("share/natural-earth"), QStringLiteral("../share/natural-earth")}) {
+    const auto directory = executable.filePath(relative);
+    if(QFile::exists(QDir(directory).filePath("manifest.json"))) return directory;
+  }
   return QDir(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation))
     .filePath("EDITools/natural-earth");
 }
@@ -94,7 +100,7 @@ void MapBackground::setLayers(int layers) {
 QToolButton *MapBackground::button(QWidget *parent, int initial, const std::function<void(int)> &changed, bool reportOnly) {
   auto *button = new QToolButton(parent); button->setObjectName("mapLayers"); button->setText(QObject::tr("Map layers…"));
   button->setPopupMode(QToolButton::InstantPopup);
-  button->setToolTip(QObject::tr("Geographic backgrounds for maps and exports. Natural Earth uses optional local files; OpenStreetMap loads online tiles for the visible area. See README for setup."));
+  button->setToolTip(QObject::tr("Geographic backgrounds for maps and exports. Natural Earth works offline and is included in portable packages; OpenStreetMap loads online tiles for the visible area."));
   auto *menu = new QMenu(button); button->setMenu(menu);
   const QStringList labels{QObject::tr("Coastlines"), QObject::tr("Country boundaries"), QObject::tr("State / province boundaries"), QObject::tr("Rivers and lakes")};
   const int available = availableLayers();
@@ -133,6 +139,7 @@ void MapBackground::prepare(int dataset) {
   if(ready[dataset]) return;
   auto &paths = projected[dataset]; paths.clear();
   std::unique_ptr<PJ_CONTEXT, decltype(&proj_context_destroy)> context(proj_context_create(), proj_context_destroy);
+  proj_log_level(context.get(), PJ_LOG_NONE);
   const auto definition = "+proj=utm +zone=" + std::to_string(coordinates.zone) + " +ellps=WGS84" + (coordinates.north ? "" : " +south");
   std::unique_ptr<PJ, decltype(&proj_destroy)> projection(coordinates.utm ? proj_create(context.get(), definition.c_str()) : nullptr, proj_destroy);
   if(coordinates.utm && !projection) return;
@@ -148,7 +155,7 @@ void MapBackground::prepare(int dataset) {
       QPointF target = point;
       if(coordinates.utm) {
         const double delta = std::remainder(lon - (coordinates.zone * 6. - 183.), 360.);
-        if(lat < -80. || lat > 84. || std::abs(delta) > 30.) { flush(); continue; }
+        if(lat < -80. || lat > 84. || std::abs(delta) >= 90.) { flush(); continue; }
         proj_errno_reset(projection.get());
         const auto p = proj_trans(projection.get(), PJ_FWD, proj_coord(lon * radians, lat * radians, 0., 0.));
         if(proj_errno(projection.get()) || !std::isfinite(p.xy.x) || !std::isfinite(p.xy.y)) { flush(); continue; }

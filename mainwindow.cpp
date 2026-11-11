@@ -66,7 +66,7 @@
 #include "SurveyCoordinatesDialog.h"
 #include "include/SurveyHistory.h"
 #include "include/CommandRibbon.h"
-#include <QStyle>
+#include "include/CommandIcons.h"
 #include <QUndoView>
 #include <QVBoxLayout>
 #include "FitStatisticsWindow.h"
@@ -195,7 +195,7 @@ MainWindow::MainWindow(QWidget *parent) :
   mapActions->addStretch();
   auto *mapsButton = new QPushButton(tr("Maps…"), mapControls);
   mapsButton->setObjectName("openPeriodMaps");
-  mapsButton->setToolTip(tr("Induction vector and phase tensor maps at a selected period"));
+  mapsButton->setToolTip(tr("Induction vectors, phase tensors, apparent resistivity and phase at a selected period"));
   mapActions->addWidget(mapsButton);
   mapControlsLayout->addLayout(mapActions);
   connect(mapStationNames, &QCheckBox::toggled, ui->actionShow_station_names, &QAction::setChecked);
@@ -335,50 +335,48 @@ MainWindow::MainWindow(QWidget *parent) :
 
 void MainWindow::setupRibbon()
 {
-  const auto command = [this](const char *name, const QString &label, bool needsSurvey = false) {
+  const auto command = [this](const char *name, const QString &label, const char *glyph = nullptr, bool needsSurvey = false) {
     auto *action = findChild<QAction *>(QLatin1String(name));
     Q_ASSERT(action);
     action->setIconText(label);
+    if(glyph) action->setIcon(commandIcon(glyph));
     if(needsSurvey) surveyActions.push_back(action);
     return action;
   };
-  const auto icon = [this](QAction *action, const char *theme, QStyle::StandardPixmap fallback) {
-    action->setIcon(QIcon::fromTheme(QLatin1String(theme), style()->standardIcon(fallback)));
-    return action;
-  };
-  auto *open = icon(command("actionLoad_project", tr("Open")), "document-open", QStyle::SP_DialogOpenButton);
-  auto *save = icon(command("actionSave_project", tr("Save"), true), "document-save", QStyle::SP_DialogSaveButton);
-  auto *undo = icon(command("actionUndo", tr("Undo")), "edit-undo", QStyle::SP_ArrowBack);
-  auto *redo = icon(command("actionRedo", tr("Redo")), "edit-redo", QStyle::SP_ArrowForward);
+  auto *open = command("actionLoad_project", tr("Open"), "folder-open");
+  auto *save = command("actionSave_project", tr("Save"), "save", true);
+  auto *undo = command("actionUndo", tr("Undo"), "arrow-undo");
+  auto *redo = command("actionRedo", tr("Redo"), "arrow-redo");
   const std::vector<CommandRibbon::Page> pages{
     {tr("&Survey"), {
       {tr("Project"), {open, save}},
-      {tr("Import"), {command("actionLoad_EDI", tr("EDI files")), command("actionLoad_responses", tr("Responses"))}},
-      {tr("Export data"), {command("actionExport_native_MT", tr("Native MT"), true), command("actionExport_in_GoFEM", tr("GoFEM"), true)}}}},
+      {tr("Import"), {command("actionLoad_EDI", tr("EDI files"), "document-arrow-down"), command("actionLoad_responses", tr("Responses"), "data-line")}},
+      {tr("Export data"), {command("actionExport_native_MT", tr("Native MT"), "document-arrow-up", true), command("actionExport_in_GoFEM", tr("GoFEM"), "document-arrow-up", true)}}}},
     {tr("&Edit"), {
-      {tr("History"), {undo, redo, command("actionSurvey_history", tr("History"))}},
-      {tr("Masks"), {command("actionActivate_masking_mode", tr("Masking mode")), command("actionLink_tensor_masks", tr("Link Z / PT")), command("actionGroup_masking", tr("Group masking"), true)}},
-      {tr("Periods"), {command("actionPeriod_layout", tr("Layout / resample"), true), command("actionDecimate", tr("Decimate"), true)}},
-      {tr("Errors"), {command("actionSet_error_floor", tr("Error floors"), true)}}}},
+      {tr("History"), {undo, redo, command("actionSurvey_history", tr("History"), "history")}},
+      {tr("Masks"), {command("actionActivate_masking_mode", tr("Masking mode"), "edit"), command("actionLink_tensor_masks", tr("Link Z / PT"), "link"), command("actionGroup_masking", tr("Group masking"), "select-all-on", true)}},
+      {tr("Periods"), {command("actionPeriod_layout", tr("Layout / resample"), "table", true), command("actionDecimate", tr("Decimate"), "filter", true)}},
+      {tr("Errors"), {command("actionSet_error_floor", tr("Error floors"), "options", true)}}}},
     {tr("Auto &mask"), {
-      {tr("Preview"), {command("actionAuto_mask_preview", tr("Preview")), command("actionAuto_mask_settings", tr("Settings")), command("actionAuto_masking", tr("Detailed review"))}},
-      {tr("Station"), {command("actionAuto_mask_previous", tr("Previous")), command("actionAuto_mask_next", tr("Next")), command("actionAuto_mask_apply", tr("Apply")), command("actionAuto_mask_apply_next", tr("Apply + next"))}},
-      {tr("Batch"), {command("actionAuto_mask_selected", tr("Apply to selected")), command("actionAuto_mask_pair", tr("Pair diagonals")), command("actionLink_tensor_masks", tr("Link Z / PT"))}},
+      {tr("Preview"), {command("actionAuto_mask_preview", tr("Preview"), "eye"), command("actionAuto_mask_settings", tr("Settings"), "settings"), command("actionAuto_masking", tr("Detailed review"), "table")}},
+      {tr("Station"), {command("actionAuto_mask_previous", tr("Previous"), "chevron-left"), command("actionAuto_mask_next", tr("Next"), "chevron-right"), command("actionAuto_mask_apply", tr("Apply"), "checkmark"), command("actionAuto_mask_apply_next", tr("Apply + next"), "checkmark-circle")}},
+      {tr("Batch"), {command("actionAuto_mask_selected", tr("Apply to selected"), "select-all-on"), command("actionAuto_mask_pair", tr("Pair diagonals"), "link"), command("actionLink_tensor_masks", tr("Link Z / PT"), "link")}},
       {tr("Checks"), {command("actionAuto_mask_check0", tr("Rho+")), command("actionAuto_mask_check1", tr("Period outliers")), command("actionAuto_mask_check2", tr("Neighbours")), command("actionAuto_mask_check3", tr("Uncertainty"))}},
       {tr("Components"), {command("actionAuto_mask_XY", tr("XY")), command("actionAuto_mask_YX", tr("YX")), command("actionAuto_mask_Tzx", tr("Tzx")), command("actionAuto_mask_Tzy", tr("Tzy"))}}}},
     {tr("&Analysis"), {
-      {tr("Validity"), {command("actionImpedance_validity", tr("Rho+ analysis"), true), command("actionShow_rho_plus", tr("Rho+ guides")), command("actionPolarity_review", tr("Polarity review"), true)}},
-      {tr("Compare"), {command("actionCompare_stations", tr("Neighbours"), true), command("actionSurvey_averages", tr("Survey averages"), true)}},
-      {tr("Data fit"), {command("actionFit_statistics", tr("Statistics / RMS"), true)}}}},
+      {tr("Validity"), {command("actionImpedance_validity", tr("Rho+ analysis"), "data-line", true), command("actionShow_rho_plus", tr("Rho+ guides"), "data-line"), command("actionPolarity_review", tr("Polarity review"), "arrow-swap", true)}},
+      {tr("Compare"), {command("actionCompare_stations", tr("Neighbours"), "people-community", true), command("actionSurvey_averages", tr("Survey averages"), "math-symbols", true)}},
+      {tr("Data fit"), {command("actionFit_statistics", tr("Statistics / RMS"), "data-histogram", true)}}}},
     {tr("&Maps"), {
-      {tr("Coordinates"), {command("actionConvert_UTM", tr("UTM / origin"), true), command("actionGeographic_coordinates", tr("Geographic"), true)}},
-      {tr("Survey maps"), {command("actionPeriod_maps", tr("PT / induction"), true), command("actionShow_station_names", tr("Station names"))}},
-      {tr("Background"), {command("actionMap_layers", tr("Map layers")), command("actionTopography", tr("Topography"), true)}}}},
+      {tr("Coordinates"), {command("actionConvert_UTM", tr("UTM / origin"), "my-location", true), command("actionGeographic_coordinates", tr("Geographic"), "globe", true)}},
+      {tr("Survey maps"), {command("actionPeriod_maps", tr("PT / induction"), "map", true), command("actionShow_station_names", tr("Station names"), "text-field")}},
+      {tr("Background"), {command("actionMap_layers", tr("Map layers"), "layer"), command("actionTopography", tr("Topography"), "mountain-location-top", true)}}}},
     {tr("&Report"), {
-      {tr("Export figures"), {command("actionExport_survey_report", tr("Survey PDF"), true), command("actionSave_as_PDF", tr("Plot image"))}},
-      {tr("Plot display"), {command("actionPlot_axis_ranges", tr("Axis ranges")), command("actionShow_error_bars", tr("Error bars")),
-        command("actionPhase_wrap", tr("Wrap phase")), command("actionTipper_arrows", tr("Tipper arrows"))}}}}
+      {tr("Export figures"), {command("actionExport_survey_report", tr("Survey PDF"), "document-pdf", true), command("actionSave_as_PDF", tr("Plot image"), "image")}},
+      {tr("Plot display"), {command("actionPlot_axis_ranges", tr("Axis ranges"), "arrow-expand"), command("actionShow_error_bars", tr("Error bars"), "ruler"),
+        command("actionPhase_wrap", tr("Wrap phase"), "arrow-repeat-all"), command("actionTipper_arrows", tr("Tipper arrows"), "arrow-trending-lines")}}}}
   };
+  ui->actionAbout_EDI_Tools->setIcon(commandIcon("info"));
   new CommandRibbon(*this, {open, save, undo, redo}, pages, ui->actionAbout_EDI_Tools);
   updateActionAvailability();
 }
@@ -1068,6 +1066,7 @@ void MainWindow::setupListContextMenu()
   listContextMenu->addAction(findChild<QAction *>("actionAuto_masking"));
   auto *remove = listContextMenu->addAction(tr("Delete"), this, &MainWindow::deleteStations);
   remove->setObjectName("actionDelete_stations");
+  remove->setIcon(commandIcon("delete"));
   remove->setToolTip(tr("Delete all selected stations. Undo restores them together."));
   listContextMenu->addAction(tr("Rename"), this, &MainWindow::renameStation);
 
@@ -1316,9 +1315,16 @@ void MainWindow::openSurveyCopy(std::shared_ptr<MTSurveyData> data)
 
 void MainWindow::on_actionPeriod_maps_triggered()
 {
-  if(!periodMaps) periodMaps = new PeriodMapWindow(this, [this] { history->record(tr("Map masks")); updatePlots(); refreshAnalysisWindows(); });
+  const bool firstOpen = !periodMaps;
+  if(firstOpen) periodMaps = new PeriodMapWindow(this, [this] { history->record(tr("Map masks")); updatePlots(); refreshAnalysisWindows(); });
   periodMaps->setLinkTensorMasks(linkTensorMasksAction->isChecked());
   periodMaps->setData(mtSurvey, mtResponses);
+  if(firstOpen) {
+    auto settings = periodMaps->displaySettings();
+    settings.mapLayers = mapBackground->layers();
+    settings.names = mapStationNames->isChecked();
+    periodMaps->setDisplaySettings(settings);
+  }
   periodMaps->show();
   periodMaps->raise();
   periodMaps->activateWindow();

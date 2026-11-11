@@ -31,7 +31,7 @@ void check(bool ok, const char *message) {
   if (!ok)
     throw std::runtime_error(message);
 }
-void near(double a, double b, double tolerance = 1e-4) {
+void checkNear(double a, double b, double tolerance = 1e-4) {
   check(std::isfinite(a) && std::abs(a - b) <= tolerance, "Unexpected DEM value");
 }
 template <class T> T *control(QWidget &w, const char *name) {
@@ -119,8 +119,8 @@ void tests(const QString &dir) {
   messages.start(20);
   auto g = fixture();
   g.validate();
-  near(g.sample(500005, 4099995), 100);
-  near(g.sample(500010, 4099990), 115);
+  checkNear(g.sample(500005, 4099995), 100);
+  checkNear(g.sample(500010, 4099990), 115);
   check(std::isnan(g.sample(500025, 4099975)), "NoData was filled");
   check(std::isnan(g.sample(499999, 4099995)), "DEM extrapolated");
   Topography::Request r;
@@ -136,7 +136,7 @@ void tests(const QString &dir) {
   const auto tif = dir + "/terrain.tif";
   Topography::writeGeoTiff(tif.toStdString(), g);
   auto loaded = Topography::load({tif.toStdString()}, r);
-  near(loaded->sample(500010, 4099990), 115);
+  checkNear(loaded->sample(500010, 4099990), 115);
   check(std::isnan(loaded->values[12]), "GeoTIFF lost NoData");
   auto *ds = static_cast<GDALDataset *>(GDALOpen(tif.toUtf8().constData(), GA_ReadOnly));
   check(ds, "GeoTIFF cannot reopen");
@@ -144,13 +144,13 @@ void tests(const QString &dir) {
   check(std::string(ds->GetMetadataItem("DEM_LICENCE_NOTICE")) == g.notice, "Missing licence");
   double gt[6];
   ds->GetGeoTransform(gt);
-  near(gt[0], g.west);
-  near(gt[3], g.north);
+  checkNear(gt[0], g.west);
+  checkNear(gt[3], g.north);
   GDALClose(ds);
   auto feet = r;
   feet.unitScale = .3048;
   auto metric = Topography::load({tif.toStdString()}, feet);
-  near(metric->values[0], 30.48);
+  checkNear(metric->values[0], 30.48);
   // Import a geographic raster into UTM, with explicit scale/offset and units.
   const auto geographic = dir + "/geographic.tif";
   auto *geo = GetGDALDriverManager()->GetDriverByName("GTiff")->Create(geographic.toUtf8().constData(), 10,
@@ -169,14 +169,14 @@ void tests(const QString &dir) {
   GDALClose(geo);
   const auto region = Topography::surveyArea({{{37., -117., 0.}}}, SurveyCoordinates{}, 20, 10);
   auto projected = Topography::load({geographic.toStdString()}, region);
-  near(projected->range()[0], 210 * .3048);
-  near(projected->range()[1], 210 * .3048);
+  checkNear(projected->range()[0], 210 * .3048);
+  checkNear(projected->range()[1], 210 * .3048);
   auto clip = r;
   clip.west += 10;
   clip.east -= 10;
   auto cropped = Topography::reproject(g, clip);
   check(cropped->width == 3 && cropped->height == 5, "Clipping failed");
-  near(cropped->values[0], 110);
+  checkNear(cropped->values[0], 110);
   check(cropped->notice == g.notice, "Clipping lost licence");
   auto huge = r;
   huge.spacing = .001;
@@ -201,9 +201,9 @@ void tests(const QString &dir) {
       double n, e, z;
       row >> n >> e >> z;
       if (!rows) {
-        near(n, -5);
-        near(e, 5);
-        near(z, -100);
+        checkNear(n, -5);
+        checkNear(e, 5);
+        checkNear(z, -100);
       }
       ++rows;
     }
@@ -220,7 +220,7 @@ void tests(const QString &dir) {
   }
   check(restored.topography().grid && restored.topography().grid->notice == g.notice,
         "Project lost topography");
-  near(restored.topography().grid->sample(500010, 4099990), 115);
+  checkNear(restored.topography().grid->sample(500010, 4099990), 115);
   QFile raster(tif);
   check(raster.open(QIODevice::ReadOnly), "Cannot inspect GeoTIFF metadata");
   check(!raster.readAll().contains(dir.toUtf8()), "GeoTIFF leaked a local path");
@@ -239,7 +239,7 @@ void tests(const QString &dir) {
   auto data = std::make_shared<MTSurveyData>(s);
   PeriodMapWindow maps(nullptr);
   maps.setData(data, {});
-  check(maps.findChild<TopographyLayer *>("topographyLayer"), "Period map lacks DEM layer");
+  check(dynamic_cast<TopographyLayer *>(maps.findChild<QObject *>("topographyLayer")), "Period map lacks DEM layer");
   unsigned changes = 0;
   TopographyDialog dialog(nullptr, s, [&] { ++changes; });
   dialog.show();
@@ -253,7 +253,7 @@ void tests(const QString &dir) {
   check(!s.topography().style.visible, "Visibility did not reach survey");
   control<QCheckBox>(dialog, "demVisible")->setChecked(true);
   control<QDoubleSpinBox>(dialog, "demOpacity")->setValue(40);
-  near(s.topography().style.opacity, .4);
+  checkNear(s.topography().style.opacity, .4);
   const auto masks = s.get_station_data("A").impedance_mask();
   const auto oldHeight = s.get_station_data("A").position()[2];
   QTimer::singleShot(0, [&] {
@@ -261,20 +261,20 @@ void tests(const QString &dir) {
     check(p, "Station preview missing");
     auto *t = control<QTableWidget>(*p, "demStationSamples");
     check(t->rowCount() == 1, "Station preview rows wrong");
-    near(t->item(0, 2)->text().toDouble(), 130, .02);
+    checkNear(t->item(0, 2)->text().toDouble(), 130, .02);
     auto *b = p->findChild<QDialogButtonBox *>();
     check(!b->button(QDialogButtonBox::Apply)->isEnabled(), "Datum confirmation absent");
     qobject_cast<QDialog *>(p)->reject();
   });
   control<QPushButton>(dialog, "demSampleStations")->click();
-  near(s.get_station_data("A").position()[2], oldHeight);
+  checkNear(s.get_station_data("A").position()[2], oldHeight);
   QTimer::singleShot(0, [&] {
     auto *p = QApplication::activeModalWidget();
     control<QCheckBox>(*p, "demDatumChecked")->setChecked(true);
     p->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Apply)->click();
   });
   control<QPushButton>(dialog, "demSampleStations")->click();
-  near(s.get_station_data("A").position()[2], 130, .02);
+  checkNear(s.get_station_data("A").position()[2], 130, .02);
   check(s.get_station_data("A").impedance_mask() == masks, "Sampling heights changed masks");
   chooseFile(dialog, "demExportXYZ", dir + "/gui.xyz");
   check(QFileInfo(dir + "/gui.xyz").size() > 0, "GUI XYZ export failed");
@@ -282,8 +282,8 @@ void tests(const QString &dir) {
   auto *exported = static_cast<GDALDataset *>(GDALOpen((dir + "/gui.tif").toUtf8().constData(), GA_ReadOnly));
   check(exported, "GUI GeoTIFF export failed");
   check(exported->GetMetadataItem("SURVEY_ORIGIN_EASTING_M"), "Missing survey origin");
-  near(std::stod(exported->GetMetadataItem("SURVEY_ORIGIN_EASTING_M")), 500000);
-  near(std::stod(exported->GetMetadataItem("SURVEY_ORIGIN_NORTHING_M")), 4100000);
+  checkNear(std::stod(exported->GetMetadataItem("SURVEY_ORIGIN_EASTING_M")), 500000);
+  checkNear(std::stod(exported->GetMetadataItem("SURVEY_ORIGIN_NORTHING_M")), 4100000);
   GDALClose(exported);
   control<QPushButton>(dialog, "demRemove")->click();
   check(!s.topography().grid, "Remove did not clear terrain");

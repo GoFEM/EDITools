@@ -19,12 +19,30 @@
 
 #include "mainwindow.h"
 #include <QApplication>
+#include <QDir>
+#include <QFileInfo>
 
 int main(int argc, char *argv[])
 {
   QApplication a(argc, argv);
 
   QCoreApplication::setApplicationName("EDITools");
+
+  // Portable distributions keep projection data and CA certificates beside
+  // the executable (Windows) or one directory above it (Linux).
+  const QDir executable(QCoreApplication::applicationDirPath());
+  for(const auto &relative : {QStringLiteral("share"), QStringLiteral("../share")}) {
+    const QDir data(executable.filePath(relative));
+    if(!QFileInfo::exists(data.filePath("proj/proj.db"))) continue;
+    qputenv("PROJ_DATA", data.filePath("proj").toUtf8());
+    qputenv("GDAL_DATA", data.filePath("gdal").toUtf8());
+    const auto certificates = data.filePath("certs/cacert.pem");
+    if(QFileInfo::exists(certificates)) {
+      qputenv("SSL_CERT_FILE", certificates.toUtf8());
+      qputenv("CURL_CA_BUNDLE", certificates.toUtf8());
+    }
+    break;
+  }
 
   MainWindow w;
   w.show();

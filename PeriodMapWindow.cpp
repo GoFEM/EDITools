@@ -3,6 +3,7 @@
 #include "include/FileLabels.h"
 #include "PeriodMapWindow.h"
 #include "include/ToolTips.h"
+#include "include/ImpedanceAnalysis.h"
 #include <QFileDialog>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -21,7 +22,7 @@ PeriodMapWindow::PeriodMapWindow(QWidget *parent, std::function<void()> changed)
   : QDialog(parent, Qt::Window), observationsChanged(std::move(changed))
 {
   setObjectName("periodMapWindow");
-  setWindowTitle(tr("Induction / phase tensor maps"));
+  setWindowTitle(tr("Period maps"));
   resize(1200, 1000);
   auto *layout = new QVBoxLayout(this);
   auto *top = new QHBoxLayout;
@@ -42,6 +43,7 @@ PeriodMapWindow::PeriodMapWindow(QWidget *parent, std::function<void()> changed)
     });
   }
   auto *fit = new QPushButton(tr("Fit view"), this); fit->setObjectName("mapFitView"); top->addWidget(fit);
+  fit->setToolTip(tr("Fit the station locations. Extreme arrows or ellipses do not expand the view; their values remain available for inspection and masking."));
   auto *pdf = new QPushButton(tr("Save PDF…"), this); pdf->setObjectName("mapSavePdf"); top->addWidget(pdf);
   layout->addLayout(top);
 
@@ -75,10 +77,24 @@ PeriodMapWindow::PeriodMapWindow(QWidget *parent, std::function<void()> changed)
   controls->addWidget(ToolTips::label(ellipseSize, tr("Ellipse (km):"), tr("Major-axis diameter. Ellipses have equal major diameters; their minor/major ratio is |Φmin/Φmax|. Orientation is clockwise from geographic north. Singular or undefined tensors are omitted.")), 0, 2);
   controls->addWidget(ellipseSize, 0, 3);
   controls->addWidget(ToolTips::label(arrowSize, tr("Arrow scale (km):"), tr("Arrow length for a tipper magnitude |T| = 1. The map reference arrow shows |T| = 0.5.")), 0, 4);
-  controls->addWidget(arrowSize, 0, 5);
+  auto *arrowControls = new QHBoxLayout;
+  arrowControls->addWidget(arrowSize);
+  arrowWidth = new QDoubleSpinBox(this); arrowWidth->setObjectName("mapArrowWidth");
+  arrowWidth->setRange(.2, 3.); arrowWidth->setDecimals(1); arrowWidth->setSingleStep(.1);
+  arrowWidth->setValue(.7); arrowWidth->setKeyboardTracking(false);
+  arrowControls->addWidget(ToolTips::label(arrowWidth, tr("Stroke:"), tr("Induction arrow line width in pixels. Arrowheads scale with the stroke; smaller values reduce clutter.")));
+  arrowControls->addWidget(arrowWidth);
+  controls->addLayout(arrowControls, 0, 5);
   colorBy = new QComboBox(this); colorBy->setObjectName("mapColorBy");
   colorBy->addItems({tr("φmax (°)"), tr("φmin (°)"), tr("Skew β (°)")});
-  controls->addWidget(ToolTips::label(colorBy, tr("Color by:"), tr("Color represents maximum phase φmax, minimum phase φmin, or skew β, in degrees. Min and Max set the color range; values outside it use endpoint colors.")), 1, 0);
+  using Quantity = ImpedanceAnalysis::Quantity;
+  for(bool rho: {true, false}) for(auto quantity: {Quantity::XY, Quantity::YX, Quantity::Berdichevsky, Quantity::SSQ}) {
+    const QString name = quantity == Quantity::XY ? tr("XY") : quantity == Quantity::YX ? tr("YX") :
+                         quantity == Quantity::Berdichevsky ? tr("Berdichevsky") : tr("SSQ");
+    colorBy->addItem(rho ? tr("ρa %1 (Ω m)").arg(name) : tr("Phase %1 (°)").arg(name), int(quantity));
+    colorBy->setItemData(colorBy->count() - 1, rho, Qt::UserRole + 1);
+  }
+  controls->addWidget(ToolTips::label(colorBy, tr("Color by:"), tr("Tensor phases/skew color the ellipses. Impedance quantities color station markers, with optional tensor outlines and arrows. Resistivity uses logarithmic colors; phase uses linear colors.\nYX uses −Zyx so its phase is comparable with XY. Berdichevsky = (Zxy − Zyx)/2; SSQ = sqrt((Zxx² + Zxy² + Zyx² + Zyy²)/2), with phase in 0–180°. These are local station quantities, not spatial averages. Required components must be unmasked and finite; missing diagonals are not replaced by zero.")), 1, 0);
   controls->addWidget(colorBy, 1, 1);
   controls->addWidget(new QLabel(tr("Colormap:"), this), 1, 2);
   colorMap = new QComboBox(this); colorMap->setObjectName("mapColorMap");
@@ -92,7 +108,7 @@ PeriodMapWindow::PeriodMapWindow(QWidget *parent, std::function<void()> changed)
   for(auto *spin: {colorMin, colorMax}) {
     spin->setRange(-180., 180.); spin->setDecimals(2); spin->setKeyboardTracking(false);
   }
-  for(auto *spin: {colorMin, colorMax}) ToolTips::set(spin, tr("Color range in degrees. Values outside the range use the endpoint colors."));
+  for(auto *spin: {colorMin, colorMax}) ToolTips::set(spin, tr("Color range in the selected quantity's units: degrees or Ω m. Resistivity limits must be positive. Values outside the range use endpoint colors."));
   colorMin->setMaximum(179.99); colorMax->setMinimum(-179.99); colorMax->setValue(90.);
   limits->addWidget(new QLabel(tr("Min:"), this)); limits->addWidget(colorMin);
   limits->addWidget(new QLabel(tr("Max:"), this)); limits->addWidget(colorMax);
@@ -187,17 +203,17 @@ PeriodMapWindow::PeriodMapWindow(QWidget *parent, std::function<void()> changed)
   connect(period, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this] { updateMap(); });
   for(auto *box: {names, tensors, realArrows, imagArrows, reverseColors})
     connect(box, &QCheckBox::toggled, this, [this] { updateMap(); });
-  for(auto *spin: {tolerance, ellipseSize, arrowSize})
+  for(auto *spin: {tolerance, ellipseSize, arrowSize, arrowWidth})
     connect(spin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this] { updateMap(); });
   for(auto *combo: {convention, colorMap})
     connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this] { updateMap(); });
   connect(colorBy, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this] { resetColorRange(); updateMap(); });
   connect(colorMin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double value) {
-    if(value >= colorMax->value()) { const QSignalBlocker block(colorMax); colorMax->setValue(value + .01); }
+    if(value >= colorMax->value()) { const QSignalBlocker block(colorMax); colorMax->setValue(value + std::pow(10., -colorMax->decimals())); }
     updateMap();
   });
   connect(colorMax, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double value) {
-    if(value <= colorMin->value()) { const QSignalBlocker block(colorMin); colorMin->setValue(value - .01); }
+    if(value <= colorMin->value()) { const QSignalBlocker block(colorMin); colorMin->setValue(value - std::pow(10., -colorMin->decimals())); }
     updateMap();
   });
   connect(fit, &QPushButton::clicked, this, [this] { fitView(); });
@@ -320,9 +336,19 @@ void PeriodMapWindow::updatePeriods()
 void PeriodMapWindow::resetColorRange()
 {
   const QSignalBlocker minBlock(colorMin), maxBlock(colorMax);
-  colorMin->setValue(colorBy->currentIndex() == 2 ? -10. : (colorBy->currentIndex() == 1 ? -90. : 0.));
-  colorMax->setValue(colorBy->currentIndex() == 2 ? 10. : 90.);
+  const bool rho = resistivityColors();
+  for(auto *spin: {colorMin, colorMax}) {
+    spin->setDecimals(rho ? 4 : 2);
+    spin->setRange(rho ? .0001 : -180., rho ? 1e9 : 180.);
+  }
+  colorMin->setMaximum(rho ? 1e9 - .0001 : 179.99);
+  colorMax->setMinimum(rho ? .0002 : -179.99);
+  colorMin->setValue(rho ? 1. : colorBy->currentIndex() == 2 ? -10. : (colorBy->currentIndex() == 1 ? -90. : 0.));
+  colorMax->setValue(rho ? 10000. : colorBy->currentIndex() == 2 ? 10. : 90.);
 }
+
+bool PeriodMapWindow::impedanceColors() const { return colorBy->currentData().isValid(); }
+bool PeriodMapWindow::resistivityColors() const { return colorBy->currentData(Qt::UserRole + 1).toBool(); }
 
 void PeriodMapWindow::extendBounds(const QPointF &point)
 {
@@ -342,7 +368,7 @@ void PeriodMapWindow::drawEllipse(const Site &site, const MTMapData::PhaseTensor
     const double theta = i * 2. * std::acos(-1.) / 96.;
     const auto point = site.position + .5 * ellipseSize->value() *
       (major * std::cos(theta) + minor * (tensor.axisRatio * std::sin(theta)));
-    order.push_back(i); x.push_back(point.x()); y.push_back(point.y()); extendBounds(point);
+    order.push_back(i); x.push_back(point.x()); y.push_back(point.y());
   }
   auto *ellipse = new QCPCurve(plot->xAxis, plot->yAxis);
   ellipse->setObjectName("phaseTensor_" + QString::fromStdString(site.name));
@@ -352,7 +378,7 @@ void PeriodMapWindow::drawEllipse(const Site &site, const MTMapData::PhaseTensor
   ellipse->setProperty("axisRatio", tensor.axisRatio); ellipse->setProperty("period", actualPeriod);
   ellipse->setData(order, x, y); ellipse->setPen(QPen(QColor("#333333"), .8));
   const double value = colorBy->currentIndex() == 0 ? tensor.phiMax : (colorBy->currentIndex() == 1 ? tensor.phiMin : tensor.skew);
-  ellipse->setBrush(QColor::fromRgb(colors.color(value, range)));
+  ellipse->setBrush(impedanceColors() ? QBrush(Qt::NoBrush) : QBrush(QColor::fromRgb(colors.color(value, range))));
   ellipse->setSelectable(QCP::stNone); ellipse->removeFromLegend();
 }
 
@@ -369,9 +395,8 @@ void PeriodMapWindow::drawArrow(const Site &site, const std::array<double, 2> &v
   arrow->setProperty("north", vector[0]); arrow->setProperty("east", vector[1]); arrow->setProperty("period", actualPeriod);
   arrow->setSelectable(false);
   arrow->start->setCoords(site.position); arrow->end->setCoords(end);
-  arrow->setPen(QPen(arrowColor(imaginary), 1.6));
-  arrow->setHead(QCPLineEnding(QCPLineEnding::esSpikeArrow, 6, 8));
-  extendBounds(end);
+  arrow->setPen(QPen(arrowColor(imaginary), arrowWidth->value()));
+  arrow->setHead(QCPLineEnding(QCPLineEnding::esSpikeArrow, 3. + arrowWidth->value(), 4. + 2. * arrowWidth->value()));
 }
 
 void PeriodMapWindow::updateMap(bool fit)
@@ -382,12 +407,15 @@ void PeriodMapWindow::updateMap(bool fit)
   auto colors = PlotColorMaps::gradient(colorMap->currentText());
   if(reverseColors->isChecked()) colors = colors.inverted();
   const QCPRange range(colorMin->value(), colorMax->value());
+  colorScale->setDataScaleType(resistivityColors() ? QCPAxis::stLogarithmic : QCPAxis::stLinear);
+  if(resistivityColors()) colorScale->axis()->setTicker(QSharedPointer<QCPAxisTickerLog>::create());
+  else colorScale->axis()->setTicker(QSharedPointer<QCPAxisTicker>::create());
   colorScale->setGradient(colors); colorScale->setDataRange(range);
   colorScale->axis()->setLabel(colorBy->currentText());
-  colorScale->setVisible(tensors->isChecked());
+  colorScale->setVisible(impedanceColors() || tensors->isChecked());
   const auto *data = source();
   const double requested = period->currentData().toDouble();
-  unsigned nTensor = 0, nReal = 0, nImag = 0, matchingPeriods = 0;
+  unsigned nTensor = 0, nReal = 0, nImag = 0, nScalar = 0, matchingPeriods = 0;
   QVector<double> stationX, stationY;
   for(auto &site: sites) {
     extendBounds(site.position);
@@ -399,6 +427,24 @@ void PeriodMapWindow::updateMap(bool fit)
       ++matchingPeriods;
       const double actual = 1. / station->frequencies()[index];
       site.details += tr("\nPeriod: %1 s").arg(actual, 0, 'g', 9);
+      if(impedanceColors()) {
+        const auto sample = ImpedanceAnalysis::sample(*station,
+          ImpedanceAnalysis::Quantity(colorBy->currentData().toInt()), index);
+        const double value = resistivityColors() ? sample.resistivity() : sample.phase();
+        if(std::isfinite(value) && (!resistivityColors() || value > 0.)) {
+          auto *marker = new QCPItemTracer(plot);
+          marker->setLayer("axes");
+          marker->setObjectName("impedanceMarker_" + QString::fromStdString(site.name));
+          marker->setProperty("stationName", QString::fromStdString(site.name));
+          marker->setProperty("value", value); marker->setProperty("period", actual);
+          marker->position->setType(QCPItemPosition::ptPlotCoords); marker->position->setCoords(site.position);
+          marker->setStyle(QCPItemTracer::tsCircle); marker->setSize(8.);
+          marker->setPen(QPen(QColor("#333333"), .5));
+          marker->setBrush(QColor::fromRgb(colors.color(value, range, resistivityColors())));
+          marker->setSelectable(false); ++nScalar;
+          site.details += tr("\n%1: %2").arg(colorBy->currentText()).arg(value, 0, 'g', 6);
+        } else site.details += tr("\n%1: masked or unavailable").arg(colorBy->currentText());
+      }
       MTMapData::PhaseTensor tensor;
       if(MTMapData::phase_tensor(*station, index, tensor)) {
         site.details += tr("\nφmin: %1°; φmax: %2°\nβ: %3°; azimuth: %4°")
@@ -435,12 +481,13 @@ void PeriodMapWindow::updateMap(bool fit)
   plot->legend->setVisible(realArrows->isChecked() || imagArrows->isChecked());
   for(bool imaginary: {false, true}) if((imaginary ? imagArrows : realArrows)->isChecked()) {
     auto *key = plot->addGraph(); key->setName(imaginary ? tr("Imaginary induction") : tr("Real induction"));
-    key->setPen(QPen(arrowColor(imaginary), 1.6)); key->setSelectable(QCP::stNone);
+    key->setPen(QPen(arrowColor(imaginary), arrowWidth->value())); key->setSelectable(QCP::stNone);
   }
   if(realArrows->isChecked() || imagArrows->isChecked()) {
     referenceArrow = new QCPItemLine(plot); referenceArrow->setObjectName("mapReferenceArrow");
     referenceArrow->start->setType(QCPItemPosition::ptAxisRectRatio); referenceArrow->start->setCoords(.07, .92);
-    referenceArrow->setHead(QCPLineEnding(QCPLineEnding::esSpikeArrow, 6, 8)); referenceArrow->setSelectable(false);
+    referenceArrow->setPen(QPen(arrowColor(false), arrowWidth->value()));
+    referenceArrow->setHead(QCPLineEnding(QCPLineEnding::esSpikeArrow, 3. + arrowWidth->value(), 4. + 2. * arrowWidth->value())); referenceArrow->setSelectable(false);
     auto *label = new QCPItemText(plot); label->position->setParentAnchor(referenceArrow->start);
     label->position->setType(QCPItemPosition::ptAbsolute); label->position->setCoords(0., -14.);
     label->setText("|T| = 0.5"); label->setPositionAlignment(Qt::AlignLeft | Qt::AlignVCenter); label->setSelectable(false);
@@ -453,6 +500,9 @@ void PeriodMapWindow::updateMap(bool fit)
      tr("%1/%2 stations · %3 tensors · %4 real / %5 imaginary vectors")
        .arg(matchingPeriods).arg(sites.size()).arg(nTensor).arg(nReal).arg(nImag)));
   plot->setProperty("phaseTensorCount", nTensor); plot->setProperty("realVectorCount", nReal); plot->setProperty("imagVectorCount", nImag);
+  plot->setProperty("impedanceMarkerCount", nScalar);
+  if(impedanceColors() && !sites.empty() && locationError.isEmpty())
+    summary->setText(summary->text() + tr(" · %1 impedance markers").arg(nScalar));
   updateSelection(false);
   if(fit) fitView(); else plot->replot();
 }
@@ -535,9 +585,12 @@ void PeriodMapWindow::setSelectedMasks(bool enabled)
 void PeriodMapWindow::fitView()
 {
   if(haveBounds) {
-    const double span = std::max({boundsX.size(), boundsY.size(), ellipseSize->value(), arrowSize->value(), .1});
-    plot->xAxis->setRange(boundsX.lower - .08 * span, boundsX.upper + .08 * span);
-    plot->yAxis->setRange(boundsY.lower - .08 * span, boundsY.upper + .08 * span);
+    // Fit station positions, not data-dependent glyph extents. A size-based
+    // margin also keeps an isolated station's ellipse and reference scale visible.
+    const double span = std::max({boundsX.size(), boundsY.size(), .1});
+    const double margin = std::max({.08 * span, .6 * ellipseSize->value(), .6 * arrowSize->value()});
+    plot->xAxis->setRange(boundsX.lower - margin, boundsX.upper + margin);
+    plot->yAxis->setRange(boundsY.lower - margin, boundsY.upper + margin);
   } else {
     plot->xAxis->setRange(-1., 1.); plot->yAxis->setRange(-1., 1.);
   }
@@ -549,6 +602,7 @@ PeriodMapWindow::DisplaySettings PeriodMapWindow::displaySettings() const
   DisplaySettings s;
   s.period = period->currentData().isValid() ? period->currentData().toDouble() : 1.;
   s.tolerancePercent = tolerance->value(); s.ellipseKm = ellipseSize->value(); s.arrowKm = arrowSize->value();
+  s.arrowWidth = arrowWidth->value();
   s.colorMin = colorMin->value(); s.colorMax = colorMax->value(); s.convention = convention->currentIndex();
   s.mapLayers = background->layers();
   s.colorBy = colorBy->currentIndex(); s.colormap = colorMap->currentText(); s.names = names->isChecked();
@@ -558,7 +612,7 @@ PeriodMapWindow::DisplaySettings PeriodMapWindow::displaySettings() const
 
 void PeriodMapWindow::setDisplaySettings(const DisplaySettings &s)
 {
-  const QList<QObject *> controls{tolerance, ellipseSize, arrowSize, colorMin, colorMax, convention, colorBy, colorMap, names, realArrows, imagArrows, reverseColors};
+  const QList<QObject *> controls{tolerance, ellipseSize, arrowSize, arrowWidth, colorMin, colorMax, convention, colorBy, colorMap, names, realArrows, imagArrows, reverseColors};
   std::vector<std::unique_ptr<QSignalBlocker>> blockers;
   for(auto *control: controls) blockers.emplace_back(new QSignalBlocker(control));
   background->setLayers(s.mapLayers);
@@ -566,8 +620,10 @@ void PeriodMapWindow::setDisplaySettings(const DisplaySettings &s)
     const QSignalBlocker block(action); action->setChecked(s.mapLayers & action->data().toInt());
   }
   tolerance->setValue(s.tolerancePercent); ellipseSize->setValue(s.ellipseKm); arrowSize->setValue(s.arrowKm);
+  arrowWidth->setValue(s.arrowWidth);
+  colorBy->setCurrentIndex(s.colorBy); resetColorRange();
   colorMin->setValue(s.colorMin); colorMax->setValue(s.colorMax); convention->setCurrentIndex(s.convention);
-  colorBy->setCurrentIndex(s.colorBy); colorMap->setCurrentText(s.colormap); names->setChecked(s.names);
+  colorMap->setCurrentText(s.colormap); names->setChecked(s.names);
   realArrows->setChecked(s.real); imagArrows->setChecked(s.imaginary); reverseColors->setChecked(s.reverse);
   updateMap(true);
 }

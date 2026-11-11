@@ -1,12 +1,42 @@
-<!DOCTYPE RCC>
-<RCC version="1.0">
+<RCC>
   <qresource prefix="/Icons">
-    <!-- Typical file operations. -->
-    <file>fileopen.png</file>
-    <file>filesave.png</file>
-    <file>print.png</file>
-
-    <!-- Help -->
-    <file>help.png</file>
+    <file>fluent/arrow-expand.svg</file>
+    <file>fluent/arrow-redo.svg</file>
+    <file>fluent/arrow-repeat-all.svg</file>
+    <file>fluent/arrow-swap.svg</file>
+    <file>fluent/arrow-trending-lines.svg</file>
+    <file>fluent/arrow-undo.svg</file>
+    <file>fluent/checkmark-circle.svg</file>
+    <file>fluent/checkmark.svg</file>
+    <file>fluent/chevron-left.svg</file>
+    <file>fluent/chevron-right.svg</file>
+    <file>fluent/data-histogram.svg</file>
+    <file>fluent/data-line.svg</file>
+    <file>fluent/delete.svg</file>
+    <file>fluent/document-arrow-down.svg</file>
+    <file>fluent/document-arrow-up.svg</file>
+    <file>fluent/document-pdf.svg</file>
+    <file>fluent/edit.svg</file>
+    <file>fluent/eye.svg</file>
+    <file>fluent/filter.svg</file>
+    <file>fluent/folder-open.svg</file>
+    <file>fluent/globe.svg</file>
+    <file>fluent/history.svg</file>
+    <file>fluent/image.svg</file>
+    <file>fluent/info.svg</file>
+    <file>fluent/layer.svg</file>
+    <file>fluent/link.svg</file>
+    <file>fluent/map.svg</file>
+    <file>fluent/math-symbols.svg</file>
+    <file>fluent/mountain-location-top.svg</file>
+    <file>fluent/my-location.svg</file>
+    <file>fluent/options.svg</file>
+    <file>fluent/people-community.svg</file>
+    <file>fluent/ruler.svg</file>
+    <file>fluent/save.svg</file>
+    <file>fluent/select-all-on.svg</file>
+    <file>fluent/settings.svg</file>
+    <file>fluent/table.svg</file>
+    <file>fluent/text-field.svg</file>
   </qresource>
 </RCC>

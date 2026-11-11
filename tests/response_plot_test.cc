@@ -363,9 +363,11 @@ void map_backgrounds(const QString &directory)
     }
   }
   check(std::isfinite(location[0]), "No test boundary vertex");
-  for(int mode = 0; mode < 4; ++mode) {
+  for(int mode = 0; mode < 5; ++mode) {
     SurveyCoordinates coordinates;
-    if(mode) coordinates = SurveyCoordinates::calculate({location}, 12, mode != 3, mode >= 2);
+    // Continental surveys can place a valid station more than 30 degrees from
+    // the common zone's central meridian; its background must still align.
+    if(mode) coordinates = SurveyCoordinates::calculate({location}, mode == 4 ? 19 : 12, mode != 3, mode >= 2);
     const double scale = mode >= 2 ? .001 : 1.;
     const auto point = coordinates.transform({location}).front();
     const double extent = mode == 0 ? .015 : (mode >= 2 ? 1. : 1000.);
@@ -384,7 +386,7 @@ void map_backgrounds(const QString &directory)
   check(plot.savePdf(directory + "/geography.pdf"), "Geography PDF failed");
 }
 
-void near(double actual, double expected);
+void checkNear(double actual, double expected);
 
 void survey_reports(const QString &directory)
 {
@@ -506,7 +508,7 @@ void survey_reports(const QString &directory)
         auto *bars = dynamic_cast<QCPErrorBars *>(plot->plottable(i));
         if(bars && bars->dataPlottable() == plot->graph(0)) {
           check(bars->data()->size() == 3 && std::isnan(bars->data()->at(1).errorPlus), "Mask gap shifted error bars");
-          near(bars->data()->at(0).errorPlus, .03); near(bars->data()->at(2).errorPlus, .01); checkedGaps = true;
+          checkNear(bars->data()->at(0).errorPlus, .03); checkNear(bars->data()->at(2).errorPlus, .01); checkedGaps = true;
         }
       }
     }
@@ -534,7 +536,7 @@ double value(QCustomPlot &plot, int graph, double period)
   check(it != data->end() && it->key == period, "Missing response period");
   return it->value;
 }
-void near(double actual, double expected)
+void checkNear(double actual, double expected)
 {
   check(std::isfinite(actual) && std::abs(actual - expected) < 1e-10, "Unexpected plotted value");
 }
@@ -640,13 +642,13 @@ void statistics_controls(QDialog &analysis)
     buttons->button(QDialogButtonBox::Ok)->click();
   });
   auto check_ranges = [&] {
-    near(periods->xAxis->range().lower, .1); near(periods->xAxis->range().upper, 10.);
-    near(periods->yAxis->range().lower, .5); near(periods->yAxis->range().upper, 3.);
+    checkNear(periods->xAxis->range().lower, .1); checkNear(periods->xAxis->range().upper, 10.);
+    checkNear(periods->yAxis->range().lower, .5); checkNear(periods->yAxis->range().upper, 3.);
     auto *histogram = widget<QCustomPlot>(analysis, "fitHistogram");
-    near(histogram->xAxis->range().lower, -2.); near(histogram->xAxis->range().upper, 2.);
-    near(widget<QCustomPlot>(analysis, "fitOverall")->yAxis->range().upper, 4.);
-    near(widget<QCustomPlot>(analysis, "fitComponents")->yAxis->range().upper, 4.);
-    near(widget<QCustomPlot>(analysis, "fitStations")->yAxis->range().upper, 5.);
+    checkNear(histogram->xAxis->range().lower, -2.); checkNear(histogram->xAxis->range().upper, 2.);
+    checkNear(widget<QCustomPlot>(analysis, "fitOverall")->yAxis->range().upper, 4.);
+    checkNear(widget<QCustomPlot>(analysis, "fitComponents")->yAxis->range().upper, 4.);
+    checkNear(widget<QCustomPlot>(analysis, "fitStations")->yAxis->range().upper, 5.);
   };
   check_ranges();
   widget<QComboBox>(analysis, "fitCurveColors")->setCurrentText("Thermal");
@@ -690,22 +692,22 @@ void statistics_controls(QDialog &analysis)
   normalization->setCurrentIndex(1);
   check_ranges(); check_colors();
   normalization->setCurrentIndex(0);
-  near(checks->topLevelItem(1)->data(1, Qt::UserRole).toDouble(), originalRms);
+  checkNear(checks->topLevelItem(1)->data(1, Qt::UserRole).toDouble(), originalRms);
   check(checks->topLevelItem(1)->text(2) == originalCount, "Display controls changed the comparison counts");
   auto *histogram = widget<QCustomPlot>(analysis, "fitHistogram");
   double retained = 0.;
   for(const auto &point: *histogram->graph(1)->data()) retained += point.value;
-  near(retained, originalCount.section(" / ", 0, 0).toDouble());
+  checkNear(retained, originalCount.section(" / ", 0, 0).toDouble());
   range_dialog(analysis, [](QDialog &dialog) {
     widget<QPushButton>(dialog, "fitAxesAutoscale")->click();
     dialog.findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
   });
-  near(periods->yAxis->range().lower, 0.);
+  checkNear(periods->yAxis->range().lower, 0.);
   check(periods->yAxis->range().upper != 3., "Autoscale failed to clear fixed limits");
   widget<QCheckBox>(analysis, "fitMapRangeAuto")->setChecked(true);
   widget<QCheckBox>(analysis, "fitHeatRangeAuto")->setChecked(true);
   auto *scale = dynamic_cast<QCPColorScale *>(widget<QCustomPlot>(analysis, "fitMapA")->plotLayout()->element(1, 1));
-  near(scale->dataRange().lower, 0.);
+  checkNear(scale->dataRange().lower, 0.);
   check(!widget<QDoubleSpinBox>(analysis, "fitMapRangeMin")->isEnabled(), "Auto color limits remain editable");
 }
 
@@ -721,14 +723,14 @@ void statistics(const QString &directory)
   response.load_from_native_responses(responsePath.toStdString());
   auto result = FitStatistics::compare(observed, response, FitStatistics::ErrorSource::Response);
   check(result.total.count == 2 && result.available == 4, "Fit comparison lost sparse coverage counts");
-  near(result.total.rms(), 5.);
+  checkNear(result.total.rms(), 5.);
   check(result.residuals == std::vector<double>({5., 5.}), "Scalar response errors or residual sign changed");
-  near(result.periods.at(1.).rms(), 5.);
-  near(result.components.at("Zxy").rms(), 5.);
-  near(result.stations.at("S01").rms(), 5.);
-  near(result.station_periods.at("S01").at(1.).rms(), 5.);
+  checkNear(result.periods.at(1.).rms(), 5.);
+  checkNear(result.components.at("Zxy").rms(), 5.);
+  checkNear(result.stations.at("S01").rms(), 5.);
+  checkNear(result.station_periods.at("S01").at(1.).rms(), 5.);
   result = FitStatistics::compare(observed, response, FitStatistics::ErrorSource::Observed);
-  near(result.total.rms(), std::sqrt(250.));
+  checkNear(result.total.rms(), std::sqrt(250.));
   observed.get_station_data("S01").set_data_mask(RealZxy, 1., false);
   result = FitStatistics::compare(observed, response, FitStatistics::ErrorSource::Response);
   check(result.total.count == 0 && std::isnan(result.total.rms()), "Masked comparisons must be empty");
@@ -744,13 +746,13 @@ void statistics(const QString &directory)
   write(responsePath, "1.0000001 S01 impedance_xy real .9 .2\n");
   response.load_from_native_responses(responsePath.toStdString());
   result = FitStatistics::compare(observed, response, FitStatistics::ErrorSource::Response);
-  near(result.residuals.at(0), -.5);
+  checkNear(result.residuals.at(0), -.5);
   check(result.periods.count(1.) == 1, "Rounded frequency did not align with observed periods");
   write(observedPath, "1 S01 phase_xy value 45 2\n");
   write(responsePath, "1 S01 phase_xy value 405 2\n");
   observed.load_from_native_responses(observedPath.toStdString());
   response.load_from_native_responses(responsePath.toStdString());
-  near(FitStatistics::compare(observed, response, FitStatistics::ErrorSource::Response).total.rms(), 0.);
+  checkNear(FitStatistics::compare(observed, response, FitStatistics::ErrorSource::Response).total.rms(), 0.);
 }
 
 void gofem_responses(const QString &directory)
@@ -769,8 +771,8 @@ void gofem_responses(const QString &directory)
   const auto &station = response.get_station_data("S01");
   check(station.frequencies() == dvector({1., 4.}) && response.response_observations().size() == 4,
         "GoFEM sparse keys or source rows were lost");
-  near(response.response_observations()[0].error, .4);
-  near(response.response_observations()[3].error, .2);
+  checkNear(response.response_observations()[0].error, .4);
+  checkNear(response.response_observations()[3].error, .2);
   double scalar, error;
   check(station.scalar_value(RealTzx, 0, scalar, error) && scalar == 0., "GoFEM discarded a valid zero");
   for(auto type: {ImagTzx, RealTzy, ImagTzy, RealZxx, ImagZxx, PTxx})
@@ -783,11 +785,11 @@ void gofem_responses(const QString &directory)
         "Incomplete GoFEM components produced map glyphs");
   auto fit = FitStatistics::compare(observed, response, FitStatistics::ErrorSource::Response);
   check(fit.available == 4 && fit.total.count == 3, "GoFEM statistics invented scalars or counted zero errors");
-  near(fit.total.rms(), 5.);
+  checkNear(fit.total.rms(), 5.);
   check(fit.residuals == std::vector<double>({5., -5., 5.}), "GoFEM merged real/imaginary response errors");
   fit = FitStatistics::compare(observed, response, FitStatistics::ErrorSource::Observed);
   check(fit.total.count == 4, "Zero-error GoFEM response cannot use observed errors");
-  near(fit.total.rms(), std::sqrt(175.));
+  checkNear(fit.total.rms(), std::sqrt(175.));
   observed.get_station_data("S01").set_data_mask(RealZxy, 1., false);
   fit = FitStatistics::compare(observed, response, FitStatistics::ErrorSource::Response);
   check(fit.total.count == 1, "GoFEM statistics ignored observed masks");
@@ -798,7 +800,7 @@ void gofem_responses(const QString &directory)
   { boost::archive::binary_oarchive archive(saved); archive << response; }
   MTSurveyData restored;
   { boost::archive::binary_iarchive archive(saved); archive >> restored; }
-  near(FitStatistics::compare(observed, restored, FitStatistics::ErrorSource::Response).total.rms(), 5.);
+  checkNear(FitStatistics::compare(observed, restored, FitStatistics::ErrorSource::Response).total.rms(), 5.);
   check(restored.response_observations().size() == 4 &&
         !restored.get_station_data("S01").scalar_value(ImagTzx, 0, scalar, error), "Project lost sparse GoFEM data");
 
@@ -808,7 +810,7 @@ void gofem_responses(const QString &directory)
   check(response.n_stations() == 1 && !response.is_station_present("S01") && response.response_observations().size() == 2,
         "GoFEM reload retained old response data");
   check(response.get_station_data("station:03").scalar_value(RealTzy, 1, scalar, error), "GoFEM collapsed distinct small frequencies");
-  near(scalar, .1);
+  checkNear(scalar, .1);
   for(const auto *invalid: {"RealZxy 0 Plane_wave S01 1 .1", "RealZxy 1 Plane_wave S01 1 -.1",
                            "RealZxy 1 Plane_wave S01 nan .1", "RealZxy 1 Plane_wave S01 1 inf",
                            "RealZxy 1 Plane_wave S01 1", "RealZxy 1 Plane_wave S01 1 .1extra",
@@ -843,11 +845,11 @@ void gofem_responses(const QString &directory)
     double expectedValue, expectedError;
     check(response.get_station_data("S01").scalar_value(row.type, index, scalar, error) &&
           expected.at("S01").scalar_value(row.type, index, expectedValue, expectedError), "Missing scalar after GoFEM import");
-    near(scalar, row.value); near(scalar, expectedValue); near(error, expectedError);
+    checkNear(scalar, row.value); checkNear(scalar, expectedValue); checkNear(error, expectedError);
   }
   const auto &preserved = response.response_observations();
   for(unsigned i = 0; i < rows.size(); ++i) {
-    near(preserved[i].value, rows[i].value); near(preserved[i].error, rows[i].error);
+    checkNear(preserved[i].value, rows[i].value); checkNear(preserved[i].error, rows[i].error);
   }
 }
 
@@ -973,17 +975,17 @@ void period_maps(const QString &directory)
   MTMapData::PhaseTensor tensor;
   const double degrees = 180. / std::acos(-1.);
   check(MTMapData::phase_tensor({{2., 0., 0., 1.}}, tensor), "Diagonal tensor rejected");
-  near(tensor.phiMax, std::atan(2.) * degrees); near(tensor.phiMin, 45.);
-  near(tensor.axisRatio, .5); near(tensor.azimuth, 0.); near(tensor.skew, 0.);
+  checkNear(tensor.phiMax, std::atan(2.) * degrees); checkNear(tensor.phiMin, 45.);
+  checkNear(tensor.axisRatio, .5); checkNear(tensor.azimuth, 0.); checkNear(tensor.skew, 0.);
   check(MTMapData::phase_tensor({{1.75, std::sqrt(3.) / 4., std::sqrt(3.) / 4., 1.25}}, tensor), "Rotated tensor rejected");
-  near(tensor.azimuth, 30.); near(tensor.axisRatio, .5);
+  checkNear(tensor.azimuth, 30.); checkNear(tensor.axisRatio, .5);
   check(MTMapData::phase_tensor({{2., 1., 0., 1.}}, tensor), "Non-symmetric tensor rejected");
   // The ellipse's major direction is the eigenvector of Phi * transpose(Phi).
-  near(tensor.azimuth, .5 * std::atan2(2., 4.) * degrees);
+  checkNear(tensor.azimuth, .5 * std::atan2(2., 4.) * degrees);
   check(MTMapData::phase_tensor({{2., 0., 0., -1.}}, tensor), "Negative determinant tensor rejected");
-  near(tensor.phiMin, -45.); near(tensor.axisRatio, .5);
+  checkNear(tensor.phiMin, -45.); checkNear(tensor.axisRatio, .5);
   check(MTMapData::phase_tensor({{1., 0., 0., 1.}}, tensor), "Isotropic tensor rejected");
-  near(tensor.axisRatio, 1.);
+  checkNear(tensor.axisRatio, 1.);
   check(!MTMapData::phase_tensor({{0., 0., 0., 0.}}, tensor) &&
         !MTMapData::phase_tensor({{1., NAN, 0., 1.}}, tensor), "Undefined tensor produced an ellipse");
   check(MTMapData::nearest_period({0., NAN, 1.0001, 1., .1}, 1., .001) == 3 &&
@@ -1031,7 +1033,7 @@ void period_maps(const QString &directory)
   const auto index = MTMapData::nearest_period(station.frequencies(), 1., 0.);
   std::array<double, 2> vector;
   check(MTMapData::phase_tensor(station, index, tensor), "Impedance-derived tensor rejected");
-  near(tensor.axisRatio, .5); near(tensor.azimuth, 0.);
+  checkNear(tensor.axisRatio, .5); checkNear(tensor.azimuth, 0.);
   station.set_data_mask(RealZxx, 1., false);
   check(!MTMapData::phase_tensor(station, index, tensor), "Masked impedance entered the tensor map");
   station.set_data_mask(RealZxx, 1., true);
@@ -1042,7 +1044,7 @@ void period_maps(const QString &directory)
   check(!MTMapData::phase_tensor(station, index, tensor), "Singular real impedance produced an ellipse");
   station.set_data(1., {RealTzx, RealTzy}, {0., 0.}, {.01, .01});
   check(MTMapData::induction_vector(station, index, false, vector), "Valid zero vector rejected");
-  near(vector[0], 0.); near(vector[1], 0.);
+  checkNear(vector[0], 0.); checkNear(vector[1], 0.);
   station.set_data_mask(RealTzy, 1., false);
   check(!MTMapData::induction_vector(station, index, false, vector), "Incomplete vector was plotted");
   check(!MTMapData::induction_vector(survey->get_station_data("C"), 0, false, vector), "Missing east component treated as zero");
@@ -1057,29 +1059,29 @@ void period_maps(const QString &directory)
   auto *plot = widget<QCustomPlot>(window, "periodMapPlot");
   auto *period = widget<QComboBox>(window, "mapPeriod");
   auto *dataset = widget<QComboBox>(window, "mapDataset");
-  near(period->currentData().toDouble(), 1.);
+  checkNear(period->currentData().toDouble(), 1.);
   check(period->count() == 2 && dataset->count() == 2 && plot->property("phaseTensorCount").toUInt() == 2,
         "Default period map coverage is incorrect");
   auto *ellipse = widget<QCPCurve>(*plot, "phaseTensor_A");
-  near(ellipse->property("axisRatio").toDouble(), .5);
+  checkNear(ellipse->property("axisRatio").toDouble(), .5);
   auto *arrow = widget<QCPItemLine>(*plot, "inductionReal_A");
   const QPointF center = arrow->start->coords(), delta = arrow->end->coords() - center;
   const double size = widget<QDoubleSpinBox>(window, "mapArrowSize")->value();
-  near(delta.x(), -.1 * size); near(delta.y(), -.2 * size);
+  checkNear(delta.x(), -.1 * size); checkNear(delta.y(), -.2 * size);
   const auto majorPoint = ellipse->data()->constBegin();
-  near(majorPoint->key, center.x());
-  near(majorPoint->value - center.y(), .5 * widget<QDoubleSpinBox>(window, "mapEllipseSize")->value());
+  checkNear(majorPoint->key, center.x());
+  checkNear(majorPoint->value - center.y(), .5 * widget<QDoubleSpinBox>(window, "mapEllipseSize")->value());
   check(!plot->findChild<QCPItemLine *>("inductionReal_C"), "Incomplete station vector displayed");
   widget<QComboBox>(window, "mapArrowConvention")->setCurrentIndex(1);
   arrow = widget<QCPItemLine>(*plot, "inductionReal_A");
-  near((arrow->end->coords() + delta - center).manhattanLength(), 0.);
+  checkNear((arrow->end->coords() + delta - center).manhattanLength(), 0.);
   widget<QDoubleSpinBox>(window, "mapArrowSize")->setValue(size * 2.);
   arrow = widget<QCPItemLine>(*plot, "inductionReal_A");
-  near((arrow->end->coords() + 2. * delta - center).manhattanLength(), 0.);
+  checkNear((arrow->end->coords() + 2. * delta - center).manhattanLength(), 0.);
   widget<QCheckBox>(window, "mapImagArrows")->setChecked(true);
   arrow = widget<QCPItemLine>(*plot, "inductionImag_A");
-  near(arrow->end->coords().x() - center.x(), -.1 * size * 2.);
-  near(arrow->end->coords().y() - center.y(), .05 * size * 2.);
+  checkNear(arrow->end->coords().x() - center.x(), -.1 * size * 2.);
+  checkNear(arrow->end->coords().y() - center.y(), .05 * size * 2.);
   widget<QCheckBox>(window, "mapRealArrows")->setChecked(false);
   check(!plot->findChild<QCPItemLine *>("inductionReal_A") && plot->findChild<QCPCurve *>("phaseTensor_A"),
         "Arrow visibility affected phase tensors");
@@ -1102,7 +1104,7 @@ void period_maps(const QString &directory)
         scale->gradient() == QCPColorGradient(QCPColorGradient::gpGrayscale).inverted(), "Map colors did not follow controls");
   check(widget<QCPCurve>(*plot, "phaseTensor_A")->brush().color() == QColor(Qt::black), "Color limits do not clip to palette endpoints");
   widget<QPushButton>(window, "mapNextPeriod")->click();
-  near(period->currentData().toDouble(), 10.);
+  checkNear(period->currentData().toDouble(), 10.);
   check(plot->property("phaseTensorCount").toUInt() == 1, "Unavailable period was extrapolated");
   widget<QPushButton>(window, "mapPreviousPeriod")->click();
 
@@ -1205,10 +1207,10 @@ void period_maps(const QString &directory)
   const auto unitNorth = north / std::hypot(north.x(), north.y());
   const auto expected = widget<QDoubleSpinBox>(window, "mapArrowSize")->value() *
     (.2 * unitNorth + .1 * QPointF(unitNorth.y(), -unitNorth.x()));
-  near((arrow->end->coords() - arrow->start->coords() - expected).manhattanLength(), 0.);
+  checkNear((arrow->end->coords() - arrow->start->coords() - expected).manhattanLength(), 0.);
   check(scale->dataRange() == QCPRange(10., 60.), "Refreshing maps reset color limits");
   window.resize(1300, 800); QApplication::processEvents(); plot->replot();
-  near(plot->xAxis->range().size() / plot->axisRect()->width(), plot->yAxis->range().size() / plot->axisRect()->height());
+  checkNear(plot->xAxis->range().size() / plot->axisRect()->width(), plot->yAxis->range().size() / plot->axisRect()->height());
   const auto xRange = plot->xAxis->range(), yRange = plot->yAxis->range();
   file_action(window, "mapSavePdf", {directory + "/period-map.pdf"});
   check(QFileInfo(directory + "/period-map.pdf").size() > 1000 &&
@@ -1224,8 +1226,11 @@ void period_maps(const QString &directory)
   auto &closeStation = closeSurvey->get_station_data("A");
   closeStation.set_position({{55., 9., 100.}});
   window.setData(closeSurvey, {});
+  for(const auto &point: *widget<QCPCurve>(*plot, "phaseTensor_A")->data())
+    check(plot->xAxis->range().contains(point.key) && plot->yAxis->range().contains(point.value),
+          "Single-station fit clipped its ellipse");
   period->setCurrentIndex(0);
-  near(period->currentData().toDouble(), 1. / 1.0005);
+  checkNear(period->currentData().toDouble(), 1. / 1.0005);
   widget<QCheckBox>(window, "mapSelectStations")->setChecked(true);
   const auto closeCenter = widget<QCPItemLine>(*plot, "inductionReal_A")->start->pixelPosition();
   map_gesture(plot, closeCenter, closeCenter);
@@ -1234,6 +1239,101 @@ void period_maps(const QString &directory)
   const int neighborIndex = MTMapData::nearest_period(closeStation.frequencies(), 1., 0.);
   check(!closeStation.tipper_mask()[0][exactIndex] && closeStation.tipper_mask()[0][neighborIndex],
         "Map masked a nearby frequency instead of the selected frequency");
+
+  // A finite but extreme vector must remain inspectable without collapsing
+  // the entire survey to a dot in the interactive map or report.
+  write(observedPath, rows("West", "1") + rows("Center", "1") + rows("East", "1"));
+  auto wide = std::make_shared<MTSurveyData>();
+  wide->load_from_native_responses(observedPath.toStdString());
+  wide->get_station_data("West").set_position({{42., -124., 100.}});
+  wide->get_station_data("Center").set_position({{35., -96., 100.}});
+  wide->get_station_data("East").set_position({{45., -68., 100.}});
+  wide->get_station_data("Center").set_data(1., {RealTzx, RealTzy}, {2e6, -1e6}, {.01, .01});
+  PeriodMapWindow wideMap(nullptr); wideMap.setData(wide, {}); wideMap.show(); QApplication::processEvents();
+  auto *widePlot = widget<QCustomPlot>(wideMap, "periodMapPlot");
+  const auto checkExtent = [](QCustomPlot *map) {
+    check(map->xAxis->range().size() < 20000. && map->yAxis->range().size() < 20000.,
+          "Outlier glyph expanded the map beyond the survey");
+    for(const auto &point: *widget<QCPGraph>(*map, "mapStations")->data())
+      check(map->xAxis->range().contains(point.key) && map->yAxis->range().contains(point.value),
+            "Fitted map clipped a station");
+  };
+  checkExtent(widePlot);
+  auto *outlier = widget<QCPItemLine>(*widePlot, "inductionReal_Center");
+  check(outlier->property("north").toDouble() == 2e6, "Map silently changed the outlier value");
+  widget<QPushButton>(wideMap, "mapFitView")->click(); checkExtent(widePlot);
+  SurveyReport::Options wideReport; wideReport.overview = false; wideReport.stationPages = false;
+  wideReport.phaseTensorMaps = true; wideReport.inductionMaps = true; wideReport.mapPeriods = {1.};
+  check(SurveyReport::write_pdf(directory + "/wide-map.pdf", *wide, nullptr, wideReport, [&](unsigned done, unsigned) {
+    if(done) for(auto *top: QApplication::topLevelWidgets())
+      if(auto *map = top->findChild<QCustomPlot *>("periodMapPlot")) checkExtent(map);
+    return true;
+  }), "Continental map report failed");
+  widget<QCheckBox>(wideMap, "mapSelectStations")->setChecked(true);
+  const auto outlierCenter = outlier->start->pixelPosition();
+  map_gesture(widePlot, outlierCenter, outlierCenter);
+  widget<QPushButton>(wideMap, "mapMask")->click();
+  check(!wide->get_station_data("Center").tipper_mask()[0][0] &&
+        wide->get_station_data("West").tipper_mask()[0][0], "Outlier could not be masked from its map location");
+
+  // Scalar maps use local complex impedances, not means of rho or phase.
+  auto &centerStation = wide->get_station_data("Center");
+  centerStation.set_data(1., {RealZxx, ImagZxx, RealZxy, ImagZxy, RealZyx, ImagZyx, RealZyy, ImagZyy},
+                        {.2, .1, 2., 3., -4., -2., .7, -.2}, std::vector<double>(8, .01));
+  wideMap.setData(wide, {});
+  auto *colorBy = widget<QComboBox>(wideMap, "mapColorBy");
+  auto *wideScale = dynamic_cast<QCPColorScale *>(widePlot->plotLayout()->element(1, 1));
+  using Complex = std::complex<double>;
+  const Complex xx(.2, .1), xy(2., 3.), yx(-4., -2.), yy(.7, -.2);
+  const std::array<Complex, 4> expectedZ{{xy, -yx, (xy - yx) / 2., std::sqrt((xx*xx + xy*xy + yx*yx + yy*yy) / 2.)}};
+  for(int mode = 3; mode < 11; ++mode) {
+    colorBy->setCurrentIndex(mode);
+    const bool rho = mode < 7;
+    const auto z = expectedZ[(mode - 3) % 4];
+    const double expected = rho ? std::norm(z) / (8e-7 * std::pow(std::acos(-1.), 2)) : std::arg(z) * degrees;
+    auto *marker = widget<QCPItemTracer>(*widePlot, "impedanceMarker_Center");
+    checkNear(marker->property("value").toDouble(), expected);
+    check(wideScale->visible() && wideScale->dataScaleType() == (rho ? QCPAxis::stLogarithmic : QCPAxis::stLinear),
+          "Scalar map used the wrong color scale");
+    check(widget<QCPCurve>(*widePlot, "phaseTensor_Center")->brush().style() == Qt::NoBrush,
+          "Scalar map left a conflicting filled tensor color");
+  }
+  colorBy->setCurrentIndex(7); // XY phase remains visible without YX or diagonals.
+  centerStation.set_data_mask(RealZyx, 1., false, false); wideMap.setData(wide, {});
+  check(widePlot->findChild<QCPItemTracer *>("impedanceMarker_Center"), "XY map required unrelated components");
+  for(int mode: {8, 9, 10}) {
+    colorBy->setCurrentIndex(mode);
+    check(!widePlot->findChild<QCPItemTracer *>("impedanceMarker_Center"), "Scalar map included a masked required component");
+  }
+  centerStation.set_data_mask(RealZyx, 1., true, false);
+  centerStation.set_data_mask(RealZxx, 1., false, false); wideMap.setData(wide, {});
+  check(!widePlot->findChild<QCPItemTracer *>("impedanceMarker_Center"), "SSQ replaced a masked diagonal with zero");
+  colorBy->setCurrentIndex(9);
+  check(widePlot->findChild<QCPItemTracer *>("impedanceMarker_Center"), "Berdichevsky map required diagonal data");
+  centerStation.set_data_mask(RealZxx, 1., true, false);
+  widget<QCheckBox>(wideMap, "mapPhaseTensors")->setChecked(false);
+  colorBy->setCurrentIndex(3);
+  check(wideScale->visible() && !widePlot->findChild<QCPCurve *>("phaseTensor_Center"),
+        "Scalar colors depended on ellipse visibility");
+  widget<QDoubleSpinBox>(wideMap, "mapArrowWidth")->setValue(.4);
+  widget<QDoubleSpinBox>(wideMap, "mapColorMin")->setValue(1000.);
+  widget<QDoubleSpinBox>(wideMap, "mapColorMax")->setValue(1e7);
+  const auto settings = wideMap.displaySettings();
+  wideReport.useMapSettings = true; wideReport.mapSettings = settings;
+  check(SurveyReport::write_pdf(directory + "/scalar-map.pdf", *wide, nullptr, wideReport, [&](unsigned done, unsigned) {
+    if(done) for(auto *top: QApplication::topLevelWidgets()) if(top != &wideMap && top != &window)
+      if(auto *map = top->findChild<QCustomPlot *>("periodMapPlot")) {
+        const auto *scale = dynamic_cast<QCPColorScale *>(map->plotLayout()->element(1, 1));
+        check(scale && scale->dataScaleType() == QCPAxis::stLogarithmic && scale->dataRange() == QCPRange(1000., 1e7),
+              "Report lost scalar map range or logarithmic scale");
+        checkNear(widget<QCPItemLine>(*map, "inductionReal_West")->pen().widthF(), .4);
+        check(map->property("impedanceMarkerCount").toUInt() == 3, "Report lost scalar markers");
+      }
+    return true;
+  }), "Scalar map report failed");
+  colorBy->setCurrentIndex(0);
+  check(!widePlot->findChild<QCPItemTracer *>("impedanceMarker_Center") && !wideScale->visible(),
+        "Switching to hidden tensors retained scalar markers or legend");
 }
 
 void station_selection_edits(const QString &directory)
@@ -1336,13 +1436,13 @@ void resampling_project_workflow(const QString &directory)
     if(top->objectName() == "resampledSurveyWindow") copy = qobject_cast<MainWindow *>(top);
   check(copy, "Apply did not open a separate survey window");
   select_station(*copy, "A");
-  near(value(*widget<QCustomPlot>(*copy, "plot12"), 1, 2.), std::atan2(3., 2.) * 180. / std::acos(-1.));
+  checkNear(value(*widget<QCustomPlot>(*copy, "plot12"), 1, 2.), std::atan2(3., 2.) * 180. / std::acos(-1.));
   check(widget<QCustomPlot>(window, "plot12")->graph(1)->data()->findBegin(2.)->key != 2., "Resampling modified the original window");
   file_action(*copy, "actionSave_project", {saved});
   copy->close(); QApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
   MainWindow restored;
   file_action(restored, "actionLoad_project", {saved}); select_station(restored, "A");
-  near(value(*widget<QCustomPlot>(restored, "plot12"), 1, 2.), std::atan2(3., 2.) * 180. / std::acos(-1.));
+  checkNear(value(*widget<QCustomPlot>(restored, "plot12"), 1, 2.), std::atan2(3., 2.) * 180. / std::acos(-1.));
   widget<QAction>(restored, "actionPeriod_layout")->trigger();
   auto *restoredLayout = widget<QDialog>(restored, "periodLayoutWindow");
   check(!widget<QPushButton>(*restoredLayout, "layoutOpenSource")->isHidden(), "Saved project lost source access");
@@ -1352,7 +1452,7 @@ void resampling_project_workflow(const QString &directory)
     if(top->objectName() == "resampledSurveyWindow") copy = qobject_cast<MainWindow *>(top);
   check(copy, "Could not reopen the saved source survey");
   select_station(*copy, "A");
-  near(value(*widget<QCustomPlot>(*copy, "plot12"), 1, 100.), std::atan2(9., 8.) * 180. / std::acos(-1.));
+  checkNear(value(*widget<QCustomPlot>(*copy, "plot12"), 1, 100.), std::atan2(9., 8.) * 180. / std::acos(-1.));
   copy->close(); QApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
 }
 
@@ -1431,7 +1531,7 @@ void rho_plus_overlay(const QString &directory)
   check(!rho->graph(9)->data()->isEmpty(),"Masking cleared loaded responses");
   rho->graph(5)->setSelection(QCPDataSelection(QCPDataRange(0,1)));
   menu->actions()[2]->trigger(); settle();
-  near(xy->data()->constBegin()->key,originalStart);
+  checkNear(xy->data()->constBegin()->key,originalStart);
   component_box(*rho,1)->setChecked(false);
   check(!xy->visible() && widget<QCPCurve>(*phase,"rhoPlusXY")->visible(),"Guide ignored independent component visibility");
   component_box(*rho,1)->setChecked(true);
@@ -1540,7 +1640,7 @@ void workflow(const QString &directory)
   widget<QAction>(window, "actionShow_station_names")->setChecked(false);
   check(stationMap->itemCount() == 0 && !widget<QCheckBox>(window, "stationMapNames")->isChecked(),
         "Names did not disappear from station map");
-  near(stationMap->graph(0)->data()->constBegin()->value, firstPosition);
+  checkNear(stationMap->graph(0)->data()->constBegin()->value, firstPosition);
   widget<QCheckBox>(window, "stationMapNames")->setChecked(true);
   file_action(window, "actionLoad_responses", {first, second});
   auto *list = widget<QListWidget>(window, "responsesList");
@@ -1548,9 +1648,12 @@ void workflow(const QString &directory)
   widget<QPushButton>(window, "openPeriodMaps")->click();
   auto *maps = widget<QDialog>(window, "periodMapWindow");
   check(maps->isVisible() && widget<QComboBox>(*maps, "mapDataset")->count() == 3, "Maps button did not open loaded datasets");
+  check(widget<QCheckBox>(*maps, "mapStationNames")->isChecked(), "Period map did not inherit main map station names");
+  widget<QCheckBox>(*maps, "mapStationNames")->setChecked(false);
   maps->hide();
   widget<QAction>(window, "actionPeriod_maps")->trigger();
   check(maps->isVisible(), "Data menu did not reopen period maps");
+  check(!widget<QCheckBox>(*maps, "mapStationNames")->isChecked(), "Reopening period map reset its display choices");
   maps->hide();
   auto &rho = *widget<QCustomPlot>(window, "plot11");
   auto &phase = *widget<QCustomPlot>(window, "plot12");
@@ -1559,8 +1662,8 @@ void workflow(const QString &directory)
   const auto beforeReportRange = rho.xAxis->range();
   const auto beforeReportValue = value(rho, 9, 1.);
   export_report(window, directory + "/survey-report.pdf");
-  near(rho.xAxis->range().lower, beforeReportRange.lower); near(rho.xAxis->range().upper, beforeReportRange.upper);
-  near(value(rho, 9, 1.), beforeReportValue);
+  checkNear(rho.xAxis->range().lower, beforeReportRange.lower); checkNear(rho.xAxis->range().upper, beforeReportRange.upper);
+  checkNear(value(rho, 9, 1.), beforeReportValue);
   const std::array<SurveyReport::Options::Axis, 4> guiAxes{{
     {false, 1., 1000.}, {false, -10., 100.}, {false, -.4, .4}, {false, -2., 2.}}};
   main_axis_ranges(window, false, guiAxes);
@@ -1573,10 +1676,10 @@ void workflow(const QString &directory)
             "Responses must not have observation symbols");
       check(plot->graph(i)->selectable() == QCP::stNone, "Responses must not be maskable");
     }
-  near(value(rho, 9, 1.), 10.); near(value(rho, 9, .25), 40.);
+  checkNear(value(rho, 9, 1.), 10.); checkNear(value(rho, 9, .25), 40.);
   check(std::isnan(value(rho, 9, .5)), "Missing response should break the line");
-  near(value(phase, 9, .5), 60.); near(value(phase, 10, 1.), 45.);
-  near(value(tipper, 8, 1.), 0.); near(value(tensor, 8, .25), .75);
+  checkNear(value(phase, 9, .5), 60.); checkNear(value(phase, 10, 1.), 45.);
+  checkNear(value(tipper, 8, 1.), 0.); checkNear(value(tensor, 8, .25), .75);
   check(tipper.graph(9)->data()->isEmpty() && tensor.graph(9)->data()->isEmpty(),
         "Absent response component produced a curve");
   widget<QAction>(window, "actionFit_statistics")->trigger();
@@ -1584,7 +1687,7 @@ void workflow(const QString &directory)
   auto *checks = widget<QTreeWidget>(*analysis, "fitResponses");
   auto *fitPeriods = widget<QCustomPlot>(*analysis, "fitPeriods");
   check(checks->topLevelItemCount() == 2 && fitPeriods->graphCount() == 2, "Missing response comparisons");
-  near(checks->topLevelItem(0)->text(1).toDouble(), 0.);
+  checkNear(checks->topLevelItem(0)->text(1).toDouble(), 0.);
   checks->topLevelItem(0)->setCheckState(0, Qt::Unchecked);
   check(fitPeriods->graphCount() == 1, "Unchecked response remained in fit plot");
   checks->topLevelItem(1)->setCheckState(0, Qt::Unchecked);
@@ -1596,7 +1699,7 @@ void workflow(const QString &directory)
     double count = 0;
     for(const auto &point: *distributions->graph(i)->data()) count += point.value;
     const auto matched = checks->topLevelItem(i)->text(2).section(" / ", 0, 0).toDouble();
-    near(count, matched);
+    checkNear(count, matched);
   }
   auto *normalization = widget<QComboBox>(*analysis, "fitErrorSource");
   normalization->setCurrentIndex(1);
@@ -1606,7 +1709,7 @@ void workflow(const QString &directory)
   maps->show(); QApplication::processEvents();
   auto *mapPlot = widget<QCustomPlot>(*maps, "periodMapPlot");
   widget<QComboBox>(*maps, "mapPeriod")->setCurrentIndex(3); // 1 s (four sorted periods)
-  near(widget<QComboBox>(*maps, "mapPeriod")->currentData().toDouble(), 1.);
+  checkNear(widget<QComboBox>(*maps, "mapPeriod")->currentData().toDouble(), 1.);
   widget<QCheckBox>(*maps, "mapSelectStations")->setChecked(true);
   const auto stationPoint = widget<QCPGraph>(*mapPlot, "mapStations")->data()->constBegin();
   const QPointF stationPixel(mapPlot->xAxis->coordToPixel(stationPoint->key), mapPlot->yAxis->coordToPixel(stationPoint->value));
@@ -1663,7 +1766,7 @@ void workflow(const QString &directory)
   bool projectedResponse = false;
   for(int i = 0; i < tipper.itemCount(); ++i)
     if(auto *arrow = dynamic_cast<QCPItemLine *>(tipper.item(i))) {
-      near(arrow->end->coords().y(), 0.);
+      checkNear(arrow->end->coords().y(), 0.);
       if(std::abs(arrow->end->coords().x() - 18.) < 1e-10) projectedResponse = true;
     }
   check(projectedResponse, "Selected tipper response projection is missing");
@@ -1691,9 +1794,9 @@ void workflow(const QString &directory)
   observedStations->currentItem()->setCheckState(Qt::Checked);
   check(checks->topLevelItem(0)->text(2) == "4 / 4", "Fit refresh did not restore active station");
   widget<QAction>(window, "actionPhase_wrap")->setChecked(false);
-  near(value(phase, 10, 1.), -135.);
+  checkNear(value(phase, 10, 1.), -135.);
   list->setCurrentRow(0);
-  near(value(rho, 9, 1.), 1.0132118364233778);
+  checkNear(value(rho, 9, 1.), 1.0132118364233778);
   check(tipper.graph(8)->data()->isEmpty(), "Previous iteration's tipper was left on the plot");
   select_station(window, "S02");
   for(auto *plot: {&rho, &phase, &tipper, &tensor})
@@ -1705,7 +1808,7 @@ void workflow(const QString &directory)
   write(first, "1 S01 apparent_resistivity_xy value 99 1\n4 S01 apparent_resistivity_xy value 100 1\n");
   file_action(window, "actionLoad_responses", {first});
   check(list->count() == 2, "Reloading an iteration duplicated its list item");
-  near(value(rho, 9, 1.), 99.);
+  checkNear(value(rho, 9, 1.), 99.);
 
   // The response table is stored in the project, independently of source files.
   widget<QAction>(window, "actionLink_tensor_masks")->setChecked(false);
@@ -1727,7 +1830,7 @@ void workflow(const QString &directory)
   check_visibility(*widget<QCustomPlot>(restored, "plot12"), 2);
   check_visibility(*widget<QCustomPlot>(restored, "plot21"), 5);
   check_visibility(*widget<QCustomPlot>(restored, "plot22"), 9);
-  near(value(*widget<QCustomPlot>(restored, "plot11"), 9, 1.), 99.);
+  checkNear(value(*widget<QCustomPlot>(restored, "plot11"), 9, 1.), 99.);
   widget<QAction>(restored, "actionFit_statistics")->trigger();
   auto *restoredAnalysis = widget<QDialog>(restored, "fitStatisticsWindow");
   auto *restoredChecks = widget<QTreeWidget>(*restoredAnalysis, "fitResponses");
@@ -1735,14 +1838,14 @@ void workflow(const QString &directory)
   // Existing GoFEM import remains available and selects the loaded response.
   file_action(restored, "actionLoad_responses", {observations});
   check(restoredList->count() == 3, "GoFEM response import regressed");
-  near(value(*widget<QCustomPlot>(restored, "plot11"), 9, 1.), 1.0132118364233778);
+  checkNear(value(*widget<QCustomPlot>(restored, "plot11"), 9, 1.), 1.0132118364233778);
   auto checkGoFEM = [&] {
     auto *tree = widget<QTreeWidget>(*restoredAnalysis, "fitResponses");
     QTreeWidgetItem *gofem = nullptr;
     for(int i = 0; i < tree->topLevelItemCount(); ++i)
       if(tree->topLevelItem(i)->data(0, Qt::UserRole).toString() == observations) gofem = tree->topLevelItem(i);
     check(gofem && gofem->text(2) == "10 / 10", "GoFEM statistics did not use the original scalar rows");
-    near(gofem->data(1, Qt::UserRole).toDouble(), 0.);
+    checkNear(gofem->data(1, Qt::UserRole).toDouble(), 0.);
     for(int i = 8; i < 12; ++i)
       check(widget<QCustomPlot>(restored, "plot21")->graph(i)->data()->isEmpty(),
             "GoFEM file without tippers displayed zero response lines");
@@ -1833,7 +1936,7 @@ void real_run(const QString &project, const QString &directory, const QString &s
       if(row.type == ImagZxy) imag = row.value;
     }
   const double expected = (real*real + imag*imag) / (8e-7 * std::acos(-1.) * std::acos(-1.) * .01);
-  near(value(rho, 9, 100.), expected);
+  checkNear(value(rho, 9, 100.), expected);
   if(!screenshot.isEmpty()) {
     window.showNormal();
     window.resize(1500, 1000);
@@ -1872,7 +1975,7 @@ void real_run(const QString &project, const QString &directory, const QString &s
     const auto filename = QFileInfo(item->data(0, Qt::UserRole).toString()).baseName();
     bool ok = false;
     const int iteration = filename.section("iter", -1).toInt(&ok);
-    if(ok && expectedRms.count(iteration)) near(item->data(1, Qt::UserRole).toDouble(), expectedRms.at(iteration));
+    if(ok && expectedRms.count(iteration)) checkNear(item->data(1, Qt::UserRole).toDouble(), expectedRms.at(iteration));
   }
   std::cout << "Initial/latest nRMS: " << checks->topLevelItem(0)->text(1).toStdString() << "/"
             << checks->topLevelItem(checks->topLevelItemCount()-1)->text(1).toStdString() << "; "

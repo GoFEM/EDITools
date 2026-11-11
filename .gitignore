@@ -16,6 +16,8 @@ build/*
 /.vscode/
 /dist/
 *.mtd
+__pycache__/
+*.py[cod]
 
 # Optional geographic datasets are external, not repository assets.
 /data/natural-earth/

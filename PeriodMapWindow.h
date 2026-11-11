@@ -41,6 +41,8 @@ private:
   void updateMap(bool fit = false);
   void fitView();
   void resetColorRange();
+  bool impedanceColors() const;
+  bool resistivityColors() const;
   void savePdf();
   void drawEllipse(const Site &site, const MTMapData::PhaseTensor &tensor, double period,
                    QCPColorGradient &colors, const QCPRange &range);
@@ -57,7 +59,7 @@ private:
   QString coordinatesDescription, originDescription, locationError;
   QComboBox *dataset, *period, *convention, *colorBy, *colorMap;
   QCheckBox *names, *tensors, *realArrows, *imagArrows, *reverseColors;
-  QDoubleSpinBox *tolerance, *ellipseSize, *arrowSize, *colorMin, *colorMax;
+  QDoubleSpinBox *tolerance, *ellipseSize, *arrowSize, *arrowWidth, *colorMin, *colorMax;
   QCustomPlot *plot;
   MapBackground *background;
   QCPColorScale *colorScale;

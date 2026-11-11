@@ -16,7 +16,7 @@
 
 namespace {
 void check(bool value, const char *message) { if(!value) throw std::runtime_error(message); }
-void near(double a, double b) { check(std::isfinite(a) && std::abs(a - b) < 1e-9 * std::max(1., std::abs(b)), "Numerical mismatch"); }
+void checkNear(double a, double b) { check(std::isfinite(a) && std::abs(a - b) < 1e-9 * std::max(1., std::abs(b)), "Numerical mismatch"); }
 double value(const MTStationData &s, RealDataType type, unsigned i = 0) {
   double v, e; check(s.scalar_value(type, i, v, e), "Missing scalar"); return v;
 }
@@ -48,30 +48,30 @@ void transformations() {
     for(unsigned i = 0; i < 3; ++i) {
       for(unsigned c = 0; c < 4; ++c) {
         const int sign = channels[c / 2] != channels[2 + c % 2] ? -1 : 1;
-        near(value(s, zr[c], i), sign * value(original, zr[c], i));
-        near(value(s, zi[c], i), sign * value(original, zi[c], i));
-        near(value(s, rho[c], i), value(original, rho[c], i));
-        near(value(s, pt[c], i), value(derived, pt[c], i));
-        near(std::remainder(value(s, phs[c], i) - value(derived, phs[c], i), 360.), 0.);
+        checkNear(value(s, zr[c], i), sign * value(original, zr[c], i));
+        checkNear(value(s, zi[c], i), sign * value(original, zi[c], i));
+        checkNear(value(s, rho[c], i), value(original, rho[c], i));
+        checkNear(value(s, pt[c], i), value(derived, pt[c], i));
+        checkNear(std::remainder(value(s, phs[c], i) - value(derived, phs[c], i), 360.), 0.);
         for(auto type : {zr[c], zi[c], rho[c], phs[c], pt[c]}) {
-          double v, before, after; original.scalar_value(type, i, v, before); s.scalar_value(type, i, v, after); near(after, before);
+          double v, before, after; original.scalar_value(type, i, v, before); s.scalar_value(type, i, v, after); checkNear(after, before);
         }
       }
       for(unsigned c = 0; c < 2; ++c) for(auto type : (c == 0 ? std::vector<RealDataType>{RealTzx, ImagTzx} : std::vector<RealDataType>{RealTzy, ImagTzy})) {
         const int sign = channels[4] != channels[2 + c] ? -1 : 1;
-        near(value(s, type, i), sign * value(original, type, i));
-        double v, before, after; original.scalar_value(type, i, v, before); s.scalar_value(type, i, v, after); near(after, before);
+        checkNear(value(s, type, i), sign * value(original, type, i));
+        double v, before, after; original.scalar_value(type, i, v, before); s.scalar_value(type, i, v, after); checkNear(after, before);
       }
     }
     s.reverse_polarity(channels);
-    for(auto type : {RealZxy, ImagZyx, RealTzx, ImagTzy, PTxy, PTyx, PhsZxy, PhsZyx}) near(value(s, type), value(original, type));
+    for(auto type : {RealZxy, ImagZyx, RealTzx, ImagTzy, PTxy, PTyx, PhsZxy, PhsZyx}) checkNear(value(s, type), value(original, type));
   }
   MTStationData sparse; sparse.set_size(1, true); sparse.set_frequencies({1.});
   sparse.set_data(1., {PhsZxy, RhoZxy, PTxy, RealTzx}, {45., 100., .3, .2}, {2., 5., .01, .01});
   sparse.reverse_polarity({{true, false, false, false, false}});
-  near(value(sparse, PhsZxy), -135.); near(value(sparse, RhoZxy), 100.); near(value(sparse, PTxy), .3); near(value(sparse, RealTzx), .2);
+  checkNear(value(sparse, PhsZxy), -135.); checkNear(value(sparse, RhoZxy), 100.); checkNear(value(sparse, PTxy), .3); checkNear(value(sparse, RealTzx), .2);
   sparse.reverse_polarity({{false, false, true, false, false}});
-  near(value(sparse, PTxy), -.3); near(value(sparse, RealTzx), -.2);
+  checkNear(value(sparse, PTxy), -.3); checkNear(value(sparse, RealTzx), -.2);
   MTStationData restored; std::istringstream input(bytes(sparse)); boost::archive::binary_iarchive archive(input); archive >> restored;
   check(bytes(sparse) == bytes(restored), "Project serialization lost correction");
 }
@@ -169,7 +169,7 @@ void dialog(const QString &directory) {
   for(auto format : {SurveyExport::Format::Native, SurveyExport::Format::GoFEM}) {
     const auto prepared = SurveyExport::prepare(*survey, options, format);
     check(!prepared.observations.empty(), "Corrected export empty");
-    for(const auto &row : prepared.observations) if(row.receiver == "A" && row.type == RealZxy) near(row.value, 2.);
+    for(const auto &row : prepared.observations) if(row.receiver == "A" && row.type == RealZxy) checkNear(row.value, 2.);
   }
   history.stack().undo(); check(bytes(target) == before, "Undo did not restore exact station");
   history.stack().redo(); check(value(target, RealZxy) > 0., "Redo failed");

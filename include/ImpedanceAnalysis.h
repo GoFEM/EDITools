@@ -16,6 +16,8 @@ struct Sample {
   double resistivity() const;
   double phase() const; // Degrees, without folding anomalous phases.
 };
+// A single frequency index, with the same masks, conventions and errors as curve().
+Sample sample(const MTStationData &station, Quantity quantity, unsigned frequencyIndex);
 // Keeps missing/masked periods as NaNs so plots do not bridge missing samples.
 std::vector<Sample> curve(const MTStationData &station, Quantity quantity);
 

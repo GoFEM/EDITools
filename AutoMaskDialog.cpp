@@ -133,7 +133,7 @@ bool reviewAutoMasks(QWidget *parent, MTSurveyData &survey, const std::set<std::
   QObject::connect(exportAudit, &QPushButton::clicked, &dialog, [&] {
     const auto path = QFileDialog::getSaveFileName(&dialog, QObject::tr("Export auto-mask audit"), "auto-mask.csv", QObject::tr("CSV (*.csv)")); if(path.isEmpty()) return;
     QSaveFile file(path); if(!file.open(QIODevice::WriteOnly)) { QMessageBox::warning(&dialog, QObject::tr("Export"), file.errorString()); return; }
-    QTextStream out(&file); out.setCodec("UTF-8"); out.setRealNumberPrecision(17);
+    QTextStream out(&file); out.setEncoding(QStringConverter::Utf8); out.setRealNumberPrecision(17);
     out << "# minimum_flags=" << used.minimumFlags << ",max_gap_ratio=" << used.maximumGapRatio << ",neighbours=" << used.neighbours << ",radius_km=" << used.radiusKm
         << ",period_tolerance=" << used.periodTolerance << ",min_phase_degrees=" << used.minimumPhaseDifference << ",agreement_degrees=" << used.phaseAgreement << ",rho_grid=" << used.rhoPlus.intervalsPerDecade
         << ",max_tipper_error=" << used.maximumTipperError << ",min_tipper_difference=" << used.minimumTipperDifference << ",tipper_agreement=" << used.tipperAgreement
