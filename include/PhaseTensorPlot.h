@@ -29,9 +29,21 @@ public:
 
   void set_observed_data(MTStationData &data, bool rescaleAxes = true);
   void set_predicted_data(const MTStationData &data, bool rescaleAxes = false);
+  void set_ellipse_mode(bool on);
+  void clear_observed_data() override;
+  void clear_predicted_data() override;
+  void showPointToolTip(QMouseEvent *event) override;
 
 private:
   void set_layout();
+  void apply_component_visibility() override;
+  void set_legend_component_visible(unsigned component, bool visible) override;
+  std::vector<RealDataType> get_graph_data_types(const QCPGraph *graph) const override;
+  void set_ellipses(const MTStationData &data, bool predicted);
+  class Ellipses;
+  Ellipses *m_ellipses = nullptr;
+  QCPColorScale *m_colorScale;
+  bool m_ellipseMode = false;
 };
 
 #endif // PHASE_TENSOR_PLOT_H

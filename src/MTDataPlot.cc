@@ -167,7 +167,7 @@ QColor tipperMasked()
 }
 
 MTDataPlot::MTDataPlot(QCustomPlot *plot):
-  m_plot(plot), m_associated_plot(nullptr),
+  m_associated_plot(nullptr), m_plot(plot), m_data(nullptr),
   m_yAxisAutoscale(true), m_fixedYRange(plot->yAxis->range())
 {
   m_contextMenu = new QMenu(m_plot);
@@ -185,6 +185,44 @@ MTDataPlot::~MTDataPlot() = default;
 void MTDataPlot::set_associated_plot(MTDataPlot &plot)
 {
   m_associated_plot = &plot;
+}
+
+void MTDataPlot::set_split_components(bool split)
+{
+  if(split == bool(m_diagonalAxes)) return;
+  if(split) {
+    m_diagonalAxes = new QCPAxisRect(m_plot);
+    m_plot->plotLayout()->addElement(0, 1, m_diagonalAxes);
+    auto *x = m_diagonalAxes->axis(QCPAxis::atBottom);
+    auto *y = m_diagonalAxes->axis(QCPAxis::atLeft);
+    x->setScaleType(QCPAxis::stLogarithmic);
+    x->setTicker(m_plot->xAxis->ticker()); x->setLabel(m_plot->xAxis->label());
+    x->setRange(m_plot->xAxis->range());
+    y->setScaleType(m_plot->yAxis->scaleType()); y->setTicker(m_plot->yAxis->ticker());
+    y->setLabel(m_plot->yAxis->label());
+    connect(m_plot->xAxis, qOverload<const QCPRange &>(&QCPAxis::rangeChanged), x,
+            qOverload<const QCPRange &>(&QCPAxis::setRange));
+    connect(x, qOverload<const QCPRange &>(&QCPAxis::rangeChanged), m_plot->xAxis,
+            qOverload<const QCPRange &>(&QCPAxis::setRange));
+    m_diagonalLegend = new QCPLegend;
+    m_diagonalLegend->setBrush(m_plot->legend->brush());
+    m_diagonalAxes->insetLayout()->addElement(m_diagonalLegend, Qt::AlignLeft | Qt::AlignTop);
+  }
+  for(int i = 0; i < m_plot->graphCount(); ++i) {
+    const bool diagonal = split && (i % 4 == 0 || i % 4 == 3);
+    auto *x = diagonal ? m_diagonalAxes->axis(QCPAxis::atBottom) : m_plot->xAxis;
+    auto *y = diagonal ? m_diagonalAxes->axis(QCPAxis::atLeft) : m_plot->yAxis;
+    m_plot->graph(i)->setKeyAxis(x); m_plot->graph(i)->setValueAxis(y);
+    if(i < int(m_errorBars.size())) {
+      m_errorBars[i]->setKeyAxis(x); m_errorBars[i]->setValueAxis(y);
+    }
+  }
+  if(!split) {
+    m_plot->plotLayout()->remove(m_diagonalAxes);
+    m_plot->plotLayout()->simplify();
+    m_diagonalAxes = nullptr; m_diagonalLegend = nullptr;
+  }
+  rebuild_component_legend({0, 1, 2, 3});
 }
 
 void MTDataPlot::set_error_bars_visible(bool on)
@@ -211,15 +249,19 @@ void MTDataPlot::set_legend_component_visible(unsigned component, bool visible)
 void MTDataPlot::rebuild_component_legend(const std::vector<int> &graphIndices)
 {
   m_plot->legend->clearItems();
-  for(int component: graphIndices)
-    m_plot->legend->addItem(new ComponentLegendItem(m_plot->legend, m_plot->graph(component), component,
+  if(m_diagonalLegend) m_diagonalLegend->clearItems();
+  for(int component: graphIndices) {
+    auto *legend = m_diagonalLegend && (component == 0 || component == 3) ? m_diagonalLegend : m_plot->legend;
+    legend->addItem(new ComponentLegendItem(legend, m_plot->graph(component), component,
       [this, component](bool visible) { set_legend_component_visible(component, visible); }));
+  }
 }
 
 void MTDataPlot::update_component_legend()
 {
-  for(int i = 0; i < m_plot->legend->itemCount(); ++i)
-    if(auto *item = dynamic_cast<ComponentLegendItem *>(m_plot->legend->item(i))) item->sync();
+  for(auto *legend: {m_plot->legend, m_diagonalLegend}) if(legend)
+    for(int i = 0; i < legend->itemCount(); ++i)
+      if(auto *item = dynamic_cast<ComponentLegendItem *>(legend->item(i))) item->sync();
 }
 
 void MTDataPlot::apply_component_visibility()
@@ -290,8 +332,10 @@ void MTDataPlot::plotContextRequest(QPoint pos)
 
 void MTDataPlot::showPointToolTip(QMouseEvent *event)
 {
-  double x = m_plot->xAxis->pixelToCoord(event->pos().x());
-  double y = m_plot->yAxis->pixelToCoord(event->pos().y());
+  auto *rect = m_plot->axisRectAt(event->pos());
+  if(!rect) return;
+  double x = rect->axis(QCPAxis::atBottom)->pixelToCoord(event->pos().x());
+  double y = rect->axis(QCPAxis::atLeft)->pixelToCoord(event->pos().y());
 
   m_plot->setToolTip(QString("X: %1\nY: %2").arg(x).arg(y));
 }
@@ -459,6 +503,12 @@ void MTDataPlot::apply_axis_ranges(bool rescaleAxes, bool useDefaultYRange,
   if(rescaleAxes && std::any_of(m_componentVisible.begin(), m_componentVisible.end(), [](bool visible) { return visible; }))
   {
     m_plot->xAxis->rescale(true);
+    if(m_diagonalAxes) {
+      auto *x = m_diagonalAxes->axis(QCPAxis::atBottom);
+      // Include periods that only have diagonal observations.
+      QCPRange range = m_plot->xAxis->range();
+      x->rescale(true); range.expand(x->range()); m_plot->xAxis->setRange(range);
+    }
     QCPRange xrange = m_plot->xAxis->range();
     m_plot->xAxis->setRange(xrange.lower / 2., xrange.upper * 2.);
 
@@ -473,6 +523,14 @@ void MTDataPlot::apply_axis_ranges(bool rescaleAxes, bool useDefaultYRange,
 
   if(!m_yAxisAutoscale)
     m_plot->yAxis->setRange(m_fixedYRange);
+  if(m_diagonalAxes) {
+    auto *y = m_diagonalAxes->axis(QCPAxis::atLeft);
+    if(!m_yAxisAutoscale) y->setRange(m_fixedYRange);
+    else if(rescaleAxes) {
+      if(useDefaultYRange) y->setRange(-180, 180);
+      else y->rescale(true);
+    }
+  }
 }
 
 void MTDataPlot::mask_selected_data(bool on)
@@ -484,7 +542,11 @@ void MTDataPlot::mask_selected_data(bool on)
     if(!graph->visible() || graph->selectable() == QCP::stNone)
       continue;
     QCPDataSelection selection = graph->selection();
-    const std::vector<RealDataType> types = get_graph_data_types(graph);
+    std::set<RealDataType> types;
+    for(auto type: get_graph_data_types(graph)) {
+      const auto targets = MTStationData::mask_edit_types(type, m_linkTensorMasks);
+      types.insert(targets.begin(), targets.end());
+    }
     if(types.empty())
       continue;
 
@@ -495,7 +557,7 @@ void MTDataPlot::mask_selected_data(bool on)
       for (auto it = begin; it != end; ++it)
       {
         for(const auto type: types)
-          m_data->set_data_mask(type, 1. / it->key, on, m_linkTensorMasks);
+          m_data->set_data_mask(type, 1. / it->key, on);
       }
     }
   }
@@ -538,6 +600,8 @@ void MTDataPlot::set_mask_preview(const std::vector<std::pair<RealDataType, doub
       auto *marker = new QCPItemTracer(m_plot); marker->setObjectName("autoMaskMarker");
       marker->setStyle(QCPItemTracer::tsCircle); marker->setSize(12); marker->setPen(QPen(QColor("#DC2626"), 2));
       marker->setSelectable(false); marker->position->setType(QCPItemPosition::ptPlotCoords);
+      marker->position->setAxes(graph->keyAxis(), graph->valueAxis());
+      marker->setClipAxisRect(graph->keyAxis()->axisRect());
       marker->position->setCoords(point->key, point->value); m_maskPreview.push_back(marker);
     }
   }
@@ -571,12 +635,11 @@ void MTDataPlot::invMaskSelectedData()
       }
     }
   }
-  // A masked input wins over an unmask when several selected components share
-  // a dependent PT/Z entry. Compute the whole operation before modifying data.
+  // A masked input wins over an unmask when selections share a paired diagonal,
+  // a real/imaginary mask or a linked PT/Z entry. Plan before modifying data.
   std::map<RealDataType, std::vector<bool>> related;
   for(const auto &entry: selected) {
-    for(unsigned i = 0; i < frequencies.size(); ++i) m_data->set_data_mask(entry.first, frequencies[i], entry.second[i]);
-    if(m_linkTensorMasks) for(auto type: MTStationData::linked_mask_types(entry.first)) {
+    for(auto type: MTStationData::mask_edit_types(entry.first, m_linkTensorMasks)) {
       if(!related.count(type)) related[type].assign(frequencies.size(), true);
       for(unsigned i = 0; i < frequencies.size(); ++i) related[type][i] = related[type][i] && entry.second[i];
     }

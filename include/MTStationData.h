@@ -123,6 +123,11 @@ public:
   void mask_type(RealDataType type, bool on, bool linkTensorMasks = false);
   void set_data_mask(RealDataType type, double frequency, bool on, bool linkTensorMasks = false);
   static const std::vector<RealDataType> &linked_mask_types(RealDataType type);
+  // Editor targets pair XY with XX and YX with YY independently of Z/PT links.
+  // Canonical mask types ensure shared real/imaginary and
+  // resistivity/phase masks are combined before applying inverted selections.
+  static std::vector<RealDataType> mask_edit_types(RealDataType type, bool linkTensorMasks,
+                                                 bool pairDiagonals = true);
 
   std::set<RealDataType> active_types() const;
 

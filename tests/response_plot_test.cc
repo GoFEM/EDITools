@@ -9,6 +9,9 @@
 #include "include/EDIPeriodMerge.h"
 #include "EDIImportDialog.h"
 #include "include/ApparentResistivityPlot.h"
+#include "include/PhaseTensorPlot.h"
+#include "include/PhasePlot.h"
+#include "include/TipperPlot.h"
 #include <QApplication>
 #include <QFileDialog>
 #include <QCheckBox>
@@ -560,16 +563,22 @@ QCheckBox *component_box(QCustomPlot &plot, int component)
 
 void set_visibility(QCustomPlot &plot, int mask)
 {
-  for(int i = 0; i < 4; ++i) {
-    auto *box = component_box(plot, i);
-    if(box->isChecked() != bool(mask & (1 << i))) box->click();
+  const auto boxes = plot.findChildren<QCheckBox *>();
+  for(auto *box: boxes) {
+    const int component = box->objectName().mid(QStringLiteral("componentVisibility").size()).toInt();
+    const int bits = boxes.size() == 1 ? 15 : boxes.size() == 2 ? 3 << component : 1 << component;
+    if(box->isChecked() != bool(mask & bits)) box->click();
   }
 }
 
 void check_visibility(QCustomPlot &plot, int mask, bool errorBars = true)
 {
+  const int checkboxCount = plot.findChildren<QCheckBox *>().size();
+  const bool arrows = plot.graph(0)->property("tipperArrowRole").toInt() == 1;
+  const bool ellipses = checkboxCount == 1;
+  const int visibleMask = arrows ? (mask & 3 ? 1 : 0) | (mask & 12 ? 4 : 0) : ellipses ? (mask ? 1 : 0) : mask;
   for(int i = 0; i < plot.graphCount(); ++i) {
-    check(plot.graph(i)->visible() == bool(mask & (1 << (i % 4))), "Component visibility is inconsistent");
+    check(plot.graph(i)->visible() == (bool(visibleMask & (1 << (i % 4))) && (!(arrows || ellipses) || i < 8)), "Component visibility is inconsistent");
     check(plot.graph(i)->selectable() == (i < 8 && plot.graph(i)->visible()
           ? QCP::stMultipleDataRanges : QCP::stNone), "Hidden or calculated curves are selectable");
   }
@@ -577,15 +586,20 @@ void check_visibility(QCustomPlot &plot, int mask, bool errorBars = true)
   for(int i = 0; i < plot.plottableCount(); ++i)
     if(auto *bars = dynamic_cast<QCPErrorBars *>(plot.plottable(i))) {
       ++errorCount;
-      check(bars->visible() == (errorBars && bars->dataPlottable()->visible()), "Hidden component has visible error bars");
+      check(bars->visible() == (errorBars && !arrows && !ellipses && bars->dataPlottable()->visible()), "Hidden component has visible error bars");
     }
   check(errorCount == 8, "Error bars were lost");
-  check(plot.legend->itemCount() == 4 && plot.findChildren<QCheckBox *>().size() == 4,
+  const auto legends = plot.findChildren<QCPLegend *>();
+  int legendItems = 0;
+  for(auto *legend: legends) legendItems += legend->itemCount();
+  check(legendItems == checkboxCount && checkboxCount == (arrows ? 2 : ellipses ? 1 : 4),
         "Each legend item must keep exactly one visibility checkbox");
   for(int i = 0; i < 4; ++i) {
+    if((arrows && i % 2) || (ellipses && i != 0)) continue;
     auto *box = component_box(plot, i);
-    check(box->isChecked() == bool(mask & (1 << i)), "Legend checkbox is out of sync");
-    check(!box->isHidden() && box->isEnabled() && plot.legend->outerRect().contains(box->geometry()),
+    check(box->isChecked() == bool(visibleMask & (1 << i)), "Legend checkbox is out of sync");
+    check(!box->isHidden() && box->isEnabled() && std::any_of(legends.begin(), legends.end(),
+          [box](QCPLegend *legend) { return legend->outerRect().contains(box->geometry()); }),
           "Legend checkbox cannot be used to restore a hidden component");
   }
 }
@@ -900,6 +914,75 @@ void linked_mask_tests(const QString &directory)
     for(int c = 8; c < plot.graphCount(); ++c) check(plot.graph(c)->selectable() == QCP::stNone,
                                                   "Response curves became selectable");
   }
+  // Real rectangle selections in both TF columns, including hidden paired
+  // diagonals and masked observations, must use the same component/period plan.
+  for(bool phase: {false, true}) for(bool linked: {false, true}) for(int off: {1, 2}) {
+    auto edited = original;
+    QCustomPlot plot; plot.resize(1000, 600);
+    std::unique_ptr<MTDataPlot> handler(phase ? static_cast<MTDataPlot *>(new PhasePlot(&plot))
+                                            : new ApparentResistivityPlot(&plot));
+    handler->set_split_components(true); handler->set_link_tensor_masks(linked);
+    handler->set_observed_data(edited); handler->set_predicted_data(original);
+    plot.show(); QApplication::processEvents();
+    const int diagonal = off == 1 ? 0 : 3;
+    handler->set_mask_preview({{zTypes[off], 1.}, {zTypes[diagonal], 1.}});
+    const auto markers = plot.findChildren<QCPItemTracer *>("autoMaskMarker");
+    check(markers.size() == 2, "TF preview omitted the paired diagonal");
+    std::set<QCPAxis *> markerAxes;
+    for(auto *marker: markers) {
+      markerAxes.insert(marker->position->keyAxis());
+      check(marker->clipAxisRect() == marker->position->keyAxis()->axisRect(), "TF marker clipped to the wrong column");
+      check(marker->position->keyAxis() == plot.graph(off)->keyAxis() ||
+            marker->position->keyAxis() == plot.graph(diagonal)->keyAxis(), "TF marker uses an unrelated axis");
+    }
+    check(markerAxes.size() == 2, "TF previews did not appear in both columns");
+    handler->set_mask_preview({});
+    set_visibility(plot, 1 << off);
+    auto selectPeriod = [&](int component, double period) {
+      plot.replot();
+      auto *axis = plot.graph(component)->keyAxis();
+      const auto rect = axis->axisRect()->rect();
+      map_gesture(&plot, QPointF(axis->coordToPixel(period / 1.1), rect.top() + 2),
+                  QPointF(axis->coordToPixel(period * 1.1), rect.bottom() - 2), true);
+      check(plot.graph(component)->selected() || plot.graph(component + 4)->selected(), "TF rectangle missed its component");
+      for(int c = 0; c < 12; ++c) if(c != component && c != component + 4)
+        check(!plot.graph(c)->selected(), "TF rectangle selected another column, hidden component or response");
+    };
+    selectPeriod(off, 1.); handler->maskSelectedData();
+    for(unsigned c = 0; c < 4; ++c) {
+      check(edited.impedance_mask()[c][0] == (c != off && c != diagonal) && edited.impedance_mask()[c][1],
+            "TF mask missed a hidden paired diagonal or changed another component/period");
+      check(edited.phase_tensor_mask()[c][0] == !linked && edited.phase_tensor_mask()[c][1], "TF mask ignored Z/PT linkage");
+    }
+    selectPeriod(off, 1.); handler->unmaskSelectedData();
+    check(edited.impedance_mask() == original.impedance_mask() && edited.phase_tensor_mask() == original.phase_tensor_mask(),
+          "TF unmask did not restore the paired diagonal and linked tensor");
+    selectPeriod(off, 1.); handler->invMaskSelectedData();
+    for(unsigned c = 0; c < 4; ++c) {
+      check(edited.impedance_mask()[c][0] && edited.impedance_mask()[c][1] == (c != off && c != diagonal), "TF inverted mask missed the paired diagonal");
+      check(edited.phase_tensor_mask()[c][0] && edited.phase_tensor_mask()[c][1] == !linked, "TF inverted mask lost Z/PT linkage");
+    }
+    check(edited.tipper_mask() == original.tipper_mask(), "TF impedance edit changed tipper masks");
+    edited = original; handler->set_observed_data(edited); set_visibility(plot, 1 << diagonal);
+    selectPeriod(diagonal, 1.); handler->maskSelectedData();
+    check(!edited.impedance_mask()[diagonal][0] && edited.impedance_mask()[off][0], "Diagonal rectangle masked its off-diagonal partner");
+    // Conflicting selections in the two columns: a mask must win for the
+    // shared diagonal, regardless of component order or displayed quantity.
+    edited = original; handler->set_observed_data(edited); set_visibility(plot, 15); plot.deselectAll();
+    plot.graph(diagonal)->setSelection(QCPDataSelection(QCPDataRange(0, 1)));
+    plot.graph(off)->setSelection(QCPDataSelection(QCPDataRange(1, 2))); handler->invMaskSelectedData();
+    check(!edited.impedance_mask()[diagonal][0] && !edited.impedance_mask()[diagonal][1] &&
+          !edited.impedance_mask()[off][0] && edited.impedance_mask()[off][1], "Conflicting TF inversion depends on component order");
+  }
+  {
+    auto edited = original;
+    QCustomPlot plot; TipperPlot handler(&plot); handler.set_arrow_mode(true); handler.set_observed_data(edited);
+    plot.graph(0)->setSelection(QCPDataSelection(QCPDataRange(0, 1)));
+    plot.graph(2)->setSelection(QCPDataSelection(QCPDataRange(1, 2))); handler.invMaskSelectedData();
+    for(const auto &mask: edited.tipper_mask()) check(!mask[0] && !mask[1], "Inverted real/imaginary arrow masks conflict");
+    check(edited.impedance_mask() == original.impedance_mask() && edited.phase_tensor_mask() == original.phase_tensor_mask(),
+          "Inverted tipper arrows changed Z/PT masks");
+  }
   // Z/PT edits must preserve both enabled and already-masked tipper samples.
   for(bool linked: {false, true}) for(auto type: {RealZxx, RealZxy, RealZyx, RealZyy,
       ImagZxx, ImagZxy, ImagZyx, ImagZyy, RhoZxx, RhoZxy, RhoZyx, RhoZyy,
@@ -951,7 +1034,7 @@ void linked_mask_tests(const QString &directory)
   auto &rho = *widget<QCustomPlot>(window, "plot11"), &phase = *widget<QCustomPlot>(window, "plot12"), &pt = *widget<QCustomPlot>(window, "plot22");
   auto &tipper = *widget<QCustomPlot>(window, "plot21");
   auto checkTippers = [&] {
-    for(unsigned c = 0; c < 4; ++c)
+    for(unsigned c: {0u, 2u})
       check(tipper.graph(c + 4)->data()->isEmpty() && tipper.graph(c)->data()->size() == 2,
             "Z/PT plot masking changed displayed tipper samples");
   };
@@ -964,15 +1047,43 @@ void linked_mask_tests(const QString &directory)
   };
   const auto periodRange = rho.xAxis->range(); action(phase, 1, "Mask");
   checkTippers();
-  check(rho.graph(5)->data()->size() == 1 && rho.graph(4)->data()->isEmpty(), "Phase masking changed unrelated Z plots");
-  for(unsigned c = 0; c < 4; ++c) check(pt.graph(c + 4)->data()->size() == 1, "Linked PT plots did not refresh immediately");
+  check(rho.graph(5)->data()->size() == 1 && rho.graph(4)->data()->size() == 1 && rho.graph(7)->data()->isEmpty(), "Phase masking missed its paired diagonal or changed the other pair");
+  check(pt.graph(4)->data()->size() == 1, "Linked PT ellipses did not refresh immediately");
   check(rho.xAxis->range() == periodRange, "Masking changed zoom limits");
-  action(phase, 5, "Unmask"); action(pt, 2, "Mask");
+  action(phase, 5, "Unmask"); action(pt, 0, "Mask");
   checkTippers();
   for(unsigned c = 0; c < 4; ++c) check(rho.graph(c + 4)->data()->size() == 1 && phase.graph(c + 4)->data()->size() == 1, "PT masking did not refresh all related Z plots");
-  check(pt.graph(4)->data()->isEmpty(), "Linking masked unselected PT entries"); action(pt, 6, "Unmask");
+  check(pt.graph(4)->data()->size() == 1, "Ellipse selection did not mask the whole tensor"); action(pt, 4, "Unmask");
   setting->setChecked(false); action(rho, 1, "Mask");
   for(unsigned c = 0; c < 4; ++c) check(pt.graph(c + 4)->data()->isEmpty(), "Disabling linked masks still changed PT");
+  check(rho.graph(4)->dataCount() == 1 && rho.graph(5)->dataCount() == 1, "Unlinked plot edit omitted paired diagonal");
+  widget<QAction>(window, "actionUndo")->trigger();
+  check(rho.graph(4)->data()->isEmpty() && rho.graph(5)->data()->isEmpty(), "One undo did not restore both impedance masks");
+  widget<QAction>(window, "actionRedo")->trigger();
+  check(rho.graph(4)->dataCount() == 1 && rho.graph(5)->dataCount() == 1, "Redo omitted paired diagonal");
+  auto *stations = widget<QListWidget>(window, "stationList");
+  bool componentEdited = false;
+  QTimer::singleShot(0, [&] {
+    auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+    if(!menu) return;
+    for(auto *action: menu->findChildren<QAction *>()) if(action->data().isValid() && action->data().toInt() == RealZyx) {
+      action->trigger(); componentEdited = true; break;
+    }
+    menu->close();
+  });
+  QMetaObject::invokeMethod(stations, "customContextMenuRequested", Qt::DirectConnection,
+                            Q_ARG(QPoint, stations->visualItemRect(stations->currentItem()).center()));
+  check(componentEdited && rho.graph(6)->dataCount() == 2 && rho.graph(7)->dataCount() == 2 &&
+        rho.graph(4)->dataCount() == 1 && pt.graph(4)->data()->isEmpty(), "Station component mask lost pairing or changed unrelated masks");
+  checkTippers();
+  widget<QAction>(window, "actionUndo")->trigger();
+  check(rho.graph(6)->data()->isEmpty() && rho.graph(7)->data()->isEmpty() && rho.graph(4)->dataCount() == 1,
+        "Station component undo did not restore the whole pair");
+  widget<QAction>(window, "actionSave_project")->trigger();
+  MainWindow restored; file_action(restored, "actionLoad_project", {project}); select_station(restored, "linked");
+  auto *restoredRho = widget<QCustomPlot>(restored, "plot11");
+  check(restoredRho->axisRectCount() == 2 && restoredRho->graph(4)->dataCount() == 1 && restoredRho->graph(5)->dataCount() == 1,
+        "Project round trip lost TF layout or paired masks");
 }
 
 void period_maps(const QString &directory)
@@ -1491,6 +1602,36 @@ struct LegacyOptionsV7 : LegacyOptionsV6 {
     LegacyOptionsV6::serialize(ar,version); ar & linkTensorMasks;
   }
 };
+void tensor_strip()
+{
+  MTStationData station;
+  station.set_size(2, true); station.set_frequencies({1., .1});
+  for(double f: station.frequencies()) {
+    station.set_data(f, {PTxx, PTxy, PTyx, PTyy}, {2., .2, .2, 1.}, {.01, .01, .01, .01});
+    station.set_data(f, {RealTzx, RealTzy, ImagTzx, ImagTzy}, {.1, .2, .3, .4}, {.01, .01, .01, .01});
+  }
+  QCustomPlot plot; plot.resize(800, 160); plot.show();
+  PhaseTensorPlot handler(&plot); handler.set_link_tensor_masks(false);
+  handler.set_ellipse_mode(true); handler.set_observed_data(station);
+  check(plot.graph(0)->data()->size() == 2 && plot.graph(4)->data()->isEmpty(), "Explicit PT ellipse anchors missing");
+  const auto before = plot.toPixmap().toImage();
+  plot.graph(0)->setSelection(QCPDataSelection(QCPDataRange(0, 1)));
+  handler.maskSelectedData();
+  check(plot.graph(4)->data()->size() == 1, "Masked ellipse disappeared instead of becoming selectable grey data");
+  for(const auto &mask: station.phase_tensor_mask()) check(mask[0] && !mask[1], "Ellipse masking missed a PT component");
+  for(const auto &mask: station.tipper_mask()) check(mask[0] && mask[1], "Ellipse masking affected tippers");
+  plot.graph(0)->setSelection(QCPDataSelection());
+  plot.graph(4)->setSelection(QCPDataSelection(QCPDataRange(0, 1)));
+  handler.unmaskSelectedData();
+  handler.set_predicted_data(station);
+  check(plot.toPixmap().toImage() != before, "Response ellipse outlines did not render");
+  handler.clear_predicted_data(); handler.clear_observed_data();
+  check(plot.graph(0)->data()->isEmpty() && plot.graph(4)->data()->isEmpty(), "Clearing a station left ellipse anchors");
+  handler.set_ellipse_mode(false); handler.set_observed_data(station);
+  checkNear(value(plot, 0, 1.), 2.); checkNear(value(plot, 3, 1.), 1.);
+  check(plot.legend->itemCount() == 4, "Scalar PT controls were not restored");
+}
+
 void rho_plus_overlay(const QString &directory)
 {
   const auto input=directory+"/rho-guide.gofem", project=directory+"/rho-guide.mtd";
@@ -1503,6 +1644,12 @@ void rho_plus_overlay(const QString &directory)
       if(name=="OUTLIER" && i==5 && component==std::string("xy") && part==std::string("Imag")) value=-value;
       text<<part<<'Z'<<component<<' '<<f<<" Plane_wave "<<name<<' '<<value<<' '<<.02*z<<'\n';
     }
+    text << "RealZxx " << f << " Plane_wave " << name << ' ' << .1*z << ' ' << .01*z << '\n'
+         << "ImagZxx " << f << " Plane_wave " << name << ' ' << .2*z << ' ' << .01*z << '\n'
+         << "RealZyy " << f << " Plane_wave " << name << ' ' << .15*z << ' ' << .01*z << '\n'
+         << "ImagZyy " << f << " Plane_wave " << name << ' ' << -.1*z << ' ' << .01*z << '\n';
+    for(const auto &type: {"RealTzx", "RealTzy", "ImagTzx", "ImagTzy"})
+      text << type << ' ' << f << " Plane_wave " << name << ' ' << .1*std::sin(i*.3) << " .01\n";
   }
   write(input,text.str());
   auto survey=std::make_shared<MTSurveyData>(); survey->load_from_gofem(input.toStdString());
@@ -1522,14 +1669,46 @@ void rho_plus_overlay(const QString &directory)
   toggle->setChecked(true); settle();
   check(xy->visible() && xy->data()->size()==201,"Rho+ guide missing");
   check(xy->pen().color()==PlotColors::componentColors()[1] && xy->pen().widthF()<1. && xy->pen().style()==Qt::DashLine,"Guide style differs from component");
-  check(xy->selectable()==QCP::stNone && rho->legend->itemCount()==4 && rho->graphCount()==12,"Guide affects masking or legend layout");
+  check(xy->selectable()==QCP::stNone && rho->legend->itemCount()==2 && rho->graphCount()==12,"Guide affects masking or legend layout");
   check(rho->xAxis->range()==xRange && rho->yAxis->range()==yRange,"Fitting changed zoom");
   check(std::abs(xy->data()->constBegin()->value-100.)<.01 &&
         std::abs(yxPhase->data()->constBegin()->value-45.)<.01,"Incorrect half-space guide");
   const double originalStart=xy->data()->constBegin()->key;
   file_action(window,"actionLoad_responses",{input}); settle();
   check(!rho->graph(9)->data()->isEmpty() && xy->visible(),"Loaded response and rho+ cannot coexist");
+  check(!window.findChild<QAction *>("actionTransfer_function_view") && !window.findChild<QAction *>("actionTipper_arrows"),
+        "The main view still offers alternative layouts");
+  check(rho->axisRectCount() == 2 && phase->axisRectCount() == 2, "TF columns missing");
+  check(rho->graph(0)->keyAxis() != rho->xAxis && rho->graph(1)->keyAxis() == rho->xAxis,
+        "TF components assigned to wrong columns");
+  check(rho->graph(8)->keyAxis() == rho->graph(0)->keyAxis() && xy->visible(), "TF responses or guides missing");
+  {
+    QSettings().setValue("plots/transferFunctionView", false);
+    MainWindow remembered;
+    check(widget<QCustomPlot>(remembered, "plot11")->axisRectCount() == 2 &&
+          widget<QCustomPlot>(remembered, "plot21")->legend->itemCount() == 2 &&
+          widget<QCustomPlot>(remembered, "plot22")->legend->itemCount() == 1,
+          "An old preference disabled the default TF layout");
+  }
+  auto *rightAxis = rho->graph(0)->keyAxis();
+  rightAxis->setRange(.1, 10.); settle();
+  check(phase->xAxis->range() == rightAxis->range() &&
+        widget<QCustomPlot>(window, "plot21")->xAxis->range() == rightAxis->range(), "TF period axes are not linked");
+  const auto artifacts = qEnvironmentVariable("EDITOOLS_TEST_ARTIFACT_DIR");
+  if(!artifacts.isEmpty()) {
+    window.showNormal(); window.resize(1400, 1000); QMetaObject::invokeMethod(&window, "updatePlots"); settle();
+    check(window.grab().save(artifacts + "/transfer-function-view.png"), "Could not save TF view preview");
+  }
   auto *menu=widget<QMenu>(*rho,"");
+  rho->graph(0)->setSelection(QCPDataSelection(QCPDataRange(0,1)));
+  menu->actions().front()->trigger(); settle();
+  check(rho->graph(4)->data()->size() == 1 && rho->graph(5)->data()->isEmpty() &&
+        rho->graph(6)->data()->isEmpty() && rho->graph(7)->data()->isEmpty(),
+        "Masking a diagonal in TF view affected another impedance component");
+  rho->graph(0)->setSelection(QCPDataSelection());
+  rho->graph(4)->setSelection(QCPDataSelection(QCPDataRange(0,1)));
+  menu->actions()[2]->trigger(); settle();
+  rho->graph(4)->setSelection(QCPDataSelection());
   rho->graph(1)->setSelection(QCPDataSelection(QCPDataRange(0,1)));
   menu->actions().front()->trigger(); settle();
   check(xy->data()->constBegin()->key>originalStart && rho->graph(5)->data()->size()==1,"Masking did not refit the guide");
@@ -1684,7 +1863,8 @@ void workflow(const QString &directory)
   checkNear(value(rho, 9, 1.), 10.); checkNear(value(rho, 9, .25), 40.);
   check(std::isnan(value(rho, 9, .5)), "Missing response should break the line");
   checkNear(value(phase, 9, .5), 60.); checkNear(value(phase, 10, 1.), 45.);
-  checkNear(value(tipper, 8, 1.), 0.); checkNear(value(tensor, 8, .25), .75);
+  check(tipper.graph(8)->data()->isEmpty() && tensor.graph(8)->data()->isEmpty(),
+        "TF strips retained scalar response curves");
   check(tipper.graph(9)->data()->isEmpty() && tensor.graph(9)->data()->isEmpty(),
         "Absent response component produced a curve");
   widget<QAction>(window, "actionFit_statistics")->trigger();
@@ -1764,22 +1944,13 @@ void workflow(const QString &directory)
     check_visibility(tipper, mask);
   }
   set_visibility(tipper, 1);
-  widget<QAction>(window, "actionTipper_arrows")->setChecked(true);
   check(tipper.graph(0)->visible() && !tipper.graph(2)->visible() && tipper.legend->itemCount() == 2 &&
-        tipper.graph(0)->name() == "Real Tzx", "Tipper arrow projection is not identified");
+        tipper.graph(0)->name() == "Real", "Tipper vector visibility is not identified");
   check(tipper.findChildren<QCheckBox *>().size() == 2, "Arrow legend should have one checkbox per vector");
-  bool projectedResponse = false;
-  for(int i = 0; i < tipper.itemCount(); ++i)
-    if(auto *arrow = dynamic_cast<QCPItemLine *>(tipper.item(i))) {
-      checkNear(arrow->end->coords().y(), 0.);
-      if(std::abs(arrow->end->coords().x() - 18.) < 1e-10) projectedResponse = true;
-    }
-  check(projectedResponse, "Selected tipper response projection is missing");
   component_box(tipper, 0)->click();
   check(tipper.itemCount() == 0 && tipper.legend->itemCount() == 2, "Hidden arrows should leave usable legend controls");
   component_box(tipper, 0)->click();
-  check(tipper.graph(0)->visible() && tipper.graph(0)->name() == "Real Tzx", "Restoring arrows lost the selected projection");
-  widget<QAction>(window, "actionTipper_arrows")->setChecked(false);
+  check(tipper.graph(0)->visible() && tipper.graph(0)->name() == "Real", "Restoring arrows lost the selected vector");
   check_visibility(tipper, 1);
   set_visibility(tipper, 5);
   check_visibility(tipper, 5);
@@ -1882,6 +2053,17 @@ void workflow(const QString &directory)
     check_visibility(*widget<QCustomPlot>(restored, name), 6);
   check_visibility(*widget<QCustomPlot>(restored, "plot21"), 5);
   const auto version6Project = directory + "/independent-legends-v6.mtd";
+  auto *projectedTipper = widget<QCustomPlot>(restored, "plot21");
+  check(projectedTipper->graph(0)->name() == "Real Tzx" && projectedTipper->graph(2)->name() == "Imaginary Tzx",
+        "Legacy component choices lost their arrow projection");
+  file_action(restored, "actionLoad_responses", {second});
+  bool projectedResponse = false;
+  for(int i = 0; i < projectedTipper->itemCount(); ++i)
+    if(auto *arrow = dynamic_cast<QCPItemLine *>(projectedTipper->item(i)))
+      if(arrow->pen().style() == Qt::DashLine && std::abs(arrow->end->coords().x() - 18.) < 1e-10) {
+        checkNear(arrow->end->coords().y(), 0.); projectedResponse = true;
+      }
+  check(projectedResponse, "Legacy projected response arrows are missing");
   {
     std::ofstream output(version6Project.toStdString(), std::ios::binary);
     boost::archive::binary_oarchive archive(output);
@@ -1900,8 +2082,8 @@ void real_run(const QString &project, const QString &directory, const QString &s
   MainWindow window;
   file_action(window, "actionLoad_project", {project});
   for(const auto *name: {"plot11", "plot12", "plot21", "plot22"})
-    for(int i = 0; i < 4; ++i)
-      check(component_box(*widget<QCustomPlot>(window, name), i)->isChecked(),
+    for(auto *box: widget<QCustomPlot>(window, name)->findChildren<QCheckBox *>())
+      check(box->isChecked(),
             "Older projects should show all components by default");
   QStringList paths;
   for(const auto &file: QDir(directory).entryList({"*_predicted_iter*.txt"}, QDir::Files, QDir::Name))
@@ -2076,7 +2258,7 @@ int main(int argc, char **argv)
   try {
     check(directory.isValid(), "No temporary directory");
     if(argc >= 3) real_run(argv[1], argv[2], argc >= 4 ? argv[3] : QString(), argc >= 5 && QString(argv[4]) == "mixed");
-    else { station_selection_edits(directory.path()); rho_plus_overlay(directory.path()); map_backgrounds(directory.path()); linked_mask_tests(directory.path()); edi_import_tests(directory.path()); statistics(directory.path()); gofem_responses(directory.path()); period_maps(directory.path()); period_resampling_tests(directory.path()); resampling_project_workflow(directory.path()); survey_reports(directory.path()); workflow(directory.path()); }
+    else { tensor_strip(); station_selection_edits(directory.path()); rho_plus_overlay(directory.path()); map_backgrounds(directory.path()); linked_mask_tests(directory.path()); edi_import_tests(directory.path()); statistics(directory.path()); gofem_responses(directory.path()); period_maps(directory.path()); period_resampling_tests(directory.path()); resampling_project_workflow(directory.path()); survey_reports(directory.path()); workflow(directory.path()); }
     std::cout << "Response import, curves and project workflow checks passed.\n";
   } catch(const std::exception &e) {
     std::cerr << e.what() << '\n';

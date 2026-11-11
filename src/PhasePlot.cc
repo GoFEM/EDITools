@@ -92,6 +92,7 @@ void PhasePlot::wrap_yx_yy_to_first_quadrant(std::vector<dvector> &phase) const
 
   for(unsigned component: {2u, 3u})
   {
+    if(m_diagonalAxes && component == 3) continue;
     for(auto &value: phase[component])
     {
       if(value >= -180.0 && value <= -90.0)

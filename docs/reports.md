@@ -2,7 +2,16 @@
 
 [Guide contents](README.md) · [← Profile analysis](profiles.md) · [Period layout and resampling →](periods.md)
 
+- [Current plot image](#current-plot-image)
 - [Survey PDF report](#survey-pdf-report)
+
+## Current plot image
+
+Use **Report → Plot image** to save a PNG of the selected station's TF view:
+the two impedance columns, induction arrows and phase-tensor ellipses. The
+image includes the current zoom, component visibility, masks, error bars and
+calculated response overlays. This exports the displayed layout without
+changing the survey.
 
 ## Survey PDF report
 
@@ -13,6 +22,8 @@ with station names, period coverage, full/partial/masked/missing period counts a
 response fit statistics. Each station page places resistivity, phase, tipper and
 phase-tensor plots beside a map highlighting that station. Station tippers can
 be exported as lines or arrows; masked samples interrupt observation lines.
+PDF station pages retain their own four-plot layout and scalar PT components;
+use **Plot image** when you want the main TF layout.
 
 Local project paths are omitted from the report. Response labels use only the
 filename, without directories or machine names.

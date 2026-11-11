@@ -72,7 +72,10 @@ def write_launch_note(output, platform, source_ref):
         f'EDITools\n\nExtract the entire archive. {launch}\n'
         'Keep the bundled files together. No separate installation is needed.\n'
         'Offline geographic map layers are included.\n\n'
-        'Help: https://github.com/GoFEM/EDITools#usage\n'
+        'The main TF view shows XY/YX and XX/YY columns, induction arrows,\n'
+        'and phase-tensor ellipses. XY edits also affect XX; YX edits also affect YY.\n'
+        'Undo/Redo restores paired and linked masks.\n\n'
+        f'Help: https://github.com/GoFEM/EDITools/blob/{source_ref}/docs/README.md\n'
         'Licenses and dependency details: licenses.zip (no extraction needed).\n'
         f'Source and build instructions: https://github.com/GoFEM/EDITools/tree/{source_ref}#building\n', encoding='utf-8')
 

@@ -69,7 +69,7 @@ bool editGroupMasks(QWidget *parent, MTSurveyData &survey,
     for(unsigned c = first; c < end; ++c) {
       auto *box = components[c] = new QCheckBox(labels[c], group);
       box->setObjectName("groupMask" + labels[c]); column->addWidget(box);
-      box->setToolTip(QObject::tr("Edit this component at the chosen periods. Z shares its mask with apparent resistivity and phase; complex components share real/imaginary masks."));
+      box->setToolTip(QObject::tr("Edit this component at the chosen periods. Z shares its mask with apparent resistivity and phase; complex components share real/imaginary masks. Zxy also edits Zxx; Zyx also edits Zyy, independently of Link Z / PT."));
     }
     column->addStretch(); groups->addWidget(group);
   }
@@ -111,11 +111,8 @@ bool editGroupMasks(QWidget *parent, MTSurveyData &survey,
     for(auto *item : periods->selectedItems()) chosen.insert(item->data(Qt::UserRole).toDouble());
     std::set<RealDataType> selected;
     for(unsigned c = 0; c < types.size(); ++c) if(components[c]->isChecked()) {
-      selected.insert(types[c]);
-      if(linked->isChecked()) {
-        const auto &related = MTStationData::linked_mask_types(types[c]);
-        selected.insert(related.begin(), related.end());
-      }
+      const auto targets = MTStationData::mask_edit_types(types[c], linked->isChecked());
+      selected.insert(targets.begin(), targets.end());
     }
     size_t total = 0;
     const bool enabled = operation->currentIndex() == 1;

@@ -44,7 +44,7 @@ public:
   void  keyPressEvent(QKeyEvent *event)
   {
     if(event->key() == Qt::Key_X)
-      axisRect()->setRangeZoomAxes(nullptr, this->yAxis);
+      for(auto *rect: axisRects()) rect->setRangeZoomAxes(nullptr, rect->axis(QCPAxis::atLeft));
     else if(event->key() == Qt::Key_D)
       setSelectionRectMode(QCP::srmNone);
 
@@ -54,7 +54,7 @@ public:
   void keyReleaseEvent(QKeyEvent *event)
   {
     if(event->key() == Qt::Key_X)
-      axisRect()->setRangeZoomAxes(this->xAxis, this->yAxis);
+      for(auto *rect: axisRects()) rect->setRangeZoomAxes(rect->axis(QCPAxis::atBottom), rect->axis(QCPAxis::atLeft));
     else if(event->key() == Qt::Key_D)
       setSelectionRectMode(QCP::srmSelect);
 
@@ -72,11 +72,12 @@ public:
 
   virtual void set_observed_data(MTStationData &data, bool rescaleAxes = true) = 0;
   virtual void set_predicted_data(const MTStationData &data, bool rescaleAxes = false) = 0;
-  void clear_predicted_data();
-  void clear_observed_data();
+  virtual void clear_predicted_data();
+  virtual void clear_observed_data();
   void set_mask_preview(const std::vector<std::pair<RealDataType, double>> &edits);
 
   void set_associated_plot(MTDataPlot &plot);
+  void set_split_components(bool split);
 
   void set_error_bars_visible(bool on);
   void set_component_visibility(const std::array<bool, 4> &visible);
@@ -101,7 +102,7 @@ public slots:
   void unmaskSelectedData();
   void dataSelected(bool selected);
   void plotContextRequest(QPoint pos);
-  void showPointToolTip(QMouseEvent* event);
+  virtual void showPointToolTip(QMouseEvent* event);
 
 protected:
   virtual void apply_component_visibility();
@@ -143,6 +144,8 @@ protected:
   bool m_errorBarsVisible = true;
   bool m_linkTensorMasks = true;
   std::vector<QCPItemTracer *> m_maskPreview;
+  QCPAxisRect *m_diagonalAxes = nullptr;
+  QCPLegend *m_diagonalLegend = nullptr;
 };
 
 #endif

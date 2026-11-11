@@ -5,11 +5,11 @@ A simple GUI tool to work with large collections of [Magnetitelluric](https://en
 
 ## Features
 
-- Visualize all transfer functions
+- View transfer functions in a single layout: XY/YX and XX/YY columns, induction arrows, and phase-tensor ellipses
 - Assign error floors (with a proper error propagation from impedances to derived quantities such as apparent resistivity, phase or phase tensor)
 - Decimate data
 - Export a PDF survey report or a PNG image of the current plots
-- Mask any data
+- Mask data with paired XY/XX and YX/YY edits, optional Z/PT links, automatic previews, and undo/redo
 - Save/Load a project with all masking and settings preserved
 - Export selected data in supported inversion formats.
 - Overlay computed inversion responses on observed data.
@@ -119,6 +119,7 @@ The libraries remain dynamically linked and replaceable.
 Read the [user guide and full table of contents](docs/README.md).
 
 - [Getting started](docs/getting-started.md)
+- [Transfer-function view](docs/getting-started.md#transfer-function-view)
 - [Editing and masking](docs/editing.md)
 - [Response analysis](docs/analysis.md)
 - [Maps and geographic layers](docs/maps.md)

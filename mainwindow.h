@@ -83,7 +83,6 @@ private slots:
   void on_actionActivate_masking_mode_toggled(bool on);
   void on_actionPhase_wrap_toggled(bool on);
   void on_actionShow_station_names_toggled(bool on);
-  void on_actionTipper_arrows_toggled(bool on);
   void on_actionSave_as_PDF_triggered();
   void on_actionPlot_axis_ranges_triggered();
 
@@ -231,6 +230,8 @@ private:
   void rememberDirectory(const QString &path);
   PlotOptions currentPlotOptions() const;
   void applyPlotOptions(const PlotOptions &options);
+  void setupTransferFunctionView();
+  bool syncingPeriods = false;
 
 private:
   Ui::MainWindow *ui;

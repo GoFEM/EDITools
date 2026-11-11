@@ -226,10 +226,9 @@ Edits maskPlan(const MTSurveyData &survey, const std::vector<Point> &points,
   if(checked.size() != points.size()) throw std::invalid_argument("Mask selection size mismatch.");
   std::map<std::string, std::set<std::pair<RealDataType, double>>> unique;
   for(unsigned i = 0; i < points.size(); ++i) if(checked[i]) {
-    const auto &p = points[i]; auto &changes = unique[p.station]; changes.emplace(p.component, p.frequency);
-    if(p.component != RealZxy && p.component != RealZyx) continue;
-    if(pairDiagonals) changes.emplace(p.component == RealZxy ? RealZxx : RealZyy, p.frequency);
-    if(linkTensorMasks) for(auto type : MTStationData::linked_mask_types(p.component)) changes.emplace(type, p.frequency);
+    const auto &p = points[i]; auto &changes = unique[p.station];
+    for(auto type: MTStationData::mask_edit_types(p.component, linkTensorMasks, pairDiagonals))
+      changes.emplace(type, p.frequency);
   }
   Edits result;
   for(const auto &entry : unique) {

@@ -73,21 +73,21 @@ void group_mask_tests(const QString &directory) {
     for(unsigned pane = 0; pane < 4; ++pane)
       check(plotted(d, pane, "observed") == 20 && plotted(d, pane, "pending") == 0, "Preview omitted station curves or included unselected stations");
     zxy(d);
-    check(plotted(d, 0, "pending") == 5 && plotted(d, 1, "pending") == 5 && plotted(d, 2, "pending") == 0 && plotted(d, 3, "pending") == 20,
+    check(plotted(d, 0, "pending") == 10 && plotted(d, 1, "pending") == 10 && plotted(d, 2, "pending") == 0 && plotted(d, 3, "pending") == 20,
           "Plotted changes disagree with Z/PT masking plan");
     auto *plot = control<QCustomPlot>(d, "groupMaskPlot0");
     plot->xAxis->setRange(1., 5.); plot->yAxis->setRange(.01, 1.);
     control<QCheckBox>(d, "groupMaskVisible0_1")->setChecked(false);
     control<QCheckBox>(d, "groupMaskLink")->setChecked(false);
-    check(plotted(d, 0, "pending") == 5 && plotted(d, 3, "pending") == 0, "Visibility changed masking or stale linked markers remained");
+    check(plotted(d, 0, "pending") == 10 && plotted(d, 3, "pending") == 0, "Visibility changed masking or stale linked markers remained");
     check(plot->xAxis->range() == QCPRange(1., 5.) && plot->yAxis->range() == QCPRange(.01, 1.) &&
           control<QCustomPlot>(d, "groupMaskPlot2")->xAxis->range() == plot->xAxis->range(), "Preview lost zoom or period-axis synchronization");
     for(int i = 0; i < plot->graphCount(); ++i) if(plot->graph(i)->property("component").toUInt() == 1)
       check(!plot->graph(i)->visible(), "Component visibility omitted some station curves or highlights");
     control<QCheckBox>(d, "groupMaskLink")->setChecked(true);
     auto *table = control<QTableWidget>(d, "groupMaskPreview");
-    check(table->rowCount() == 2 && table->item(0, 2)->text() == "3" && table->item(0, 3)->text() == "0" &&
-          table->item(0, 4)->text() == "12" && table->item(1, 2)->text() == "2", "Linked preview counts or disabled-station scope wrong");
+    check(table->rowCount() == 2 && table->item(0, 2)->text() == "6" && table->item(0, 3)->text() == "0" &&
+          table->item(0, 4)->text() == "12" && table->item(1, 2)->text() == "4", "Linked preview counts or disabled-station scope wrong");
     const auto artifacts = qEnvironmentVariable("EDITOOLS_TEST_ARTIFACT_DIR");
     if(!artifacts.isEmpty()) {
       control<QCheckBox>(d, "groupMaskVisible0_1")->setChecked(true);
@@ -103,13 +103,13 @@ void group_mask_tests(const QString &directory) {
     control<QLineEdit>(d, "groupMaskLower")->setText("nan");
     check(!control<QPushButton>(d, "groupMaskApply")->isEnabled(), "Nonfinite range allowed");
     control<QLineEdit>(d, "groupMaskLower")->setText("1e0");
-    check(plotted(d, 0, "pending") == 2 && plotted(d, 3, "pending") == 8, "Range markers included nearby periods");
+    check(plotted(d, 0, "pending") == 4 && plotted(d, 3, "pending") == 8, "Range markers included nearby periods");
   }), "Inclusive range did not apply");
   for(const auto *name : {"A", "B"}) {
     const auto &s = survey.get_station_data(name);
     for(unsigned i = 0; i < s.frequencies().size(); ++i) {
       const bool enabled = s.frequencies()[i] != 1.;
-      check(s.impedance_mask(true)[1][i] == enabled && s.impedance_mask(true)[0][i] && s.impedance_mask(true)[2][i] && s.impedance_mask(true)[3][i], "Z selection propagated to other Z components");
+      check(s.impedance_mask(true)[1][i] == enabled && s.impedance_mask(true)[0][i] == enabled && s.impedance_mask(true)[2][i] && s.impedance_mask(true)[3][i], "Z selection missed its diagonal or changed the other pair");
       for(unsigned c = 0; c < 4; ++c) check(s.phase_tensor_mask(true)[c][i] == enabled, "Z/PT link missed a component or period");
       check(s.tipper_mask(true)[0][i] && s.tipper_mask(true)[1][i], "Z masking changed tippers");
     }
@@ -117,7 +117,7 @@ void group_mask_tests(const QString &directory) {
   check(review(survey, true, true, [](QDialog &d) {
     control<QComboBox>(d, "groupMaskOperation")->setCurrentIndex(1);
     control<QCheckBox>(d, "groupMaskPTxy")->setChecked(true);
-    check(plotted(d, 0, "masked") == 2 && plotted(d, 0, "observed") == 18 && plotted(d, 0, "pending") == 2 &&
+    check(plotted(d, 0, "masked") == 4 && plotted(d, 0, "observed") == 16 && plotted(d, 0, "pending") == 4 &&
           plotted(d, 3, "pending") == 2, "Unmask preview lost masked data or included unrelated PT entries");
     auto *plot = control<QCustomPlot>(d, "groupMaskPlot0");
     for(int i = 0; i < plot->graphCount(); ++i) if(plot->graph(i)->property("maskState") == "pending" && plot->graph(i)->dataCount())
@@ -155,4 +155,21 @@ void group_mask_tests(const QString &directory) {
   check(review(survey, true, true, [&](QDialog &d) { all(d); control<QComboBox>(d, "groupMaskOperation")->setCurrentIndex(1); }), "Unmask all failed");
   check(bytes(survey) == bytes(original), "Unmask all did not restore original flags");
   check(!review(survey, false, true, [&](QDialog &d) { all(d); control<QPushButton>(d, "groupMaskClear")->click(); }), "Clear components still applied changes");
+  for(bool enabled: {false, true}) {
+    check(review(survey, false, true, [&](QDialog &d) {
+      control<QCheckBox>(d, "groupMaskZyx")->setChecked(true);
+      control<QComboBox>(d, "groupMaskOperation")->setCurrentIndex(enabled ? 1 : 0);
+      check(plotted(d, 0, "pending") == 10 && plotted(d, 3, "pending") == 0,
+            "Unlinked group preview missed YX/YY pairing or changed PT");
+    }), "Unlinked YX/YY group edit did not apply");
+    for(const auto *name: {"A", "B"}) {
+      const auto &s = survey.get_station_data(name);
+      for(unsigned i = 0; i < s.frequencies().size(); ++i)
+        check(s.impedance_mask(true)[0][i] && s.impedance_mask(true)[1][i] &&
+              s.impedance_mask(true)[2][i] == enabled && s.impedance_mask(true)[3][i] == enabled,
+              "Unlinked group operation edited the wrong pair");
+      check(s.phase_tensor_mask(true) == original.get_station_data(name).phase_tensor_mask(true), "Unlinked group operation changed PT");
+    }
+  }
+  check(bytes(survey) == bytes(original), "Paired group unmask did not restore the survey");
 }

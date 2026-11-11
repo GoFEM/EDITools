@@ -285,8 +285,7 @@ struct ImpedanceValidityWindow::Impl {
       entry.candidates=rhoPlusOutliers(result,threshold->value());
       const auto type=entry.quantity==Quantity::XY ? RealZxy : RealZyx;
       const auto diagonal=entry.quantity==Quantity::XY ? RealZxx : RealZyy;
-      std::vector<RealDataType> types{type,diagonal};
-      if(linkTensorMasks) for(auto related:MTStationData::linked_mask_types(type)) types.push_back(related);
+      const auto types = MTStationData::mask_edit_types(type, linkTensorMasks);
       for(auto index:entry.candidates) {
         const auto &freqs=s.frequencies();
         const auto found=std::find_if(freqs.begin(),freqs.end(),[&](double f){return 1./f==result.observed[index].period;});

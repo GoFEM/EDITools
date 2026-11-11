@@ -169,7 +169,6 @@
     <addaction name="actionShow_error_bars"/>
     <addaction name="actionPhase_wrap"/>
     <addaction name="actionShow_station_names"/>
-    <addaction name="actionTipper_arrows"/>
     <addaction name="actionActivate_masking_mode"/>
     <addaction name="actionPlot_axis_ranges"/>
     <addaction name="actionSave_as_PDF"/>
@@ -281,14 +280,6 @@
    </property>
    <property name="text">
     <string>Show station names</string>
-   </property>
-  </action>
-  <action name="actionTipper_arrows">
-   <property name="checkable">
-    <bool>true</bool>
-   </property>
-   <property name="text">
-    <string>Tipper arrows</string>
    </property>
   </action>
   <action name="actionSave_as_PDF">

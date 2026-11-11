@@ -11,14 +11,15 @@
 ## Component visibility
 
 Component colors use two families: **XX / XY** are light / dark blue, and
-**YX / YY** are dark / light orange. Tippers retain their blue/light-blue **Tzx**
-and orange/yellow **Tzy** palette for real/imaginary parts. The same colors identify observed
-points, error bars, response lines, legends and survey PDF plots.
+**YX / YY** are dark / light orange. The same colors identify observed impedance
+points, error bars, response lines, legends and survey PDF plots. Induction arrows
+use black for real and grey for imaginary values, with pale grey for masked data.
+Scalar tipper plots in analysis windows and reports retain the blue/orange palette.
 
-Each plot's legend has one checkbox per component. Uncheck **XX** and **YY**
+Each impedance plot's legend has one checkbox per component. Uncheck **XX** and **YY**
 to keep only off-diagonal impedances, or leave just one component checked.
-Tipper legends offer **Re / Im Tzx / Tzy** in scalar mode and **Real / Imaginary**
-in arrow mode. Hidden components remain in the legend so they can be restored.
+Tipper legends offer **Real / Imaginary** arrows, and the phase-tensor strip has
+one **PT** checkbox. Hidden components remain in the legend so they can be restored.
 Click the checkbox or label, or use Tab and Space with the keyboard.
 
 Each checkbox controls that plot's observed points, error bars and computed
@@ -28,10 +29,17 @@ with their selected direction, and toggling them preserves that projection.
 
 ## Linked impedance and phase-tensor masks
 
+Masking or unmasking **XY** also edits **XX**, and **YX** also edits **YY**, at
+the same periods. This applies to resistivity and phase plots, inverted masks,
+station component controls and group masking, including hidden diagonals.
+Selecting a diagonal does not edit its off-diagonal partner. Rho+ uses the same
+pairs; auto masking pairs them by default through **Pair diagonals**.
+
 **Edit → Link Z / PT** is on by default and saved with the project.
 It links mask/unmask operations from plots (including inverted masking),
-station component controls, and period maps. Turning it off restores independent
-editing; toggling the option does not change existing masks. Tippers are independent.
+station component controls, and period maps. Turning it off separates Z from PT;
+diagonal pairing still applies. Toggling the option does not change existing masks.
+Tippers are independent.
 
 The link follows the general phase tensor definition `Phi = Re(Z)^-1 Im(Z)`.
 Each PT entry depends on all four real impedance entries, so there is no general
@@ -42,8 +50,8 @@ See [Caldwell et al. (2004), equations 13–15](https://doi.org/10.1111/j.1365-2
 Because each complex impedance component shares a real/imaginary mask, masking
 one Z component (or its apparent resistivity/phase) also masks **all four PT
 entries at that period**. Masking one PT entry also masks **all four Z components
-at that period**. This applies only to the opposite tensor: it does not recursively
-change the other entries in the starting tensor. Unmasking applies the same links.
+at that period**. These Z/PT links do not propagate recursively; diagonal pairing
+is applied separately. Unmasking applies the same links.
 For inverted selections, a mask takes precedence if multiple selected components
 give conflicting instructions for a shared dependent entry.
 
@@ -57,9 +65,9 @@ Individual periods match exactly; nearby periods are not merged or interpolated.
 
 The preview shows matching periods and changes to Z, tipper and PT masks per
 station, including linked components. **Link Z / PT** starts with the main setting
-and can be overridden for this operation. Links affect only the opposite tensor;
-tippers stay independent. Component choices here are explicit and independent of
-main-plot visibility. Selected disabled stations are included without enabling them.
+and can be overridden for this operation. Zxy also edits Zxx, and Zyx also edits
+Zyy, regardless of that setting; tippers stay independent. Component choices are
+independent of main-plot visibility. Selected disabled stations are included without enabling them.
 Counts describe mask flags, including flags for missing values; unmasking does not
 create data. **Apply** makes one undoable edit; **Cancel** leaves masks unchanged.
 

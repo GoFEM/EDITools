@@ -29,6 +29,7 @@ public:
 
   void set_observed_data(MTStationData &data, bool rescaleAxes = true);
   void set_predicted_data(const MTStationData &data, bool rescaleAxes = false);
+  void clear_observed_data() override;
   void set_arrow_mode(bool on);
   bool arrow_mode() const;
 

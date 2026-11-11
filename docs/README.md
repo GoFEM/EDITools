@@ -9,6 +9,7 @@
 - [Command ribbon](getting-started.md#command-ribbon)
 - [EDI import and nearby periods](getting-started.md#edi-import-and-nearby-periods)
 - [Computed responses](getting-started.md#computed-responses)
+- [Transfer-function view](getting-started.md#transfer-function-view)
 - [Plot hotkeys](getting-started.md#plot-hotkeys)
 
 ### [Editing and masking](editing.md)
@@ -45,6 +46,7 @@
 
 ### [Survey reports](reports.md)
 
+- [Current plot image](reports.md#current-plot-image)
 - [Survey PDF report](reports.md#survey-pdf-report)
 
 ### [Period layout and resampling](periods.md)

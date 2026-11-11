@@ -261,7 +261,7 @@ MainWindow::MainWindow(QWidget *parent) :
   linkTensorMasksAction = ui->menuData->addAction(tr("Link Z / PT masks"));
   linkTensorMasksAction->setObjectName("actionLink_tensor_masks");
   linkTensorMasksAction->setCheckable(true); linkTensorMasksAction->setChecked(true);
-  linkTensorMasksAction->setToolTip(tr("Link mask and unmask edits at the same period: a selected Z component affects all PT entries; a selected PT entry affects all Z components. Phi = Re(Z)^-1 Im(Z), so there is no one-to-one mapping in general 3D. Other components in the starting tensor and tippers are unchanged. Toggling this option does not alter existing masks."));
+  linkTensorMasksAction->setToolTip(tr("Link mask and unmask edits at the same period: a selected Z component affects all PT entries; a selected PT entry affects all Z components. Phi = Re(Z)^-1 Im(Z), so there is no one-to-one mapping in general 3D. Independently, Zxy edits also affect Zxx, and Zyx edits also affect Zyy. Tippers remain independent. Toggling this option does not alter existing masks."));
   connect(linkTensorMasksAction, &QAction::toggled, this, [this](bool on) {
     for(const auto &plot: plotHandlers) plot->set_link_tensor_masks(on);
     if(periodMaps) periodMaps->setLinkTensorMasks(on);
@@ -346,8 +346,35 @@ MainWindow::MainWindow(QWidget *parent) :
 
   lastDirectory = QSettings().value("lastDirectory", QDir::homePath()).toString();
 
+  setupTransferFunctionView();
+  for(auto *plot: {plot11, plot12, plot21, plot22})
+    connect(plot->xAxis, qOverload<const QCPRange &>(&QCPAxis::rangeChanged), this, [this](const QCPRange &range) {
+      if(syncingPeriods) return;
+      syncingPeriods = true;
+      for(auto *other: {plot11, plot12, plot21, plot22}) {
+        other->xAxis->setRange(range); other->replot(QCustomPlot::rpQueuedReplot);
+      }
+      syncingPeriods = false;
+    });
   setupRibbon();
   this->showMaximized();
+}
+
+void MainWindow::setupTransferFunctionView()
+{
+  ui->splitter_2->setOrientation(Qt::Vertical);
+  ui->splitter->setOrientation(Qt::Vertical);
+  for(int i = 0; i < 2; ++i) plotHandlers[i]->set_split_components(true);
+  for(int column = 0; column < 2; ++column) {
+    auto *margins = new QCPMarginGroup(plot11);
+    for(auto *plot: {plot11, plot12})
+      plot->axisRect(column)->setMarginGroup(QCP::msLeft | QCP::msRight, margins);
+  }
+  static_cast<PhaseTensorPlot *>(plotHandlers[3].get())->set_ellipse_mode(true);
+  static_cast<TipperPlot *>(plotHandlers[2].get())->set_arrow_mode(true);
+  ui->splitter_4->setSizes({650, 350});
+  ui->splitter_2->setSizes({350, 300});
+  ui->splitter->setSizes({170, 180});
 }
 
 void MainWindow::setupRibbon()
@@ -391,7 +418,7 @@ void MainWindow::setupRibbon()
     {tr("&Report"), {
       {tr("Export figures"), {command("actionExport_survey_report", tr("Survey PDF"), "document-pdf", true), command("actionSave_as_PDF", tr("Plot image"), "image")}},
       {tr("Plot display"), {command("actionPlot_axis_ranges", tr("Axis ranges"), "arrow-expand"), command("actionShow_error_bars", tr("Error bars"), "ruler"),
-        command("actionPhase_wrap", tr("Wrap phase"), "arrow-repeat-all"), command("actionTipper_arrows", tr("Tipper arrows"), "arrow-trending-lines")}}}}
+        command("actionPhase_wrap", tr("Wrap phase"), "arrow-repeat-all")}}}}
   };
   ui->actionAbout_EDI_Tools->setIcon(commandIcon("info"));
   new CommandRibbon(*this, {open, save, undo, redo}, pages, ui->actionAbout_EDI_Tools);
@@ -488,7 +515,6 @@ void MainWindow::applyPlotOptions(const PlotOptions &options)
   linkTensorMasksAction->setChecked(options.linkTensorMasks);
   const QSignalBlocker phaseBlock(ui->actionPhase_wrap);
   const QSignalBlocker namesBlock(ui->actionShow_station_names);
-  const QSignalBlocker arrowsBlock(ui->actionTipper_arrows);
   const size_t nAxes = std::min(options.axes.size(), plotHandlers.size());
   for(size_t i = 0; i < nAxes; ++i)
   {
@@ -502,17 +528,12 @@ void MainWindow::applyPlotOptions(const PlotOptions &options)
     const QSignalBlocker block(mapStationNames);
     mapStationNames->setChecked(options.showStationNames);
   }
-  ui->actionTipper_arrows->setChecked(options.tipperArrows);
   if(plotHandlers.size() > 1)
   {
     if(auto *phasePlot = dynamic_cast<PhasePlot*>(plotHandlers[1].get()))
       phasePlot->set_phase_wrap(options.phaseWrap);
   }
-  if(plotHandlers.size() > 2)
-  {
-    if(auto *tipperPlot = dynamic_cast<TipperPlot*>(plotHandlers[2].get()))
-      tipperPlot->set_arrow_mode(options.tipperArrows);
-  }
+  // Keep reading the legacy tipperArrows archive field; the main view always uses arrows.
   mapHandler->set_station_names_visible(options.showStationNames);
   for(unsigned i = 0; i < plotHandlers.size(); ++i)
     plotHandlers[i]->set_component_visibility(options.componentVisible[i]);
@@ -652,6 +673,11 @@ void MainWindow::updatePlots(bool rescaleAxes)
                              "\t\t\t# path: " + data.file_path().c_str());
   rhoPlusOverlay->update(&data,rhoPlusAction->isChecked(),ui->actionPhase_wrap->isChecked(),
     plotHandlers[0]->component_visibility(),plotHandlers[1]->component_visibility(),rhoPlusOptions);
+  if(rescaleAxes && !data.frequencies().empty()) {
+    const auto bounds = std::minmax_element(data.frequencies().begin(), data.frequencies().end());
+    if(*bounds.first > 0. && std::isfinite(*bounds.second))
+      plot11->xAxis->setRange(.5 / *bounds.second, 2. / *bounds.first);
+  }
 }
 
 void MainWindow::stationSelected(const QCPDataSelection &selection)
@@ -677,7 +703,8 @@ void MainWindow::maskDataType(bool on)
   QAction* action = qobject_cast<QAction*>(sender());
   const RealDataType type = static_cast<RealDataType>(action->data().toInt());
 
-  mtSurvey->get_station_data(station_name).mask_type(type, on, linkTensorMasksAction->isChecked());
+  for(auto target: MTStationData::mask_edit_types(type, linkTensorMasksAction->isChecked()))
+    mtSurvey->get_station_data(station_name).mask_type(target, on);
   history->record(tr("Edit component masks"));
 
   updatePlots();
@@ -1042,17 +1069,6 @@ void MainWindow::on_actionShow_station_names_toggled(bool on)
   const QSignalBlocker block(mapStationNames);
   mapStationNames->setChecked(on);
   mapHandler->set_station_names_visible(on);
-}
-
-void MainWindow::on_actionTipper_arrows_toggled(bool on)
-{
-  if(plotHandlers.size() > 2)
-  {
-    if(auto *tipperPlot = dynamic_cast<TipperPlot*>(plotHandlers[2].get()))
-      tipperPlot->set_arrow_mode(on);
-  }
-
-  updatePlots();
 }
 
 void MainWindow::on_stationList_customContextMenuRequested(const QPoint &pos)

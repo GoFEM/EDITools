@@ -88,6 +88,12 @@ void TipperPlot::set_layout()
                  {"Im Tzx", ImagTzx}, {"Im Tzy", ImagTzy}};
 }
 
+void TipperPlot::clear_observed_data()
+{
+  clear_arrow_items();
+  MTDataPlot::clear_observed_data();
+}
+
 void TipperPlot::set_arrow_mode(bool on)
 {
   m_arrowMode = on;

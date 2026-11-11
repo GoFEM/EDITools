@@ -5,12 +5,13 @@
 - [Command ribbon](#command-ribbon)
 - [EDI import and nearby periods](#edi-import-and-nearby-periods)
 - [Computed responses](#computed-responses)
+- [Transfer-function view](#transfer-function-view)
 - [Plot hotkeys](#plot-hotkeys)
 
 ## Command ribbon
 
-The compact ribbon groups commands into **Survey**, **Edit**, **Analysis**,
-**Maps** and **Report**. Open project, Save, Undo and Redo stay available in the
+The compact ribbon groups commands into **Survey**, **Edit**, **Auto mask**,
+**Analysis**, **Maps** and **Report**. Open project, Save, Undo and Redo stay available in the
 upper left. Component visibility controls remain beside their plots.
 
 Use the arrow or **Ctrl+F1** to collapse the commands; click a tab to expand them.
@@ -102,8 +103,10 @@ types are accepted. Rows may be unordered and sparse. Missing values leave
 gaps, valid zeros are preserved, and absent stations show no computed curves.
 Impedances produce resistivity, phase and phase-tensor curves where the necessary
 components exist; explicitly supplied derived values take precedence. Station
-names must match the observed survey for overlays and maps. Tippers follow the
-selected scalar/arrow display mode.
+names must match the observed survey for overlays and maps. In the main TF view,
+tipper responses appear as dashed arrows and phase tensors as unfilled ellipse
+outlines. Missing vector components or incomplete tensors are omitted; projects
+with saved tipper projections retain those projections.
 
 The original scalar values and separate real/imaginary errors are retained for
 fit statistics and project saving. GoFEM permits zero response errors for plotting;
@@ -114,6 +117,37 @@ scalar rows are reported with a line number.
 
 Reload GoFEM response files imported by older versions once to recover their
 original missing-value and error information, then save the project.
+
+## Transfer-function view
+
+The main plots always use the transfer-function (TF) layout: XY/YX on the left,
+XX/YY on the right, then full-width induction arrows and phase-tensor ellipses.
+This also applies when opening older projects.
+
+Component checkboxes control observations, errors, calculated responses and
+rho+ guides. The period axes pan and zoom together. Diagonal phases remain signed
+(−180° to 180° with automatic ranges); **Wrap phase** applies to YX.
+Fixed resistivity and phase ranges apply to both columns. Masking or
+unmasking XY also edits XX at the same periods; YX similarly edits YY, even if
+the paired diagonal is hidden. Selecting a diagonal leaves other impedance
+components unchanged. **Link Z / PT** independently controls the corresponding PT masks.
+
+Drag a rectangle around observations in either impedance column, then use the
+plot's context menu to **Mask**, **Unmask**, or apply an **Inverted Mask**. Masked
+points remain selectable. Hidden observations and calculated responses cannot
+be selected. For inverted masks, a mask takes precedence when selections give
+conflicting instructions for a paired diagonal or linked tensor entry.
+**Undo / Redo** restores the whole edit, including its paired and linked masks.
+
+Ellipses have equal major diameters, with geographic north up and east right.
+Their color shows the minimum principal phase on a fixed 0–90° scale (values
+outside that interval use the end colors). Grey ellipses are masked; unfilled
+outlines show the selected calculated response. Missing or undefined tensors
+are omitted. Select ellipse centers to mask/unmask all four PT entries at those
+periods. **Link Z / PT** controls the corresponding impedance masks; tipper masks
+remain independent. Use **Edit → Group masking** to inspect or mask individual
+PT entries. **Report → Plot image** exports the displayed layout; the survey PDF
+retains its own plot settings.
 
 ## Plot hotkeys
 

@@ -425,6 +425,34 @@ const std::vector<RealDataType> &MTStationData::linked_mask_types(RealDataType t
   }
 }
 
+std::vector<RealDataType> MTStationData::mask_edit_types(RealDataType type, bool linkTensorMasks,
+                                                      bool pairDiagonals)
+{
+  const std::array<RealDataType, 4> impedance{{RealZxx, RealZxy, RealZyx, RealZyy}};
+  std::vector<RealDataType> targets;
+  switch(type) {
+  case RealZxx: case RealZxy: case RealZyx: case RealZyy:
+  case ImagZxx: case ImagZxy: case ImagZyx: case ImagZyy:
+  case RhoZxx: case RhoZxy: case RhoZyx: case RhoZyy:
+  case PhsZxx: case PhsZxy: case PhsZyx: case PhsZyy: {
+    const auto column = type_to_column_table.at(type);
+    targets.push_back(impedance[column]);
+    if(pairDiagonals && (column == 1 || column == 2))
+      targets.push_back(column == 1 ? RealZxx : RealZyy);
+    break;
+  }
+  case RealTzx: case ImagTzx: targets.push_back(RealTzx); break;
+  case RealTzy: case ImagTzy: targets.push_back(RealTzy); break;
+  case PTxx: case PTxy: case PTyx: case PTyy: targets.push_back(type); break;
+  default: return targets;
+  }
+  if(linkTensorMasks) {
+    const auto &linked = linked_mask_types(type);
+    targets.insert(targets.end(), linked.begin(), linked.end());
+  }
+  return targets;
+}
+
 std::vector<bool> &MTStationData::mask_for(RealDataType type)
 {
   const auto it = type_to_column_table.find(type);
