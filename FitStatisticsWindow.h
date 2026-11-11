@@ -16,7 +16,8 @@ class MapBackground;
 class FitStatisticsWindow : public WorkspaceView
 {
 public:
-  FitStatisticsWindow(QWidget *parent, std::function<void()> refresh);
+  FitStatisticsWindow(QWidget *parent, std::function<void()> refresh, bool central = false);
+  SurveyCoordinates centralMapCoordinates() const override { return renderedCoordinates; }
   QJsonObject saveViewState() const override;
   void restoreViewState(const QJsonObject &state) override;
   void setData(const std::shared_ptr<MTSurveyData> &survey,
@@ -66,6 +67,7 @@ private:
   QCustomPlot *overall, *periods, *histogram, *components, *stations;
   QCustomPlot *mapA, *mapB, *heatA, *heatB;
   MapBackground *backgroundA, *backgroundB;
+  SurveyCoordinates renderedCoordinates;
   QCPColorScale *mapScaleA, *mapScaleB, *heatScaleA, *heatScaleB;
   std::vector<std::string> stationOrder;
   std::map<std::string, std::array<double, 3>> positions;

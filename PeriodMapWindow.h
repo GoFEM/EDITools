@@ -15,12 +15,14 @@
 
 class QPushButton;
 class MapBackground;
+class QTableWidget;
 
 class PeriodMapWindow : public WorkspaceView
 {
 public:
   using DisplaySettings = MapDisplaySettings;
-  explicit PeriodMapWindow(QWidget *parent, std::function<void()> observationsChanged = {});
+  explicit PeriodMapWindow(QWidget *parent, std::function<void()> observationsChanged = {}, bool central = false);
+  SurveyCoordinates centralMapCoordinates() const override { return renderedCoordinates; }
   DisplaySettings displaySettings() const;
   void setDisplaySettings(const DisplaySettings &settings);
   // Render using this window's data and styles. Use an independent window for reports.
@@ -61,6 +63,8 @@ private:
   QCheckBox *names, *tensors, *realArrows, *imagArrows, *reverseColors;
   QDoubleSpinBox *tolerance, *ellipseSize, *arrowSize, *arrowWidth, *colorMin, *colorMax;
   QCustomPlot *plot;
+  QTableWidget *detailsTable = nullptr;
+  SurveyCoordinates renderedCoordinates;
   MapBackground *background;
   QCPColorScale *colorScale;
   QCPTextElement *title, *note;

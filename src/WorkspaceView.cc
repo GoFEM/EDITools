@@ -20,7 +20,24 @@
 #include <QRegularExpression>
 
 WorkspaceView::WorkspaceView(QWidget *parent): QWidget(parent) {}
-WorkspaceView::~WorkspaceView() { for(const auto &page: pages) delete page.widget.data(); }
+WorkspaceView::~WorkspaceView() { for(const auto &map: sharedMaps) delete map.data(); for(const auto &page: pages) delete page.widget.data(); }
+
+void WorkspaceView::setCentralMaps(const QList<QWidget *> &maps, const QStringList &labels, const QString &toolPage)
+{
+  for(auto *map: maps) {
+    map->hide(); map->setParent(this); map->setMinimumSize(0, 0);
+    sharedMaps.append(map);
+  }
+  if(maps.size() > 1) {
+    auto *row = new QHBoxLayout;
+    auto *choice = new QComboBox(this); sharedMapChoice = choice; choice->setObjectName("sharedMapChoice"); choice->addItems(labels);
+    row->addWidget(new QLabel(tr("Map:"), this)); row->addWidget(choice);
+    connect(choice, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this] { emit centralMapChanged(); });
+    addToolGroup(toolPage, tr("Shared map"), row);
+  }
+}
+QWidget *WorkspaceView::centralMap() const { const int index = sharedMapChoice ? sharedMapChoice->currentIndex() : 0; return index >= 0 && index < sharedMaps.size() ? sharedMaps[index].data() : nullptr; }
+QList<QWidget *> WorkspaceView::centralMaps() const { QList<QWidget *> result; for(const auto &map: sharedMaps) if(map) result.append(map); return result; }
 
 void WorkspaceView::setEmbedded()
 {
@@ -111,7 +128,10 @@ QString WorkspaceView::exportName(const QString &extension) const {
 QJsonObject WorkspaceView::savePlotRanges(QWidget *content)
 {
   QJsonObject result;
-  for(auto *plot: content->findChildren<QCustomPlot *>()) if(!plot->objectName().isEmpty()) {
+  auto plots = content->findChildren<QCustomPlot *>();
+  if(auto *view = dynamic_cast<WorkspaceView *>(content)) for(auto *map: view->centralMaps())
+    if(auto *plot = qobject_cast<QCustomPlot *>(map)) if(!plots.contains(plot)) plots.append(plot);
+  for(auto *plot: plots) if(!plot->objectName().isEmpty()) {
     QJsonArray rects;
     for(auto *rect: plot->axisRects()) {
       const auto x = rect->axis(QCPAxis::atBottom)->range(), y = rect->axis(QCPAxis::atLeft)->range();
@@ -124,7 +144,10 @@ QJsonObject WorkspaceView::savePlotRanges(QWidget *content)
 
 void WorkspaceView::restorePlotRanges(QWidget *content, const QJsonObject &state)
 {
-  for(auto *plot: content->findChildren<QCustomPlot *>()) {
+  auto plots = content->findChildren<QCustomPlot *>();
+  if(auto *view = dynamic_cast<WorkspaceView *>(content)) for(auto *map: view->centralMaps())
+    if(auto *plot = qobject_cast<QCustomPlot *>(map)) if(!plots.contains(plot)) plots.append(plot);
+  for(auto *plot: plots) {
     const auto rects = state.value(plot->objectName()).toArray();
     for(int i = 0; i < rects.size() && i < plot->axisRectCount(); ++i) {
       const auto values = rects[i].toArray(); if(values.size() != 4) continue;

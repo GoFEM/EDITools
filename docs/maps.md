@@ -13,9 +13,10 @@ Use **Station names** below the small station map to show or hide its labels.
 The same option is available under **TF tools → Station names** and is saved
 with the project. New sessions start with names hidden.
 
-Click **Maps…** beside that checkbox, or **Views → PT / induction**, to open a map tab. Choose **Observed data** or a loaded
+Click **Maps…** beside that checkbox, or **Views → PT / induction**, to open a map tab. Its map uses the shared map area at the left, and the tab
+shows each station’s numerical values. Choose **Observed data** or a loaded
 computed response, then select a **Period (s)**; **Previous** and **Next** step
-through available periods. Layer checkboxes above the plot independently control
+through available periods. Layer checkboxes in the ribbon independently control
 phase tensors, real induction arrows, imaginary induction arrows and station
 names. Hover near a station for its actual period and numerical values.
 

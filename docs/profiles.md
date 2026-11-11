@@ -10,7 +10,11 @@
 - [Extract and export](#extract-and-export)
 
 Open **Views → 2D profile**, or click **2D profile…** beside the station map,
-to draw a corridor and inspect the stations along it.
+to draw a corridor on the shared map at the left and inspect its stations.
+The profile tab contains sections and the corridor table, with no duplicate map.
+Only the active profile’s line, corridor and station markers are shown; they
+disappear when you switch to TF view or another analysis and return when you
+reopen that profile. Each profile tab keeps its own line.
 The source survey, coordinates, errors and masks are unchanged.
 
 ## Draw and select
@@ -30,8 +34,9 @@ the offset magnitude is distance to that endpoint. A station occurs only once
 at a bend or crossing; equal-distance ties use the first segment.
 
 Distances use one common WGS84/UTM projection. The tool uses the survey's saved
-UTM zone and origin, or suggests a zone from its enabled stations. The map shows
-the zone and origin. For wide surveys, review projection distortion under
+UTM zone and origin, or suggests a zone from its enabled stations. The profile
+shows its projection below the ribbon. The shared map can use latitude/longitude
+or UTM; changing its frame keeps the line in the same geographic position. For wide surveys, review projection distortion under
 [UTM / origin](coordinates-export.md#utm-and-survey-origin) before choosing a corridor.
 Station names, offline map layers, online basemap and loaded topography use the
 same map controls as the other analysis tabs. Line and corridor controls are in

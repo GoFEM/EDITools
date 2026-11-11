@@ -23,10 +23,10 @@ AutoMaskWorkflow::AutoMaskWorkflow(QMainWindow &window, SurveyHistory &history,
   preview = action("actionAuto_mask_preview", tr("Preview"), tr("Show auto-mask candidates as red circles on the main plots. Refreshes when the station, data or settings change. Preview does not change masks."), true);
   settings = action("actionAuto_mask_settings", tr("Settings…"), tr("Thresholds, required flags and neighbour limits. Uses the same settings as detailed review."));
   details = action("actionAuto_masking", tr("Detailed review…"), tr("Review scores, check individual candidates and export an audit for selected sites."));
-  previous = action("actionAuto_mask_previous", tr("Previous"), tr("Show the previous station without changing the batch selection or applying masks."));
-  next = action("actionAuto_mask_next", tr("Next"), tr("Show the next station without changing the batch selection or applying masks."));
+  previous = action("actionAuto_mask_previous", tr("Previous"), tr("Select the previous station in the table and highlight it on the map without applying masks."));
+  next = action("actionAuto_mask_next", tr("Next"), tr("Select the next station in the table and highlight it on the map without applying masks."));
   apply = action("actionAuto_mask_apply", tr("Apply"), tr("Apply the current station's previewed masks as one Undo step."));
-  applyNext = action("actionAuto_mask_apply_next", tr("Apply + next"), tr("Apply the current preview, then show the next station. Does not change the batch selection."));
+  applyNext = action("actionAuto_mask_apply_next", tr("Apply + next"), tr("Apply the current preview, then select the next station in the table and on the map."));
   batch = action("actionAuto_mask_selected", tr("Apply to selected"), tr("Analyse all selected, enabled sites using the current checks and apply their candidates in one Undo step. Cancellation applies nothing. Unselected sites provide references only."));
   pair = action("actionAuto_mask_pair", tr("Pair diagonals"), tr("For impedance candidates, also mask Zxx for Zxy and Zyy for Zyx. Does not affect tipper candidates."), true); pair->setChecked(true);
   const auto names = AutoMaskSettings::criterionNames(), help = AutoMaskSettings::criterionHelp();

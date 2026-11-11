@@ -1,4 +1,6 @@
 #include "include/MapBackground.h"
+#include <QTableWidget>
+#include <QHeaderView>
 #include "include/PlotColorMaps.h"
 #include "include/FileLabels.h"
 #include "PeriodMapWindow.h"
@@ -18,7 +20,7 @@ namespace {
 QColor arrowColor(bool imaginary) { return imaginary ? QColor("#c2410c") : QColor("#111827"); }
 }
 
-PeriodMapWindow::PeriodMapWindow(QWidget *parent, std::function<void()> changed)
+PeriodMapWindow::PeriodMapWindow(QWidget *parent, std::function<void()> changed, bool central)
   : WorkspaceView(parent), observationsChanged(std::move(changed))
 {
   setObjectName("periodMapWindow");
@@ -150,7 +152,21 @@ PeriodMapWindow::PeriodMapWindow(QWidget *parent, std::function<void()> changed)
   plot->xAxis->setLabel(tr("Easting (km)")); plot->yAxis->setLabel(tr("Northing (km)"));
   plot->legend->setVisible(true); plot->legend->setBrush(Qt::white);
   plot->axisRect()->insetLayout()->setInsetAlignment(0, Qt::AlignRight | Qt::AlignTop);
-  layout->addWidget(plot, 1);
+  if(!central) layout->addWidget(plot, 1);
+  else {
+    setCentralMaps({plot}, {}, tr("Map tools"));
+    detailsTable = new QTableWidget(this); detailsTable->setObjectName("periodMapDetails");
+    detailsTable->setColumnCount(2); detailsTable->setHorizontalHeaderLabels({tr("Station"), tr("Values at selected period")});
+    detailsTable->horizontalHeader()->setStretchLastSection(true); detailsTable->setColumnWidth(0, 150);
+    detailsTable->verticalHeader()->hide(); detailsTable->setWordWrap(false);
+    detailsTable->setEditTriggers(QAbstractItemView::NoEditTriggers); detailsTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    detailsTable->setSelectionMode(QAbstractItemView::SingleSelection);
+    connect(detailsTable, &QTableWidget::currentCellChanged, this, [this](int row, int, int, int) {
+      if(row < 0 || !detailsTable->item(row, 0)) return;
+      const auto name = detailsTable->item(row, 0)->text(); selectedStations = {name.toStdString()}; updateSelection(); emit stationActivated(name);
+    });
+    layout->addWidget(detailsTable, 1);
+  }
   summary = new QLabel(this); summary->setObjectName("mapSummary"); summary->setWordWrap(true);
   layout->addWidget(summary);
 
@@ -284,6 +300,7 @@ void PeriodMapWindow::setData(const std::shared_ptr<MTSurveyData> &data,
           sites[i].north = north / length;
           sites[i].east = QPointF(sites[i].north.y(), -sites[i].north.x());
         }
+        renderedCoordinates = coordinates;
         background->setCoordinates(coordinates, .001);
         coordinatesDescription = tr("WGS84 / UTM %1%2%3").arg(coordinates.zone)
           .arg(coordinates.north ? "N" : "S").arg(coordinates.centered ? tr("; survey-centered offsets") : QString());
@@ -517,6 +534,18 @@ void PeriodMapWindow::updateMap(bool fit)
   if(impedanceColors() && !sites.empty() && locationError.isEmpty())
     summary->setText(summary->text() + tr(" · %1 impedance markers").arg(nScalar));
   updateSelection(false);
+  if(detailsTable) {
+    const QSignalBlocker block(detailsTable);
+    const auto current = detailsTable->currentRow() >= 0 && detailsTable->item(detailsTable->currentRow(), 0) ? detailsTable->item(detailsTable->currentRow(), 0)->text() : QString();
+    detailsTable->setRowCount(int(sites.size()));
+    for(unsigned i = 0; i < sites.size(); ++i) {
+      const auto name = QString::fromStdString(sites[i].name);
+      detailsTable->setItem(i, 0, new QTableWidgetItem(name));
+      auto text = sites[i].details.section('\n', 1).replace('\n', "; ");
+      detailsTable->setItem(i, 1, new QTableWidgetItem(text)); detailsTable->item(i, 1)->setToolTip(sites[i].details);
+      if(name == current) detailsTable->setCurrentCell(i, 0);
+    }
+  }
   if(fit) fitView(); else plot->replot();
 }
 

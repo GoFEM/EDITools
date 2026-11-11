@@ -59,6 +59,35 @@ protected:
     p->drawPath(path);
   }
 };
+// Overlay only: it never owns or clears survey-map graphs, labels or backgrounds.
+class SharedProfileOverlay : public QCPLayerable {
+public:
+  explicit SharedProfileOverlay(QCustomPlot *map) : QCPLayerable(map) {
+    setObjectName("profileMapOverlay"); setLayer("overlay"); setVisible(false);
+  }
+  QPolygonF line, stations, highlighted;
+  QList<QPolygonF> corridor;
+protected:
+  QRect clipRect() const override { return mParentPlot->axisRect()->rect(); }
+  void applyDefaultAntialiasingHint(QCPPainter *p) const override { p->setAntialiasing(true); }
+  QPolygonF pixels(const QPolygonF &points) const {
+    QPolygonF result;
+    for(const auto &point: points) result << QPointF(mParentPlot->xAxis->coordToPixel(point.x()), mParentPlot->yAxis->coordToPixel(point.y()));
+    return result;
+  }
+  void draw(QCPPainter *p) override {
+    QPainterPath area; area.setFillRule(Qt::WindingFill);
+    for(const auto &polygon: corridor) area.addPolygon(pixels(polygon));
+    p->setPen(Qt::NoPen); p->setBrush(QColor(37, 99, 235, 35)); p->drawPath(area);
+    p->setPen(QPen(QColor("#c2410c"), 1.)); p->setBrush(QColor("#c2410c"));
+    for(const auto &point: pixels(stations)) p->drawEllipse(point, 3.5, 3.5);
+    p->setPen(QPen(QColor("#2563eb"), 1.5)); p->setBrush(Qt::NoBrush);
+    const auto points = pixels(line); p->drawPolyline(points);
+    for(const auto &point: points) p->drawEllipse(point, 4., 4.);
+    p->setPen(QPen(QColor("#d81b60"), 2.)); p->setBrush(Qt::white);
+    for(const auto &point: pixels(highlighted)) p->drawEllipse(point, 6., 6.);
+  }
+};
 QDoubleSpinBox *spin(QWidget *owner, const char *name, double low, double high, double value,
                      int decimals = 2) {
   auto *s = new QDoubleSpinBox(owner);
@@ -94,6 +123,12 @@ struct ProfileWindow::Impl {
   bool automaticDistance = true, updatingPlots = false;
   double stationSpacing = 1.;
   QCustomPlot *map;
+  QPointer<QCustomPlot> sharedMap;
+  QPointer<SharedProfileOverlay> sharedOverlay;
+  SurveyCoordinates sharedCoordinates;
+  bool sharedActive = false;
+  QCP::Interactions savedInteractions;
+  QCursor savedCursor;
   MapBackground *background;
   Corridor *corridor;
   QCPCurve *line;
@@ -120,8 +155,8 @@ struct ProfileWindow::Impl {
   bool swappedStrike = false, manualStrikeSet = false;
   double manualStrike = 0., rotation = 0.;
 
-  Impl(ProfileWindow *w, std::function<void(std::shared_ptr<MTSurveyData>)> callback)
-      : owner(w), extracted(std::move(callback)) {
+  Impl(ProfileWindow *w, std::function<void(std::shared_ptr<MTSurveyData>)> callback, QCustomPlot *shared)
+      : owner(w), extracted(std::move(callback)), sharedMap(shared) {
     auto *layout = new QVBoxLayout(w);
     auto *top = new QHBoxLayout;
     dataset = combo(w, "profileDataset", {});
@@ -218,7 +253,7 @@ struct ProfileWindow::Impl {
     names->setObjectName("profileNames");
     mapTools->addWidget(names);
     map = new QCustomPlot(left);
-    map->setObjectName("profileMap");
+    map->setObjectName(sharedMap ? "profileExportMap" : "profileMap");
     map->setMinimumSize(320, 260);
     background = new MapBackground(map);
     corridor = new Corridor(map);
@@ -227,7 +262,7 @@ struct ProfileWindow::Impl {
       map->replot();
     }));
     mapTools->addStretch();
-    ml->addLayout(mapTools);
+    if(!sharedMap) ml->addLayout(mapTools);
     for (int i = 0; i < 3; ++i) {
       auto *g = map->addGraph();
       g->setLineStyle(QCPGraph::lsNone);
@@ -253,7 +288,7 @@ struct ProfileWindow::Impl {
     map->yAxis->setLabel(ProfileWindow::tr("Northing (km)"));
     map->setInteractions(QCP::iRangeZoom);
     map->setCursor(Qt::CrossCursor);
-    ml->addWidget(map, 3);
+    if(sharedMap) map->hide(); else ml->addWidget(map, 3);
     coordinateLabel = new QLabel(w);
     coordinateLabel->setWordWrap(true);
     ml->addWidget(coordinateLabel);
@@ -428,7 +463,7 @@ struct ProfileWindow::Impl {
                            updatingPlots = false;
                          });
       }
-    split->setSizes({420, 1000});
+    split->setSizes(sharedMap ? QList<int>{260, 1160} : QList<int>{420, 1000});
     status = new QLabel(w);
     status->setObjectName("profileStatus");
     status->setWordWrap(true);
@@ -461,6 +496,7 @@ struct ProfileWindow::Impl {
     QObject::connect(drawing, &QCheckBox::toggled, w, [this](bool on) {
       map->setInteraction(QCP::iRangeDrag, !on);
       map->setCursor(on ? Qt::CrossCursor : Qt::ArrowCursor);
+      sharedInteractions();
     });
     QObject::connect(map, &QCustomPlot::mousePress, w,
                      [this](QMouseEvent *e) { press = e->position().toPoint(); });
@@ -556,7 +592,11 @@ struct ProfileWindow::Impl {
     w->addToolGroup(ProfileWindow::tr("Profile tools"), ProfileWindow::tr("Data and periods"), top);
     w->addToolGroup(ProfileWindow::tr("Profile tools"), ProfileWindow::tr("Line"), tools);
     w->addToolGroup(ProfileWindow::tr("Profile tools"), ProfileWindow::tr("Corridor"), widthRow);
-    w->addToolGroup(ProfileWindow::tr("Profile tools"), ProfileWindow::tr("Map"), mapTools);
+    if(!sharedMap) w->addToolGroup(ProfileWindow::tr("Profile tools"), ProfileWindow::tr("Map"), mapTools);
+    else {
+      while(auto *item = mapTools->takeAt(0)) { if(item->widget()) item->widget()->hide(); delete item; }
+      delete mapTools;
+    }
     w->addToolGroup(ProfileWindow::tr("Profile tools"), ProfileWindow::tr("Output"), outputs);
     w->addToolGroup(ProfileWindow::tr("Profile appearance"), ProfileWindow::tr("Scalar sections"), scalarTools);
     w->addToolGroup(ProfileWindow::tr("Profile appearance"), ProfileWindow::tr("Color ranges"), ranges);
@@ -564,16 +604,89 @@ struct ProfileWindow::Impl {
     w->addToolGroup(ProfileWindow::tr("Strike tools"), ProfileWindow::tr("Rotation"), rotationRow);
     w->addToolGroup(ProfileWindow::tr("Strike tools"), ProfileWindow::tr("Rose directions"), roseTools);
     w->addToolGroup(ProfileWindow::tr("Strike tools"), ProfileWindow::tr("Quality and weighting"), filterTools);
+    if(sharedMap) {
+      sharedOverlay = new SharedProfileOverlay(sharedMap);
+      QObject::connect(sharedMap, &QCustomPlot::mousePress, w, [this](QMouseEvent *e) {
+        if(sharedActive) press = e->position().toPoint();
+      });
+      QObject::connect(sharedMap, &QCustomPlot::mouseRelease, w, [this](QMouseEvent *e) {
+        if(!sharedActive || !drawing->isChecked() || !sharedMap->axisRect()->rect().contains(e->position().toPoint())) return;
+        if(e->button() == Qt::RightButton) { drawing->setChecked(false); return; }
+        if(e->button() != Qt::LeftButton || (e->position().toPoint() - press).manhattanLength() > 4) return;
+        try {
+          const std::array<double, 3> point{{sharedMap->yAxis->pixelToCoord(e->position().y()), sharedMap->xAxis->pixelToCoord(e->position().x()), 0.}};
+          const auto projected = coordinates.transform(sharedCoordinates.inverse({point})).front();
+          const Point vertex{{projected[1] / 1000., projected[0] / 1000.}};
+          if(vertices.empty() || std::hypot(vertex[0] - vertices.back()[0], vertex[1] - vertices.back()[1]) > 1e-6) vertices.push_back(vertex);
+          select();
+        } catch(const std::exception &e) { status->setText(ProfileWindow::tr("Cannot project profile vertex: %1").arg(e.what())); }
+      });
+    }
     w->setExportButton("pdf", pdfButton); w->setExportButton("csv", csvButton);
     w->setStateRefresh([this] {
       manualStrike = strikeAngle->value();
       map->setInteraction(QCP::iRangeDrag, !drawing->isChecked());
       map->setCursor(drawing->isChecked() ? Qt::CrossCursor : Qt::ArrowCursor);
-      periods(); select();
+      periods(); select(); sharedInteractions();
     });
 
   }
 
+  ~Impl() {
+    deactivateSharedMap();
+    delete sharedOverlay.data();
+  }
+  void deactivateSharedMap() {
+    if(!sharedActive) return;
+    sharedActive = false;
+    if(sharedOverlay) sharedOverlay->setVisible(false);
+    if(sharedMap) { sharedMap->setInteractions(savedInteractions); sharedMap->setCursor(savedCursor); sharedMap->replot(QCustomPlot::rpQueuedReplot); }
+  }
+  void sharedInteractions() {
+    if(!sharedActive || !sharedMap) return;
+    sharedMap->setInteractions(savedInteractions);
+    sharedMap->setInteraction(QCP::iRangeDrag, !drawing->isChecked() && savedInteractions.testFlag(QCP::iRangeDrag));
+    sharedMap->setInteraction(QCP::iSelectPlottables, !drawing->isChecked() && savedInteractions.testFlag(QCP::iSelectPlottables));
+    sharedMap->setCursor(drawing->isChecked() ? QCursor(Qt::CrossCursor) : savedCursor);
+  }
+  QPolygonF toSharedMap(const std::vector<Point> &points) const {
+    std::vector<std::array<double, 3>> projected;
+    for(const auto &p: points) projected.push_back({{p[1] * 1000., p[0] * 1000., 0.}});
+    QPolygonF result;
+    for(const auto &p: sharedCoordinates.transform(coordinates.inverse(projected))) result << QPointF(p[1], p[0]);
+    return result;
+  }
+  void updateSharedMap() {
+    if(!sharedActive || !sharedMap || !sharedOverlay) return;
+    try {
+      sharedOverlay->line = toSharedMap(vertices);
+      sharedOverlay->corridor.clear();
+      const double radius = distance->value(), pi = std::acos(-1.);
+      for(unsigned i = 1; i < vertices.size() && radius > 0.; ++i) {
+        const auto a = vertices[i - 1], b = vertices[i];
+        const double angle = std::atan2(b[1] - a[1], b[0] - a[0]);
+        std::vector<Point> polygon;
+        for(int end = 0; end < 2; ++end) for(int step = 0; step <= 24; ++step) {
+          const auto center = end ? a : b;
+          const double t = angle - pi / 2. + end * pi + step * pi / 24.;
+          polygon.push_back({{center[0] + radius * std::cos(t), center[1] + radius * std::sin(t)}});
+        }
+        sharedOverlay->corridor << toSharedMap(polygon);
+      }
+      std::vector<Point> selected, highlighted;
+      for(const auto &station: stations) {
+        if(std::any_of(offsets.begin(), offsets.end(), [&](const ProfileAnalysis::Offset &p) { return p.name == station.name; })) selected.push_back(station.position);
+        if(QString::fromStdString(station.name) == selectedStation) highlighted.push_back(station.position);
+      }
+      sharedOverlay->stations = toSharedMap(selected); sharedOverlay->highlighted = toSharedMap(highlighted);
+      sharedOverlay->setProperty("vertexCount", int(vertices.size()));
+      sharedOverlay->setVisible(true);
+    } catch(const std::exception &e) {
+      sharedOverlay->setVisible(false);
+      status->setText(ProfileWindow::tr("Cannot display profile on the survey map: %1").arg(e.what()));
+    }
+    sharedMap->replot(QCustomPlot::rpQueuedReplot);
+  }
   const MTSurveyData *source() const {
     const auto key = dataset->currentData().toString();
     const auto found = responses.find(key);
@@ -613,7 +726,7 @@ struct ProfileWindow::Impl {
                           decade);
     roseBand->setCurrentIndex(std::max(0, roseBand->findText(old)));
   }
-  void highlight(const QString &name) {
+  void highlight(const QString &name, bool notify = true) {
     int row = -1;
     for (unsigned i = 0; i < offsets.size(); ++i)
       if (QString::fromStdString(offsets[i].name) == name) {
@@ -621,7 +734,7 @@ struct ProfileWindow::Impl {
         break;
       }
     selectedStation = row < 0 ? QString() : name;
-    if(!selectedStation.isEmpty()) emit owner->stationActivated(selectedStation);
+    if(notify && !selectedStation.isEmpty()) emit owner->stationActivated(selectedStation);
     const QSignalBlocker block(table);
     table->clearSelection();
     table->setCurrentCell(row, row < 0 ? -1 : 0);
@@ -692,6 +805,7 @@ struct ProfileWindow::Impl {
     map->graph(3)->setData(hx, hy);
     line->setData(order, vx, vy);
     map->replot();
+    updateSharedMap();
   }
   void fitMap() {
     if (stations.empty()) {
@@ -710,6 +824,17 @@ struct ProfileWindow::Impl {
       map->yAxis->setRange(y0 - margin, y1 + margin);
     }
     map->replot();
+    if(sharedActive && sharedMap) {
+      std::vector<Point> points = vertices;
+      for(const auto &station: stations) points.push_back(station.position);
+      const auto bounds = toSharedMap(points).boundingRect();
+      if(!points.empty()) {
+        const double margin = std::max(sharedCoordinates.utm ? 100. : .001, .08 * std::max(bounds.width(), bounds.height()));
+        sharedMap->xAxis->setRange(bounds.left() - margin, bounds.right() + margin);
+        sharedMap->yAxis->setRange(bounds.top() - margin, bounds.bottom() + margin);
+        sharedMap->replot();
+      }
+    }
   }
   bool inRoseBand(double period) const {
     if (roseBand->currentIndex() <= 0)
@@ -1015,13 +1140,22 @@ struct ProfileWindow::Impl {
   }
 };
 
-ProfileWindow::ProfileWindow(QWidget *parent, std::function<void(std::shared_ptr<MTSurveyData>)> extracted)
-    : WorkspaceView(parent), impl(new Impl(this, std::move(extracted))) {
+ProfileWindow::ProfileWindow(QWidget *parent, std::function<void(std::shared_ptr<MTSurveyData>)> extracted, QCustomPlot *sharedMap)
+    : WorkspaceView(parent), impl(new Impl(this, std::move(extracted), sharedMap)) {
   setObjectName("profileWindow");
   setWindowTitle(tr("Profile analysis"));
   resize(1500, 950);
 }
 ProfileWindow::~ProfileWindow() = default;
+void ProfileWindow::setSharedMapActive(bool active, const SurveyCoordinates &coordinates) {
+  auto &s = *impl;
+  if(!active) { s.deactivateSharedMap(); return; }
+  if(!s.sharedMap) return;
+  if(!s.sharedActive) { s.savedInteractions = s.sharedMap->interactions(); s.savedCursor = s.sharedMap->cursor(); }
+  s.sharedActive = true; s.sharedCoordinates = coordinates;
+  s.sharedInteractions(); s.updateSharedMap();
+}
+void ProfileWindow::selectStation(const QString &name) { impl->highlight(name, false); }
 void ProfileWindow::setMapLayers(int layers) {
   impl->background->setLayers(layers);
   for (auto *action : control<QToolButton>("mapLayers")->menu()->actions())

@@ -18,6 +18,8 @@
  */
 
 #include "include/MapPlot.h"
+#include <algorithm>
+#include <cmath>
 
 MapPlot::MapPlot(QCustomPlot *plot, QWidget* parent):
   m_plot(plot), m_parent(parent), m_stationNamesVisible(false)
@@ -46,7 +48,16 @@ void MapPlot::set_data(const std::vector<std::array<double, 3>> &locations,
   m_locations = locations;
   m_names = names;
   update_station_labels();
-  m_plot->rescaleAxes();
+  double x0 = INFINITY, x1 = -INFINITY, y0 = INFINITY, y1 = -INFINITY;
+  for(int i = 0; i < x.size(); ++i) if(std::isfinite(x[i]) && std::isfinite(y[i])) {
+    x0 = std::min(x0, x[i]); x1 = std::max(x1, x[i]); y0 = std::min(y0, y[i]); y1 = std::max(y1, y[i]);
+  }
+  if(std::isfinite(x0)) {
+    const double span = std::max({x1 - x0, y1 - y0, m_utm ? 100. : .01});
+    const double width = std::max(x1 - x0, span * .1), height = std::max(y1 - y0, span * .1);
+    m_plot->xAxis->setRange((x0 + x1) / 2., width * 1.16, Qt::AlignCenter);
+    m_plot->yAxis->setRange((y0 + y1) / 2., height * 1.16, Qt::AlignCenter);
+  }
   m_plot->replot();
 }
 
@@ -62,7 +73,6 @@ void MapPlot::set_selected_points(const std::vector<std::array<double, 3>> &loca
   }
 
   m_plot->graph(1)->setData(x, y);
-  m_plot->rescaleAxes();
   m_plot->replot();
 }
 
@@ -75,6 +85,7 @@ void MapPlot::set_station_names_visible(bool on)
 
 void MapPlot::set_coordinate_labels(bool utm, bool centered)
 {
+  m_utm = utm;
   m_plot->xAxis->setLabel(utm ? (centered ? "East offset (m)" : "UTM easting (m)") : "Longitude");
   m_plot->yAxis->setLabel(utm ? (centered ? "North offset (m)" : "UTM northing (m)") : "Latitude");
 }

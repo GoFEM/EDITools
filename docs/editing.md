@@ -94,8 +94,8 @@ project's shared Undo history.
 
 Use the **Auto mask** ribbon tab (or the **Auto mask** classic menu). **Preview**
 marks candidates with red circles directly on the main station plots, including
-tipper lines or arrow anchors. **Previous / Next** switches stations without
-changing the selected batch. **Apply** masks the current preview; **Apply + next**
+tipper lines or arrow anchors. **Previous / Next** selects the new station in the table, scrolls it into view,
+and highlights it on the shared map. This replaces the previous table selection. **Apply** masks the current preview; **Apply + next**
 also advances. **Apply to selected** evaluates the selected enabled sites with
 the same settings and applies them in one Undo step. Cancelling that calculation
 applies nothing. Unselected sites can provide neighbour references but are not edited.

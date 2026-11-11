@@ -16,8 +16,10 @@ station and normalized-residual plots. Each response keeps the same color across
 the comparison plots; the list shows its nRMS and matched/available scalar count.
 All residuals, including outliers, contribute to the histograms and statistics.
 
-**Maps and heatmaps** compares two checked responses side by side, with shared
-axes and color scales. Stations are ordered north to south, and grey cells mark
+**Maps and heatmaps** compares two checked responses. The station map appears
+in the shared area at the left; use **Fit appearance → Shared map** to choose
+response A or B. Only one geographic map is visible. Heatmaps remain side by
+side in the analysis tab, with shared axes and color scales. Stations are ordered north to south, and grey cells mark
 missing comparisons. Select either response from the dropdowns. Pan and zoom
 the plots, or use **Save PDF…** to export the overview, station plot and selected
 spatial comparison.
@@ -49,8 +51,9 @@ nearest enabled neighbours. Change **Reference** and click **Nearest** to choose
 a different group; the count specifies neighbours in addition to the reference.
 Distances use WGS84 geodesics and handle the date line.
 
-Each station has one visibility checkbox; clicking its marker on the comparison
-map toggles the same selection. Choose a component of resistivity/phase, tipper,
+Each station has one visibility checkbox; clicking its marker on the shared
+map at the left toggles the same selection. Coloured neighbour markers appear
+only while that comparison tab is active; the tab has no duplicate map. Choose a component of resistivity/phase, tipper,
 or phase tensor. Colours identify stations, **Errors** shows their effective
 uncertainties, and phases retain their stored convention. Masked or missing
 samples remain gaps. Disabled stations are excluded; stations without locations

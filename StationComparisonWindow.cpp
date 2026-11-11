@@ -21,7 +21,26 @@ QColor stationColor(int index) {
 using SurveyGeometry::located;
 using SurveyGeometry::distance;
 } // namespace
-StationComparisonWindow::StationComparisonWindow(QWidget *parent) : WorkspaceView(parent) {
+class StationComparisonWindow::Overlay : public QCPLayerable {
+public:
+  struct Station { QString name; QPointF position; QColor color; bool checked; };
+  std::vector<Station> stations;
+  explicit Overlay(QCustomPlot *map) : QCPLayerable(map) { setObjectName("comparisonMapOverlay"); setLayer("overlay"); setVisible(false); }
+  QPointF pixel(const Station &station) const { return {mParentPlot->xAxis->coordToPixel(station.position.x()), mParentPlot->yAxis->coordToPixel(station.position.y())}; }
+protected:
+  QRect clipRect() const override { return mParentPlot->axisRect()->rect(); }
+  void applyDefaultAntialiasingHint(QCPPainter *p) const override { p->setAntialiasing(true); }
+  void draw(QCPPainter *p) override {
+    for(const auto &station: stations) {
+      const auto point = pixel(station);
+      p->setPen(QPen(station.color)); p->setBrush(station.color);
+      const double radius = station.checked ? 4.5 : 2.5;
+      p->drawEllipse(point, radius, radius);
+      if(station.checked) p->drawText(point + QPointF(7., -5.), station.name);
+    }
+  }
+};
+StationComparisonWindow::StationComparisonWindow(QWidget *parent, QCustomPlot *shared) : WorkspaceView(parent), sharedMap(shared) {
   setObjectName("stationComparison");
   setWindowTitle(tr("Neighbouring stations"));
   resize(1180, 760);
@@ -66,10 +85,10 @@ StationComparisonWindow::StationComparisonWindow(QWidget *parent) : WorkspaceVie
                           "Distances are from the reference; phases retain the stored convention. Masked, "
                           "missing and disabled samples are omitted without connecting across gaps."));
   map = new QCustomPlot(left);
-  map->setObjectName("compareMap");
+  map->setObjectName(sharedMap ? "compareExportMap" : "compareMap");
   map->xAxis->ticker()->setTickCount(3);
   map->setMinimumSize(280, 240);
-  leftLayout->addWidget(map, 1);
+  if(sharedMap) map->hide(); else leftLayout->addWidget(map, 1);
   background = new MapBackground(map);
   map->setInteractions(QCP::iRangeDrag | QCP::iRangeZoom);
   map->setToolTip(tr("Click a station to toggle its curves. Pan and zoom to inspect the survey."));
@@ -114,6 +133,26 @@ StationComparisonWindow::StationComparisonWindow(QWidget *parent) : WorkspaceVie
         break;
       }
   });
+  if(sharedMap) {
+    overlay = new Overlay(sharedMap);
+    connect(sharedMap, &QCustomPlot::mousePress, this, [this](QMouseEvent *event) { if(sharedActive) sharedPress = event->position().toPoint(); });
+    connect(sharedMap, &QCustomPlot::mouseRelease, this, [this](QMouseEvent *event) {
+      if(!sharedActive || !overlay || event->button() != Qt::LeftButton || (event->position().toPoint() - sharedPress).manhattanLength() > 4) return;
+      if(!sharedMap->axisRect()->rect().contains(event->position().toPoint())) return;
+      QString nearest; double best = 12.;
+      for(const auto &station: overlay->stations) {
+        const auto delta = overlay->pixel(station) - event->position(); const double distance = std::hypot(delta.x(), delta.y());
+        if(distance < best) { best = distance; nearest = station.name; }
+      }
+      for(int i = 0; !nearest.isEmpty() && i < stations->count(); ++i) {
+        auto *item = stations->item(i);
+        if(item->data(Qt::UserRole).toString() == nearest && (item->flags() & Qt::ItemIsEnabled)) {
+          item->setCheckState(item->checkState() == Qt::Checked ? Qt::Unchecked : Qt::Checked);
+          stations->setCurrentItem(item); emit stationActivated(nearest); break;
+        }
+      }
+    });
+  }
   component->addItems({"XX", "XY", "YX", "YY"});
   component->setCurrentIndex(1);
   addToolGroup(tr("Comparison tools"), tr("Stations and curves"), controls);
@@ -123,6 +162,34 @@ StationComparisonWindow::StationComparisonWindow(QWidget *parent) : WorkspaceVie
     component->setCurrentIndex(std::max(0, component->findText(selected))); rebuild();
   });
   connect(anchor, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] { emit stationActivated(anchor->currentText()); });
+}
+StationComparisonWindow::~StationComparisonWindow() {
+  setSharedMapActive(false, sharedCoordinates); delete overlay.data();
+}
+void StationComparisonWindow::setSharedMapActive(bool active, const SurveyCoordinates &coordinates) {
+  if(!sharedMap || !overlay) return;
+  if(!active) {
+    if(sharedActive) { sharedMap->setInteractions(savedInteractions); overlay->setVisible(false); sharedMap->replot(QCustomPlot::rpQueuedReplot); }
+    sharedActive = false; return;
+  }
+  if(!sharedActive) savedInteractions = sharedMap->interactions();
+  sharedActive = true; sharedCoordinates = coordinates;
+  sharedMap->setInteraction(QCP::iSelectPlottables, false);
+  updateSharedMap();
+}
+void StationComparisonWindow::updateSharedMap() {
+  if(!sharedActive || !overlay) return;
+  overlay->stations.clear();
+  if(survey) for(int i = 0; i < stations->count(); ++i) {
+    const auto *item = stations->item(i); const auto name = item->data(Qt::UserRole).toString();
+    const auto &station = survey->get_station_data(name.toStdString());
+    if(!located(station.position())) continue;
+    try {
+      const auto p = sharedCoordinates.transform({station.position()}).front();
+      overlay->stations.push_back({name, QPointF(p[1], p[0]), item->foreground().color(), item->checkState() == Qt::Checked});
+    } catch(const std::exception &) {}
+  }
+  overlay->setVisible(true); sharedMap->replot(QCustomPlot::rpQueuedReplot);
 }
 void StationComparisonWindow::setData(std::shared_ptr<MTSurveyData> data, const QStringList &selected) {
   const bool changed = survey != data;
@@ -212,6 +279,7 @@ void StationComparisonWindow::draw() {
     for (auto *plot : {map, first, second})
       plot->replot();
     status->clear();
+    updateSharedMap();
     return;
   }
   const int mode = family->currentIndex(), c = std::max(0, component->currentIndex());
@@ -323,4 +391,5 @@ void StationComparisonWindow::draw() {
     plot->replot();
   }
   status->setText(tr("%1 checked stations · %2 visible scalar samples").arg(visible).arg(samples));
+  updateSharedMap();
 }

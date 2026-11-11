@@ -5,6 +5,7 @@
 #include "include/MapBackground.h"
 #include "include/SurveyHistory.h"
 #include "ProfileWindow.h"
+#include <QStackedWidget>
 #include "PeriodMapWindow.h"
 #include "FitStatisticsWindow.h"
 #include "StationComparisonWindow.h"
@@ -25,6 +26,11 @@ const QStringList kinds{"profile", "map", "fit", "comparison", "validity", "aver
 
 void MainWindow::setupWorkspace()
 {
+  sharedMapHost = new QStackedWidget; sharedMapHost->setObjectName("sharedMapHost");
+  sharedMapHost->setSizePolicy(ui->mapPlot->sizePolicy());
+  const int mapIndex = ui->splitter_3->indexOf(ui->mapPlot);
+  ui->splitter_3->replaceWidget(mapIndex, sharedMapHost); sharedMapHost->addWidget(ui->mapPlot);
+  ui->splitter_3->setStretchFactor(mapIndex, 3);
   workspaces = new WorkspaceTabs;
   ui->splitter_5->replaceWidget(ui->splitter_5->indexOf(tfView), workspaces);
   ui->splitter_5->setStretchFactor(0, 0);
@@ -33,7 +39,10 @@ void MainWindow::setupWorkspace()
   workspaces->addView(tfView, "tf", tr("TF view"), "tf");
   connect(workspaces, &QTabWidget::currentChanged, this, [this] { activateWorkspace(); });
   connect(workspaces, &WorkspaceTabs::closing, this, [this](QWidget *view) {
+    if(auto *v = dynamic_cast<ProfileWindow *>(view)) v->setSharedMapActive(false, mapCoordinates);
     if(!restoringWorkspace) { closedViews.append(workspaceSnapshot(view)); if(closedViews.size() > 20) closedViews.removeFirst(); }
+    if(auto *v = dynamic_cast<StationComparisonWindow *>(view)) v->setSharedMapActive(false, mapCoordinates);
+    if(auto *v = dynamic_cast<WorkspaceView *>(view)) if(v->centralMaps().contains(sharedMapHost->currentWidget())) sharedMapHost->setCurrentWidget(ui->mapPlot);
     if(ribbon) ribbon->releaseContext(workspaces->id(view));
   });
   connect(workspaces, &WorkspaceTabs::titleChanged, this, [](QWidget *view, const QString &title) { view->setProperty("viewTitle", title); });
@@ -75,13 +84,13 @@ QWidget *MainWindow::openWorkspace(const QString &type, bool create, const QJson
   WorkspaceView *view = nullptr;
   const auto changed = [this] { updatePlots(false); refreshAnalysisWindows(); };
   const auto copy = [this](std::shared_ptr<MTSurveyData> data) { openSurveyCopy(std::move(data)); };
-  if(type == "profile") { profile = new ProfileWindow(this, copy); profile->setMapLayers(mapBackground->layers()); view = profile; }
+  if(type == "profile") { profile = new ProfileWindow(this, copy, ui->mapPlot); profile->setMapLayers(mapBackground->layers()); view = profile; }
   else if(type == "map") {
-    periodMaps = new PeriodMapWindow(this, [this, changed] { history->record(tr("Map masks")); changed(); });
+    periodMaps = new PeriodMapWindow(this, [this, changed] { history->record(tr("Map masks")); changed(); }, true);
     auto settings = periodMaps->displaySettings(); settings.mapLayers = mapBackground->layers(); settings.names = mapStationNames->isChecked();
     periodMaps->setDisplaySettings(settings); periodMaps->setLinkTensorMasks(linkTensorMasksAction->isChecked()); view = periodMaps;
-  } else if(type == "fit") { fitStatistics = new FitStatisticsWindow(this, [this] { refreshAnalysisWindows(); }); view = fitStatistics; }
-  else if(type == "comparison") { stationComparison = new StationComparisonWindow(this); view = stationComparison; }
+  } else if(type == "fit") { fitStatistics = new FitStatisticsWindow(this, [this] { refreshAnalysisWindows(); }, true); view = fitStatistics; }
+  else if(type == "comparison") { stationComparison = new StationComparisonWindow(this, ui->mapPlot); view = stationComparison; }
   else if(type == "validity") {
     impedanceValidity = new ImpedanceValidityWindow(this, [this](const ImpedanceAnalysis::RhoPlusOptions &options) { rhoPlusOptions = options; updatePlots(false); }, changed);
     impedanceValidity->setLinkTensorMasks(linkTensorMasksAction->isChecked()); impedanceValidity->setFitOptions(rhoPlusOptions); impedanceValidity->setHistory(history.get()); view = impedanceValidity;
@@ -95,6 +104,8 @@ QWidget *MainWindow::openWorkspace(const QString &type, bool create, const QJson
     view = new AutoMaskReview(this, mtSurvey, selection, linkTensorMasksAction->isChecked(), autoMaskWorkflow->currentOptions(), autoMaskWorkflow->pairDiagonals(), [this, changed] { history->record(tr("Auto masking")); changed(); });
   }
   if(!view) return nullptr;
+  for(auto *map: view->centralMaps()) sharedMapHost->addWidget(map);
+  connect(view, &WorkspaceView::centralMapChanged, this, [this, view] { if(workspaces->currentWidget() == view) syncCentralMap(); });
   view->setEmbedded(); view->setProperty("workspaceDirty", true);
   refreshWorkspace(view);
   const auto station = ui->stationList->currentItem() ? ui->stationList->currentItem()->text(0) : QString();
@@ -143,6 +154,7 @@ void MainWindow::refreshWorkspace(QWidget *view)
   else if(auto *v = dynamic_cast<PeriodLayoutWindow *>(view)) v->setData(mtSurvey);
   else if(auto *v = dynamic_cast<AutoMaskReview *>(view)) v->setData(mtSurvey);
   view->setProperty("workspaceInitialized", true);
+  if(workspaces->currentWidget() == view) syncCentralMap();
   if(initialized && sameCoordinates) {
     WorkspaceView::restorePlotRanges(view, ranges);
     if(dynamic_cast<ImpedanceValidityWindow *>(view) || dynamic_cast<SurveyAverageWindow *>(view)) view->setProperty("pendingPlotRanges", ranges);
@@ -153,6 +165,18 @@ void MainWindow::activateWorkspace()
 {
   if(!ribbon || !workspaces->currentWidget()) return;
   auto *view = workspaces->currentWidget(); refreshWorkspace(view);
+  for(int i = 0; i < workspaces->count(); ++i)
+    if(auto *v = dynamic_cast<ProfileWindow *>(workspaces->widget(i)))
+      if(v != view) v->setSharedMapActive(false, mapCoordinates);
+  for(int i = 0; i < workspaces->count(); ++i)
+    if(auto *v = dynamic_cast<StationComparisonWindow *>(workspaces->widget(i)))
+      if(v != view) v->setSharedMapActive(false, mapCoordinates);
+  if(auto *v = dynamic_cast<StationComparisonWindow *>(view)) v->setSharedMapActive(true, mapCoordinates);
+  if(auto *v = dynamic_cast<ProfileWindow *>(view)) {
+    v->setSharedMapActive(true, mapCoordinates);
+    v->selectStation(ui->stationList->currentItem() ? ui->stationList->currentItem()->text(0) : QString());
+  }
+  syncCentralMap();
   auto *analysis = dynamic_cast<WorkspaceView *>(view);
   ribbon->setContext(workspaces->id(view), analysis ? analysis->toolPages() : tfTools);
   for(const auto &name: {"actionClose_view", "actionDuplicate_view"}) findChild<QAction *>(name)->setEnabled(analysis);
@@ -162,6 +186,16 @@ void MainWindow::activateWorkspace()
     auto *button = analysis ? analysis->exportButton(format) : nullptr;
     action->setEnabled(button && button->isEnabled());
   }
+}
+
+void MainWindow::syncCentralMap()
+{
+  if(!sharedMapHost || !workspaces) return;
+  auto *view = dynamic_cast<WorkspaceView *>(workspaces->currentWidget());
+  auto *map = view ? view->centralMap() : nullptr;
+  sharedMapHost->setCurrentWidget(map ? map : ui->mapPlot);
+  if(auto *controls = findChild<QWidget *>("surveyMapControls")) controls->setVisible(!map);
+  if(mtSurvey) updateStationCoordinates(map ? view->centralMapCoordinates() : mapCoordinates);
 }
 
 QJsonObject MainWindow::workspaceSnapshot(QWidget *view) const
@@ -221,5 +255,14 @@ void MainWindow::exportWorkspace(const QString &format)
   const auto path = QFileDialog::getSaveFileName(this, tr("Export active view"), lastDirectory + "/" + title + ".png", tr("PNG image (*.png)"));
   if(path.isEmpty()) return;
   rememberDirectory(path);
-  if(!(workspaces->type(view) == "tf" ? tfView : view)->grab().save(path, "PNG")) QMessageBox::warning(this, tr("Export"), tr("Could not save the image."));
+  auto image = (workspaces->type(view) == "tf" ? tfView : view)->grab();
+  if(workspaces->type(view) == "map") image = sharedMapHost->currentWidget()->grab();
+  else if(workspaces->type(view) == "profile" || workspaces->type(view) == "comparison" || workspaces->type(view) == "fit") {
+    const auto map = sharedMapHost->currentWidget()->grab();
+    QPixmap combined(map.width() + image.width(), std::max(map.height(), image.height()));
+    combined.setDevicePixelRatio(image.devicePixelRatio()); combined.fill(palette().color(QPalette::Window));
+    { QPainter painter(&combined); painter.drawPixmap(0, 0, map); painter.drawPixmap(QPointF(map.width() / map.devicePixelRatio(), 0), image); }
+    image = combined;
+  }
+  if(!image.save(path, "PNG")) QMessageBox::warning(this, tr("Export"), tr("Could not save the image."));
 }

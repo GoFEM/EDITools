@@ -60,7 +60,7 @@ QString shortName(const QString &path)
 }
 }
 
-FitStatisticsWindow::FitStatisticsWindow(QWidget *parent, std::function<void()> refresh)
+FitStatisticsWindow::FitStatisticsWindow(QWidget *parent, std::function<void()> refresh, bool central)
   : WorkspaceView(parent)
 {
   setObjectName("fitStatisticsWindow");
@@ -228,7 +228,8 @@ FitStatisticsWindow::FitStatisticsWindow(QWidget *parent, std::function<void()> 
   auto *maps = new QWidget(spatialTabs);
   auto *mapLayout = new QHBoxLayout(maps);
   mapLayout->addWidget(mapA); mapLayout->addWidget(mapB);
-  spatialTabs->addTab(maps, tr("Station maps"));
+  if(!central) spatialTabs->addTab(maps, tr("Station maps"));
+  else { setCentralMaps({mapA, mapB}, {tr("Response A"), tr("Response B")}, tr("Fit appearance")); maps->hide(); }
   auto *heatmaps = new QWidget(spatialTabs);
   auto *heatLayout = new QHBoxLayout(heatmaps);
   heatLayout->addWidget(heatA); heatLayout->addWidget(heatB);
@@ -301,11 +302,13 @@ void FitStatisticsWindow::setData(const std::shared_ptr<MTSurveyData> &data,
     try {
       if(!coordinates.utm) coordinates = SurveyCoordinates::suggested(locations);
       locations = coordinates.transform(locations);
+      renderedCoordinates = coordinates;
       backgroundA->setCoordinates(coordinates, .001); backgroundB->setCoordinates(coordinates, .001);
       mapXLabel = coordinates.centered ? tr("East offset (km)") : tr("Easting (km)");
       mapYLabel = coordinates.centered ? tr("North offset (km)") : tr("Northing (km)");
       for(auto &position: locations) { position[0] /= 1000.; position[1] /= 1000.; }
     } catch(const std::exception &) {
+      renderedCoordinates = {};
       backgroundA->setCoordinates(SurveyCoordinates{}); backgroundB->setCoordinates(SurveyCoordinates{});
       mapXLabel = tr("Longitude (°)"); mapYLabel = tr("Latitude (°)");
     }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CommandRibbon.h"
+#include "SurveyCoordinates.h"
 #include <QJsonObject>
 #include <QPointer>
 #include <QWidget>
@@ -9,6 +10,7 @@
 class QLayout;
 class QAbstractButton;
 class QTabWidget;
+class QComboBox;
 
 // A view owns its content and its ribbon editors even when those editors are
 // displayed by the main window. Each instance has independent display state.
@@ -19,6 +21,10 @@ public:
   explicit WorkspaceView(QWidget *parent = nullptr);
   ~WorkspaceView() override;
   void setEmbedded();
+  void setCentralMaps(const QList<QWidget *> &maps, const QStringList &labels, const QString &toolPage);
+  QWidget *centralMap() const;
+  QList<QWidget *> centralMaps() const;
+  virtual SurveyCoordinates centralMapCoordinates() const { return {}; }
   std::vector<CommandRibbon::Page> toolPages() const;
   void addToolGroup(const QString &page, const QString &title, QLayout *controls);
   void setToolVisible(QWidget *control, bool visible);
@@ -33,6 +39,10 @@ public:
     if(auto *found = findChild<T *>(name)) return found;
     for(const auto &page: pages) if(page.widget)
       if(auto *found = page.widget->findChild<T *>(name)) return found;
+    for(const auto &map: sharedMaps) if(map) {
+      if(map->objectName() == name) if(auto *found = qobject_cast<T *>(map.data())) return found;
+      if(auto *found = map->findChild<T *>(name)) return found;
+    }
     return nullptr;
   }
   static QJsonObject savePlotRanges(QWidget *content);
@@ -40,10 +50,13 @@ public:
 signals:
   void stationActivated(const QString &name);
   void toolsChanged();
+  void centralMapChanged();
 protected:
   void showEvent(QShowEvent *event) override;
   bool eventFilter(QObject *object, QEvent *event) override;
 private:
+  QList<QPointer<QWidget>> sharedMaps;
+  QPointer<QComboBox> sharedMapChoice;
   struct ToolPage { QString title; QPointer<QWidget> widget; };
   std::vector<ToolPage> pages;
   QList<QPointer<QWidget>> editors;

@@ -32,6 +32,7 @@
 #include <QListWidget>
 #include <QPushButton>
 #include <QTreeWidget>
+#include <QStackedWidget>
 #include <QTabWidget>
 #include <QSettings>
 #include <QTemporaryDir>
@@ -1642,13 +1643,14 @@ void station_table(const QString &directory)
   auto *previous = widget<QAction>(window, "actionAuto_mask_previous"), *next = widget<QAction>(window, "actionAuto_mask_next");
   check(previous->isEnabled() && !next->isEnabled(), "Navigation boundaries ignore the table sort order");
   previous->trigger();
-  check(table->currentItem()->text(0) == "C" && table->selectedItems().size() == 2, "Sorted navigation lost station or batch selection");
+  check(table->currentItem()->text(0) == "C" && table->selectedItems().size() == 1 && table->currentItem()->isSelected(), "Sorted navigation did not select the current station");
   next->trigger();
   check(table->currentItem() == station, "Sorted next navigation failed");
   table->sortByColumn(2, Qt::AscendingOrder);
   check(table->topLevelItem(0)->text(0) == "B" && table->topLevelItem(2)->text(0) == "A", "Coordinates sorted as text");
   checkNear(station->data(2, Qt::DisplayRole).toDouble(), 55.);
   checkNear(station->data(3, Qt::DisplayRole).toDouble(), 12.);
+  table->findItems("B", Qt::MatchExactly).front()->setSelected(true);
   station->setCheckState(0, Qt::Unchecked);
   check(table->findItems("B", Qt::MatchExactly).front()->checkState(0) == Qt::Unchecked && table->findItems("C", Qt::MatchExactly).front()->checkState(0) == Qt::Checked, "Sorted table checkboxes changed the wrong stations");
   widget<QAction>(window, "actionUndo")->trigger();
@@ -2302,12 +2304,21 @@ void workspace_tabs(const QString &directory)
   check(!tabs->isAncestorOf(navigator) && navigator->isVisible() && sharedMap->isVisible(), "Station navigator must remain outside workspace tabs");
   check(widget<QSplitter>(window, "splitter_5")->indexOf(tabs) == 1, "Workspace tabs must be beside the shared navigator");
   const auto id = tabs->id(first);
-  auto *map = widget<QCustomPlot>(*first, "profileMap");
-  const auto projection = SurveyCoordinates::suggested(survey->geographic_locations());
-  for(const auto &p: projection.transform({{54.999, 9., 0.}, {55.021, 9., 0.}})) {
-    const QPointF point(map->xAxis->coordToPixel(p[1] / 1000.), map->yAxis->coordToPixel(p[0] / 1000.));
+  check(!first->findChild<QCustomPlot *>("profileMap") && !widget<QCustomPlot>(*first, "profileExportMap")->isVisible(), "Profile still contains a visible duplicate map");
+  const auto visibleOverlay = [&](const char *name) -> QCPLayerable * {
+    for(auto *layer: sharedMap->findChildren<QCPLayerable *>(name)) if(layer->visible()) return layer;
+    return nullptr;
+  };
+  auto *map = sharedMap;
+  map->xAxis->setRange(8.99, 9.01); map->yAxis->setRange(54.995, 55.025); map->replot();
+  check(visibleOverlay("profileMapOverlay") && !map->interactions().testFlag(QCP::iRangeDrag), "Profile did not activate central-map drawing");
+  for(double latitude: {54.999, 55.021}) {
+    const QPointF point(map->xAxis->coordToPixel(9.), map->yAxis->coordToPixel(latitude));
     map_gesture(map, point, point);
   }
+  check(visibleOverlay("profileMapOverlay")->property("vertexCount").toInt() == 2, "Central map did not display profile vertices");
+  const auto geographicLine = first->saveViewState()["vertices"].toArray();
+  check(std::abs(geographicLine[0].toArray()[0].toDouble() - 54.999) < 1e-7, "Central map drawing changed geographic position");
   check(widget<QTableWidget>(*first, "profileStations")->rowCount() == 2, "Workspace corridor missing stations");
   widget<QDoubleSpinBox>(*first, "profileDistance")->setValue(1.5);
   widget<QCheckBox>(*first, "profileRotateStrike")->setChecked(true);
@@ -2323,7 +2334,12 @@ void workspace_tabs(const QString &directory)
   checkNear(widget<QDoubleSpinBox>(*first, "profileDistance")->value(), 1.5);
   auto *bar = widget<QTabBar>(*tabs, "workspaceTabBar"); bar->moveTab(2, 1); bar->moveTab(0, 2);
   check(tabs->type(tabs->widget(0)) == "tf", "TF tab moved from its pinned position");
-  tabs->setCurrentIndex(0); widget<QComboBox>(window, "mapCoordinateSwitch")->setCurrentIndex(1); widget<QCheckBox>(window, "mapCenterUtm")->setChecked(true);
+  tabs->setCurrentIndex(0);
+  check(!visibleOverlay("profileMapOverlay") && map->interactions().testFlag(QCP::iRangeDrag), "Leaving profile retained its overlay or drawing mode");
+  const auto beforeClick = first->saveViewState()["vertices"].toArray();
+  map_gesture(map, map->axisRect()->rect().center(), map->axisRect()->rect().center());
+  check(first->saveViewState()["vertices"].toArray() == beforeClick, "Inactive profile handled shared-map clicks");
+  widget<QComboBox>(window, "mapCoordinateSwitch")->setCurrentIndex(1); widget<QCheckBox>(window, "mapCenterUtm")->setChecked(true);
   tabs->setCurrentWidget(first);
   check(widget<QTableWidget>(*first, "profileStations")->rowCount() == 2, "Changing UTM origin erased corridor");
   widget<QTableWidget>(*first, "profileStations")->setCurrentCell(1, 0);
@@ -2349,7 +2365,37 @@ void workspace_tabs(const QString &directory)
     widget<QAction>(window, action)->trigger(); QApplication::processEvents();
     check(dynamic_cast<WorkspaceView *>(tabs->currentWidget()) && !tabs->currentWidget()->isWindow(), "Analysis opened a separate window");
     check(widget<QWidget>(window, "ribbonPages")->height() == ribbonHeight, "Context changes resized ribbon");
-    check(navigator->isVisible() && sharedMap->isVisible(), "Changing analysis tabs hid the shared navigator");
+    auto *mapHost = widget<QStackedWidget>(window, "sharedMapHost");
+    check(navigator->isVisible() && mapHost->isVisible() && mapHost->currentWidget()->isVisible(), "Changing analysis tabs hid the shared map area");
+    if(QString(action) == "actionPeriod_maps") {
+      auto *view = dynamic_cast<WorkspaceView *>(tabs->currentWidget());
+      check(mapHost->currentWidget() == view->centralMap() && !tabs->isAncestorOf(view->centralMap()) && !sharedMap->isVisible(), "Period map did not use the single shared map area");
+      const auto artifacts = qEnvironmentVariable("EDITOOLS_TEST_ARTIFACT_DIR");
+      if(!artifacts.isEmpty()) window.grab().save(artifacts + "/workspace-period-map.png");
+    }
+    if(QString(action) == "actionFit_statistics") {
+      auto *view = dynamic_cast<WorkspaceView *>(tabs->currentWidget());
+      check(view->centralMaps().size() == 2 && mapHost->currentWidget() == view->centralMaps()[0], "RMS map A did not use the shared map area");
+      widget<QComboBox>(*view, "sharedMapChoice")->setCurrentIndex(1);
+      check(mapHost->currentWidget() == view->centralMaps()[1] && !view->centralMaps()[0]->isVisible(), "RMS selector displayed more than one map");
+      const auto artifacts = qEnvironmentVariable("EDITOOLS_TEST_ARTIFACT_DIR");
+      if(!artifacts.isEmpty()) window.grab().save(artifacts + "/workspace-rms-map.png");
+    }
+    check(!visibleOverlay("profileMapOverlay"), "Profile overlay leaked into another analysis");
+    if(QString(action) == "actionCompare_stations") {
+      check(visibleOverlay("comparisonMapOverlay"), "Neighbour markers did not move to shared map");
+      auto *comparison = tabs->currentWidget();
+      check(!comparison->findChild<QCustomPlot *>("compareMap") && !widget<QCustomPlot>(*comparison, "compareExportMap")->isVisible(), "Neighbours retained a duplicate visible map");
+      auto *choices = widget<QListWidget>(*comparison, "compareStations");
+      const auto old = choices->item(0)->checkState();
+      const auto name = choices->item(0)->data(Qt::UserRole).toString();
+      const auto location = survey->get_station_data(name.toStdString()).position();
+      const auto coordinates = SurveyCoordinates::calculate(survey->geographic_locations(), 32, true, true);
+      const auto p = coordinates.transform({location}).front();
+      const QPointF point(sharedMap->xAxis->coordToPixel(p[1]), sharedMap->yAxis->coordToPixel(p[0]));
+      map_gesture(sharedMap, point, point);
+      check(choices->item(0)->checkState() != old, "Shared map click did not toggle neighbour curves");
+    } else check(!visibleOverlay("comparisonMapOverlay"), "Neighbour overlay leaked into another analysis");
   }
   tabs->setCurrentWidget(first); widget<QAction>(window, "actionSave_project")->trigger();
   const auto artifacts = qEnvironmentVariable("EDITOOLS_TEST_ARTIFACT_DIR");
@@ -2363,6 +2409,17 @@ void workspace_tabs(const QString &directory)
   check(restoredProfile && restoredTabs->tabText(restoredTabs->currentIndex()) == "North line", "Project lost renamed profile");
   checkNear(widget<QDoubleSpinBox>(*restoredProfile, "profileDistance")->value(), 1.5);
   check(widget<QTableWidget>(*restoredProfile, "profileStations")->rowCount() == 2, "Project lost geographic corridor");
+  WorkspaceView *restoredFit = nullptr;
+  for(int i = 0; i < restoredTabs->count(); ++i) if(restoredTabs->type(restoredTabs->widget(i)) == "fit") restoredFit = dynamic_cast<WorkspaceView *>(restoredTabs->widget(i));
+  check(restoredFit && widget<QComboBox>(*restoredFit, "sharedMapChoice")->currentIndex() == 1 && restoredFit->centralMap() == restoredFit->centralMaps()[1], "Project lost the active RMS map choice");
+  restoredTabs->setCurrentWidget(restoredFit);
+  QPointer<QWidget> closingMap = restoredFit->centralMap();
+  widget<QAction>(restored, "actionClose_view")->trigger();
+  check(closingMap.isNull(), "Closing an analysis left its map in the shared area");
+  widget<QAction>(restored, "actionReopen_view")->trigger();
+  auto *reopenedFit = dynamic_cast<WorkspaceView *>(restoredTabs->currentWidget());
+  check(widget<QStackedWidget>(restored, "sharedMapHost")->currentWidget() == reopenedFit->centralMap() && widget<QComboBox>(*reopenedFit, "sharedMapChoice")->currentIndex() == 1, "Reopened RMS map did not restore its selector");
+  restoredTabs->setCurrentWidget(restoredProfile);
   const int count = restoredTabs->count(); QPointer<QWidget> closing = restoredProfile;
   widget<QAction>(restored, "actionClose_view")->trigger(); check(closing.isNull() && restoredTabs->count() == count - 1, "Close did not release the view");
   widget<QAction>(restored, "actionReopen_view")->trigger(); check(restoredTabs->count() == count && restoredTabs->id(restoredTabs->currentWidget()) == id, "Reopen lost identity");

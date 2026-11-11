@@ -17,7 +17,11 @@ polarity review, period layout or detailed auto-mask review from **Views**
 or **Auto mask**. The analysis opens beside TF view in the same project window.
 The station table, calculated responses and survey map stay on the left across
 all tabs. Only the area to their right switches between TF and analysis views;
-the active view's controls appear in the ribbon.
+the active view's controls appear in the ribbon. Every geographic analysis uses
+the single shared map area. Profile corridors and neighbour markers appear only
+for their active tab. Period/PT maps replace the survey map there; the period
+tab shows station values. For fit statistics, **Fit appearance → Shared map**
+selects response A or B. Switching tabs restores the corresponding map.
 
 A view command returns to an existing tab. **Views → New view** opens another
 instance; **Duplicate view** copies the current analysis and its settings.

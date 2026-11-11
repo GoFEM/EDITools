@@ -192,7 +192,7 @@ MainWindow::MainWindow(QWidget *parent) :
       history->record(tr("Topography / elevations"));
     } catch(const std::exception &e) { QMessageBox::warning(this,tr("Topography"),QString::fromUtf8(e.what())); }
   });
-  auto *mapControls = new QWidget(ui->splitter_3);
+  auto *mapControls = new QWidget(ui->splitter_3); mapControls->setObjectName("surveyMapControls");
   auto *mapControlsLayout = new QVBoxLayout(mapControls);
   mapControlsLayout->setContentsMargins(4, 0, 4, 0);
   auto *mapActions = new QHBoxLayout;
@@ -274,7 +274,11 @@ MainWindow::MainWindow(QWidget *parent) :
 
   connect(autoMaskWorkflow, &AutoMaskWorkflow::navigateRequested, this, [this](int direction) {
     const int row = ui->stationList->indexOfTopLevelItem(ui->stationList->currentItem()) + direction;
-    if(row >= 0 && row < ui->stationList->topLevelItemCount()) ui->stationList->setCurrentItem(ui->stationList->topLevelItem(row), 0, QItemSelectionModel::NoUpdate);
+    if(row >= 0 && row < ui->stationList->topLevelItemCount()) {
+      auto *item = ui->stationList->topLevelItem(row);
+      ui->stationList->setCurrentItem(item, 0, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+      ui->stationList->scrollToItem(item);
+    }
   });
   auto *autoMenu = new QMenu(tr("Auto mask"), this); ui->menuBar->insertMenu(ui->menuData->menuAction(), autoMenu);
   for(const char *name : {"actionAuto_mask_preview", "actionAuto_mask_settings", "actionAuto_masking", "actionAuto_mask_previous", "actionAuto_mask_next",
@@ -690,6 +694,18 @@ void MainWindow::updateMap()
   coordinateInfoLabel->setToolTip(QString::fromStdString(coordinates.description()));
   mapHandler->set_data(locations,
                        mtSurvey->get_stations_names());
+  if(sharedMapHost) syncCentralMap(); else updateStationCoordinates(view);
+  on_stationList_itemSelectionChanged();
+  if(workspaces) if(auto *view = dynamic_cast<ProfileWindow *>(workspaces->currentWidget()))
+    view->setSharedMapActive(true, mapCoordinates);
+  if(workspaces) if(auto *view = dynamic_cast<StationComparisonWindow *>(workspaces->currentWidget()))
+    view->setSharedMapActive(true, mapCoordinates);
+}
+
+void MainWindow::updateStationCoordinates(const SurveyCoordinates &view)
+{
+  if(!mtSurvey) return;
+  const auto locations = view.transform(mtSurvey->geographic_locations());
   const QSignalBlocker blocker(ui->stationList);
   const bool sorting = ui->stationList->isSortingEnabled();
   ui->stationList->setSortingEnabled(false);
@@ -716,7 +732,6 @@ void MainWindow::updateMap()
   }
   updateStationDetails();
   ui->stationList->setSortingEnabled(sorting);
-  on_stationList_itemSelectionChanged();
 }
 
 void MainWindow::updatePlots(bool rescaleAxes)
@@ -727,6 +742,8 @@ void MainWindow::updatePlots(bool rescaleAxes)
   updateActionAvailability();
   rhoPlusOverlay->hide();
   QTreeWidgetItem* item = ui->stationList->currentItem();
+  if(workspaces) if(auto *view = dynamic_cast<ProfileWindow *>(workspaces->currentWidget()))
+    view->selectStation(item ? item->text(0) : QString());
   if(stationHeading) {
     stationHeading->setText(item ? item->text(0) : tr("No station selected"));
     stationHeading->setToolTip(stationHeading->text());

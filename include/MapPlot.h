@@ -51,6 +51,7 @@ private:
   std::vector<std::string> m_names;
   std::vector<QCPItemText*> m_stationLabels;
   bool m_stationNamesVisible;
+  bool m_utm = false;
 };
 
 #endif // MAP_PLOT_H

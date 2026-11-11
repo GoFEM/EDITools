@@ -46,6 +46,7 @@ class MapBackground;
 class FitStatisticsWindow;
 class PeriodMapWindow;
 class ProfileWindow;
+class QStackedWidget;
 class PeriodLayoutWindow;
 class ImpedanceValidityWindow;
 class SurveyAverageWindow;
@@ -245,6 +246,8 @@ private:
   void setupWorkspace();
   QWidget *openWorkspace(const QString &type, bool create = false, const QJsonObject &saved = {});
   void activateWorkspace();
+  void syncCentralMap();
+  void updateStationCoordinates(const SurveyCoordinates &coordinates);
   void refreshWorkspace(QWidget *view);
   QJsonObject workspaceSnapshot(QWidget *view) const;
   QJsonObject saveWorkspace() const;
@@ -252,6 +255,7 @@ private:
   void clearWorkspace();
   void exportWorkspace(const QString &format);
   WorkspaceTabs *workspaces = nullptr;
+  QStackedWidget *sharedMapHost = nullptr;
   std::vector<CommandRibbon::Page> tfTools;
   QList<QJsonObject> closedViews;
   bool restoringWorkspace = false;
