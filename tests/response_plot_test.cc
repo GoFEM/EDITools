@@ -2387,6 +2387,15 @@ void workspace_tabs(const QString &directory)
       auto *comparison = tabs->currentWidget();
       check(!comparison->findChild<QCustomPlot *>("compareMap") && !widget<QCustomPlot>(*comparison, "compareExportMap")->isVisible(), "Neighbours retained a duplicate visible map");
       auto *choices = widget<QListWidget>(*comparison, "compareStations");
+      select_station(window, "WS_A");
+      check(widget<QLabel>(*comparison, "compareReference")->text() == "WS_A" &&
+            choices->item(0)->data(Qt::UserRole).toString() == "WS_A", "Main station table did not set comparison reference");
+      check(!widget<QComboBox>(*comparison, "compareAnchor")->isVisible(), "Embedded comparison retained separate reference selector");
+      choices->setCurrentRow(1);
+      check(widget<QLabel>(*comparison, "compareReference")->text() == "WS_A", "Neighbour highlight changed the reference");
+      tabs->setCurrentIndex(0); select_station(window, "WS_B"); tabs->setCurrentWidget(comparison);
+      check(widget<QLabel>(*comparison, "compareReference")->text() == "WS_B" &&
+            choices->item(0)->data(Qt::UserRole).toString() == "WS_B", "Reactivating comparison did not follow the main station table");
       const auto old = choices->item(0)->checkState();
       const auto name = choices->item(0)->data(Qt::UserRole).toString();
       const auto location = survey->get_station_data(name.toStdString()).position();
@@ -2395,6 +2404,7 @@ void workspace_tabs(const QString &directory)
       const QPointF point(sharedMap->xAxis->coordToPixel(p[1]), sharedMap->yAxis->coordToPixel(p[0]));
       map_gesture(sharedMap, point, point);
       check(choices->item(0)->checkState() != old, "Shared map click did not toggle neighbour curves");
+      check(widget<QLabel>(*comparison, "compareReference")->text() == "WS_B", "Map visibility toggle changed the reference");
     } else check(!visibleOverlay("comparisonMapOverlay"), "Neighbour overlay leaked into another analysis");
   }
   tabs->setCurrentWidget(first); widget<QAction>(window, "actionSave_project")->trigger();

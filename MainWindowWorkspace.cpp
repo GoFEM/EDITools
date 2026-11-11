@@ -171,7 +171,10 @@ void MainWindow::activateWorkspace()
   for(int i = 0; i < workspaces->count(); ++i)
     if(auto *v = dynamic_cast<StationComparisonWindow *>(workspaces->widget(i)))
       if(v != view) v->setSharedMapActive(false, mapCoordinates);
-  if(auto *v = dynamic_cast<StationComparisonWindow *>(view)) v->setSharedMapActive(true, mapCoordinates);
+  if(auto *v = dynamic_cast<StationComparisonWindow *>(view)) {
+    v->selectReferenceStation(ui->stationList->currentItem() ? ui->stationList->currentItem()->text(0) : QString());
+    v->setSharedMapActive(true, mapCoordinates);
+  }
   if(auto *v = dynamic_cast<ProfileWindow *>(view)) {
     v->setSharedMapActive(true, mapCoordinates);
     v->selectStation(ui->stationList->currentItem() ? ui->stationList->currentItem()->text(0) : QString());

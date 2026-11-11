@@ -12,6 +12,8 @@
 Open **Views → 2D profile**, or click **2D profile…** beside the station map,
 to draw a corridor on the shared map at the left and inspect its stations.
 The profile tab contains sections and the corridor table, with no duplicate map.
+Section colourbars use a compact width and match the height of the data area,
+including when the view is resized.
 Only the active profile’s line, corridor and station markers are shown; they
 disappear when you switch to TF view or another analysis and return when you
 reopen that profile. Each profile tab keeps its own line.

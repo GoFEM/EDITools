@@ -50,7 +50,11 @@ StationComparisonWindow::StationComparisonWindow(QWidget *parent, QCustomPlot *s
   controls->addWidget(new QLabel(tr("Reference"), this));
   anchor = new QComboBox(this);
   anchor->setObjectName("compareAnchor");
-  controls->addWidget(anchor);
+  referenceLabel = new QLabel(this);
+  referenceLabel->setObjectName("compareReference");
+  referenceLabel->setToolTip(tr("Select the reference station in the main station table."));
+  if(sharedMap) { anchor->hide(); controls->addWidget(referenceLabel); }
+  else { referenceLabel->hide(); controls->addWidget(anchor); }
   count = new QSpinBox(this);
   count->setObjectName("compareCount");
   count->setRange(1, 100);
@@ -81,7 +85,7 @@ StationComparisonWindow::StationComparisonWindow(QWidget *parent, QCustomPlot *s
   stations = new QListWidget(left);
   stations->setObjectName("compareStations");
   leftLayout->addWidget(stations, 1);
-  stations->setToolTip(tr("One checkbox per station controls its curves. Colours identify stations. "
+  stations->setToolTip(tr("Select a row to highlight its curves. One checkbox per station controls visibility. Colours identify stations. "
                           "Distances are from the reference; phases retain the stored convention. Masked, "
                           "missing and disabled samples are omitted without connecting across gaps."));
   map = new QCustomPlot(left);
@@ -100,6 +104,7 @@ StationComparisonWindow::StationComparisonWindow(QWidget *parent, QCustomPlot *s
   second = new QCustomPlot(right);
   second->setObjectName("compareSecondPlot");
   for (auto *plot : {first, second}) {
+    plot->addLayer("comparisonHighlight", plot->layer("main"), QCustomPlot::limAbove);
     plots->addWidget(plot, 1);
     plot->setInteractions(QCP::iRangeDrag | QCP::iRangeZoom);
     plot->xAxis->setLabel(tr("Period (s)"));
@@ -114,6 +119,7 @@ StationComparisonWindow::StationComparisonWindow(QWidget *parent, QCustomPlot *s
   connect(nearest, &QPushButton::clicked, this, [this] { selectNearest(); });
   connect(anchor, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] { rebuild(); });
   connect(stations, &QListWidget::itemChanged, this, [this] { draw(); });
+  connect(stations, &QListWidget::currentItemChanged, this, [this] { highlightStation(); });
   connect(errors, &QCheckBox::toggled, this, [this] { draw(); });
   connect(component, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] { draw(); });
   connect(family, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] {
@@ -148,7 +154,7 @@ StationComparisonWindow::StationComparisonWindow(QWidget *parent, QCustomPlot *s
         auto *item = stations->item(i);
         if(item->data(Qt::UserRole).toString() == nearest && (item->flags() & Qt::ItemIsEnabled)) {
           item->setCheckState(item->checkState() == Qt::Checked ? Qt::Unchecked : Qt::Checked);
-          stations->setCurrentItem(item); emit stationActivated(nearest); break;
+          stations->setCurrentItem(item); break;
         }
       }
     });
@@ -219,6 +225,8 @@ void StationComparisonWindow::setData(std::shared_ptr<MTSurveyData> data, const 
     selectNearest();
 }
 void StationComparisonWindow::rebuild() {
+  referenceLabel->setText(anchor->currentText());
+  const QString current = stations->currentItem() ? stations->currentItem()->data(Qt::UserRole).toString() : QString();
   QStringList checked;
   for (int i = 0; i < stations->count(); ++i)
     if (stations->item(i)->checkState() == Qt::Checked)
@@ -239,6 +247,7 @@ void StationComparisonWindow::rebuild() {
                                                      : tr(" · no location")),
                                          stations);
         item->setData(Qt::UserRole, name);
+        if(name == current) stations->setCurrentItem(item);
         item->setCheckState(checked.contains(name) ? Qt::Checked : Qt::Unchecked);
         if (!survey->is_active(entry.second)) {
           item->setText(item->text() + tr(" · disabled"));
@@ -249,6 +258,29 @@ void StationComparisonWindow::rebuild() {
     }
   }
   draw();
+}
+void StationComparisonWindow::selectReferenceStation(const QString &name) {
+  const int index = anchor->findText(name);
+  if(index < 0 || index == anchor->currentIndex()) return;
+  const QSignalBlocker block(anchor);
+  anchor->setCurrentIndex(index);
+  rebuild();
+  selectNearest();
+}
+
+void StationComparisonWindow::highlightStation() {
+  const QString selected = stations->currentItem() ? stations->currentItem()->data(Qt::UserRole).toString() : QString();
+  for(auto *plot: {first, second}) {
+    for(int i = 0; i < plot->graphCount(); ++i) {
+      auto *graph = plot->graph(i);
+      const bool highlighted = graph->name() == selected;
+      const auto color = graph->pen().color();
+      graph->setPen(QPen(color, highlighted ? 3. : 1.2));
+      graph->setScatterStyle(QCPScatterStyle(highlighted ? QCPScatterStyle::ssDisc : QCPScatterStyle::ssCircle, highlighted ? 7. : 4.));
+      graph->setLayer(highlighted ? "comparisonHighlight" : "main");
+    }
+    plot->replot(QCustomPlot::rpQueuedReplot);
+  }
 }
 void StationComparisonWindow::selectNearest() {
   int remaining = count->value();
@@ -391,5 +423,6 @@ void StationComparisonWindow::draw() {
     plot->replot();
   }
   status->setText(tr("%1 checked stations · %2 visible scalar samples").arg(visible).arg(samples));
+  highlightStation();
   updateSharedMap();
 }

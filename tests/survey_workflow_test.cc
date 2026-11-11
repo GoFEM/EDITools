@@ -189,6 +189,16 @@ void comparisonChecks(const std::shared_ptr<MTSurveyData> &survey) {
         "Date-line nearest neighbour wrong");
   auto *plot = control<QCustomPlot>(window, "compareFirstPlot");
   check(plot->graphCount() == 2, "Checked station curves missing");
+  auto *second = control<QCustomPlot>(window, "compareSecondPlot");
+  plot->xAxis->setRange(.2, 2.);
+  list->setCurrentRow(1);
+  check(plot->graph(1)->pen().widthF() > plot->graph(0)->pen().widthF() &&
+        second->graph(1)->pen().widthF() > second->graph(0)->pen().widthF(),
+        "Selecting a neighbour did not highlight both curves");
+  check(plot->xAxis->range() == QCPRange(.2, 2.), "Neighbour highlight reset plot zoom");
+  list->setCurrentRow(0);
+  check(plot->graph(0)->pen().widthF() > plot->graph(1)->pen().widthF(),
+        "Neighbour highlight did not follow list selection");
   check(plot->graph(0)->dataCount() == 2 && std::isnan(plot->graph(0)->data()->at(1)->value),
         "Masked period is not a curve gap");
   list->item(1)->setCheckState(Qt::Unchecked);
@@ -209,6 +219,8 @@ void comparisonChecks(const std::shared_ptr<MTSurveyData> &survey) {
   check(list->item(1)->checkState() == Qt::Checked && plot->graphCount() == 2,
         "Map click did not toggle station curves");
   control<QComboBox>(window, "compareFamily")->setCurrentIndex(1);
+  check(plot->graph(0)->pen().widthF() > plot->graph(1)->pen().widthF(),
+        "Changing curve family lost the neighbour highlight");
   check(plot->graph(0)->dataCount() == 2 && plot->graph(0)->data()->at(0)->value == 0.,
         "Valid zero tipper omitted");
   control<QCheckBox>(window, "compareErrors")->setChecked(true);

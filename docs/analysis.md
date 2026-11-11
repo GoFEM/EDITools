@@ -45,14 +45,17 @@ matched counts mean the responses cover different subsets of the observations.
 
 ## Neighbouring-station comparison
 
-**Views → Neighbours** overlays the stations selected in the
-main station list. With one station selected, it chooses that reference and its
-nearest enabled neighbours. Change **Reference** and click **Nearest** to choose
-a different group; the count specifies neighbours in addition to the reference.
+**Views → Neighbours** uses the current station in the main station table as its
+reference and overlays its nearest enabled neighbours. Select another row in
+the main table to change the reference and choose its nearest neighbours.
+The ribbon shows the reference name; **Nearest** reapplies the neighbour count,
+which specifies neighbours in addition to the reference.
 Distances use WGS84 geodesics and handle the date line.
 
 Each station has one visibility checkbox; clicking its marker on the shared
-map at the left toggles the same selection. Coloured neighbour markers appear
+map at the left toggles the same selection. Select a row in the comparison list
+to highlight its visible curves with thicker lines and larger filled markers,
+without changing the reference or plot zoom. Coloured neighbour markers appear
 only while that comparison tab is active; the tab has no duplicate map. Choose a component of resistivity/phase, tipper,
 or phase tensor. Colours identify stations, **Errors** shows their effective
 uncertainties, and phases retain their stored convention. Masked or missing

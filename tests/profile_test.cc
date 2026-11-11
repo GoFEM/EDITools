@@ -148,6 +148,13 @@ void dialog(const QString &directory) {
        *pt = control<QCustomPlot>(window, "profileTensorPlot");
   check(xy->property("profileSampleCount").toUInt() == 9 && yx->property("profileSampleCount").toUInt() == 9,
         "Sections lost samples");
+  for(const QSize size: {QSize(1100, 760), QSize(1400, 950)}) {
+    window.resize(size); QApplication::processEvents(); xy->replot();
+    auto *scale = control<QCPColorScale>(*xy, "profileColorScale");
+    check(scale->rect().top() == xy->axisRect()->rect().top() &&
+          scale->rect().bottom() == xy->axisRect()->rect().bottom(),
+          "Profile colourbar height does not match the data area after resizing");
+  }
   auto *rotate = control<QCheckBox>(window, "profileRotateStrike");
   auto *strikeMode = control<QComboBox>(window, "profileStrikeMode");
   auto *strikeAngle = control<QDoubleSpinBox>(window, "profileStrikeAngle");

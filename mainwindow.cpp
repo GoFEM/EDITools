@@ -744,6 +744,8 @@ void MainWindow::updatePlots(bool rescaleAxes)
   QTreeWidgetItem* item = ui->stationList->currentItem();
   if(workspaces) if(auto *view = dynamic_cast<ProfileWindow *>(workspaces->currentWidget()))
     view->selectStation(item ? item->text(0) : QString());
+  if(workspaces) if(auto *view = dynamic_cast<StationComparisonWindow *>(workspaces->currentWidget()))
+    view->selectReferenceStation(item ? item->text(0) : QString());
   if(stationHeading) {
     stationHeading->setText(item ? item->text(0) : tr("No station selected"));
     stationHeading->setToolTip(stationHeading->text());

@@ -19,12 +19,14 @@ public:
   ~StationComparisonWindow();
   void setSharedMapActive(bool active, const SurveyCoordinates &coordinates);
   void setData(std::shared_ptr<MTSurveyData> survey, const QStringList &selected = {});
+  void selectReferenceStation(const QString &name);
 
 private:
   void rebuild();
   void selectNearest();
   void draw();
   void updateSharedMap();
+  void highlightStation();
   class Overlay;
   QPointer<Overlay> overlay;
   QPointer<QCustomPlot> sharedMap;
@@ -37,7 +39,7 @@ private:
   QSpinBox *count;
   QListWidget *stations;
   QCheckBox *errors;
-  QLabel *status;
+  QLabel *status, *referenceLabel;
   QCustomPlot *map, *first, *second;
   MapBackground *background;
 };

@@ -113,6 +113,11 @@ ProfileSectionPlot::ProfileSectionPlot(QWidget *parent) : QCustomPlot(parent), c
   scale->setObjectName("profileColorScale");
   plotLayout()->addElement(0, 1, scale);
   scale->setType(QCPAxis::atRight);
+  scale->setBarWidth(12);
+  scale->axis()->setPadding(3);
+  auto *margins = new QCPMarginGroup(this);
+  axisRect()->setMarginGroup(QCP::msTop | QCP::msBottom, margins);
+  scale->setMarginGroup(QCP::msTop | QCP::msBottom, margins);
   connect(this, &QCustomPlot::mouseMove, this, [this](QMouseEvent *event) {
     if ((event->position().toPoint() - pressPosition).manhattanLength() > 4)
       dragged = true;
