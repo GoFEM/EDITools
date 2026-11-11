@@ -8,8 +8,8 @@
 ## Current plot image
 
 Use **Report → Plot image** to save a PNG of the selected station's TF view:
-the two impedance columns, induction arrows and phase-tensor ellipses. The
-image includes the current zoom, component visibility, masks, error bars and
+the station heading, two impedance columns, induction arrows and phase-tensor ellipses. The
+image includes the current zoom, ribbon colors and sizes, component visibility, masks, error bars and
 calculated response overlays. This exports the displayed layout without
 changing the survey.
 
@@ -59,8 +59,11 @@ Choose all stations or enabled stations, an optional loaded response overlay,
 error bars, and whether to include only the currently visible components.
 GoFEM and native inversion responses use the same report rendering. nRMS uses
 observed errors and all matched, enabled scalar data, independently of plot
-visibility. Fixed Y ranges from **Report → Axis ranges** are retained on every
-station page, including response overlays and empty panels. Y axes set to
+visibility. Fixed XY/YX resistivity and phase ranges from **View → Axis ranges**
+are retained on every station page, including response overlays and empty panels.
+The PDF uses one axis per quantity, so separate XX/YY ranges and the TF view's
+colors, glyph sizes and ellipse colormap apply only to the on-screen view and
+its PNG export. Y axes set to
 autoscale and period axes scale to each station. Phase wrapping follows the
 main window. Station locator maps include all valid survey locations. Missing coordinates are
 noted on the station page. Hover over an option to read its tooltip.

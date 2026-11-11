@@ -50,6 +50,8 @@ class SurveyHistory;
 class StationComparisonWindow;
 class PolarityWindow;
 class AutoMaskWorkflow;
+class TFViewControls;
+class CommandRibbon;
 
 class MainWindow : public QMainWindow
 {
@@ -144,7 +146,7 @@ private:
     }
   };
 
-  struct PlotOptions : PlotOptionsV7
+  struct PlotOptionsV8 : PlotOptionsV7
   {
     bool rhoPlus = false;
     unsigned rhoPlusGridDensity = 12;
@@ -154,6 +156,19 @@ private:
       // Keep the obsolete version-8 field readable, but never use it.
       double legacyErrorFloor=0.;
       ar & rhoPlus & legacyErrorFloor & rhoPlusGridDensity;
+    }
+  };
+
+  struct PlotOptions : PlotOptionsV8
+  {
+    TFViewStyle style;
+    TFViewRange period;
+    std::array<TFViewRange, 2> diagonals{{{true, .1, 1000.}, {true, -180., 180.}}};
+    bool errorBars = true;
+    template<class Archive> void serialize(Archive &ar, const unsigned int version)
+    {
+      PlotOptionsV8::serialize(ar, version);
+      ar & style & period & diagonals & errorBars;
     }
   };
 
@@ -222,6 +237,11 @@ private:
 
   void setupListContextMenu();
   void setupRibbon();
+  void updateStationDetails();
+  TFViewRange viewRange(int index) const;
+  void setViewRange(int index, TFViewRange range);
+  void applyViewStyle();
+  void fitViewRange(int index);
   void updateActionAvailability();
   std::vector<QAction *> surveyActions;
   void loadResponseFiles(const QStringList &files);
@@ -232,6 +252,11 @@ private:
   void applyPlotOptions(const PlotOptions &options);
   void setupTransferFunctionView();
   bool syncingPeriods = false;
+  TFViewRange periodRange;
+  TFViewControls *viewControls = nullptr;
+  CommandRibbon *ribbon = nullptr;
+  QWidget *tfView = nullptr;
+  QLabel *stationHeading = nullptr;
 
 private:
   Ui::MainWindow *ui;

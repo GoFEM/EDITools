@@ -12,6 +12,10 @@
 #include "include/PhaseTensorPlot.h"
 #include "include/PhasePlot.h"
 #include "include/TipperPlot.h"
+#include "include/StationListDelegate.h"
+#include "include/PlotColorMaps.h"
+#include <QTabBar>
+#include <QSplitter>
 #include <QApplication>
 #include <QFileDialog>
 #include <QCheckBox>
@@ -297,23 +301,17 @@ void export_report(MainWindow &window, const QString &path,
 }
 void main_axis_ranges(MainWindow &window, bool autoscale, const std::array<SurveyReport::Options::Axis, 4> &axes)
 {
-  QTimer timer; bool handled = false;
-  QObject::connect(&timer, &QTimer::timeout, [&] {
-    for(auto *top: QApplication::topLevelWidgets()) {
-      auto *dialog = qobject_cast<QDialog *>(top);
-      if(!dialog || !dialog->isVisible() || dialog->windowTitle() != "Axis ranges") continue;
-      const auto edits = dialog->findChildren<QLineEdit *>();
-      check(edits.size() == 8, "Unexpected main axis controls");
-      dialog->findChild<QCheckBox *>()->setChecked(autoscale);
-      for(unsigned i = 0; i < axes.size(); ++i) {
-        edits[2 * i]->setText(QString::number(axes[i].lower)); edits[2 * i + 1]->setText(QString::number(axes[i].upper));
-      }
-      handled = true; timer.stop(); dialog->accept(); return;
-    }
-  });
-  timer.start(0); widget<QAction>(window, "actionPlot_axis_ranges")->trigger();
-  check(handled, "Main axis dialog did not open");
+  widget<QAction>(window, "actionPlot_axis_ranges")->trigger();
+  check(!QApplication::activeModalWidget(), "Axis settings opened a modal window");
+  for(unsigned i = 0; i < 2; ++i) {
+    widget<QComboBox>(window, "viewRangeAxis")->setCurrentIndex(i + 1);
+    widget<QLineEdit>(window, "viewRangeMin")->setText(QString::number(axes[i].lower));
+    widget<QLineEdit>(window, "viewRangeMax")->setText(QString::number(axes[i].upper));
+    widget<QPushButton>(window, "viewRangeApply")->click();
+    widget<QCheckBox>(window, "viewRangeAuto")->setChecked(autoscale);
+  }
 }
+
 void map_backgrounds(const QString &directory)
 {
   struct EnvironmentGuard {
@@ -1602,6 +1600,14 @@ struct LegacyOptionsV7 : LegacyOptionsV6 {
     LegacyOptionsV6::serialize(ar,version); ar & linkTensorMasks;
   }
 };
+struct LegacyOptionsV8 : LegacyOptionsV7 {
+  bool rhoPlus = true;
+  double obsoleteFloor = 0.;
+  unsigned density = 16;
+  template<class Archive> void serialize(Archive &ar, const unsigned int version) {
+    LegacyOptionsV7::serialize(ar, version); ar & rhoPlus & obsoleteFloor & density;
+  }
+};
 void tensor_strip()
 {
   MTStationData station;
@@ -1632,6 +1638,140 @@ void tensor_strip()
   check(plot.legend->itemCount() == 4, "Scalar PT controls were not restored");
 }
 
+void tf_view_controls(MainWindow &window, const QString &directory, const QString &project)
+{
+  select_station(window, "GUIDE");
+  auto *heading = widget<QLabel>(window, "tfStationName");
+  check(heading->text() == "GUIDE" && heading->textFormat() == Qt::PlainText, "TF heading is not the current station");
+  auto *stations = widget<QListWidget>(window, "stationList");
+  check(stations->currentItem()->data(StationListDelegate::PeriodCount).toUInt() == 12, "Missing station period count");
+  widget<QAction>(window, "actionPlot_axis_ranges")->trigger();
+  check(!QApplication::activeModalWidget() && widget<QTabBar>(window, "ribbonTabs")->currentIndex() == 6,
+        "View controls must be in the ribbon");
+  auto *rho = widget<QCustomPlot>(window, "plot11"), *phase = widget<QCustomPlot>(window, "plot12");
+  auto *tipper = widget<QCustomPlot>(window, "plot21"), *tensor = widget<QCustomPlot>(window, "plot22");
+  const auto setRange = [&](int index, double minimum, double maximum) {
+    widget<QComboBox>(window, "viewRangeAxis")->setCurrentIndex(index);
+    widget<QLineEdit>(window, "viewRangeMin")->setText(QString::number(minimum));
+    widget<QLineEdit>(window, "viewRangeMax")->setText(QString::number(maximum));
+    widget<QPushButton>(window, "viewRangeApply")->click();
+  };
+  setRange(0, .03, 30.); setRange(1, 10., 500.); setRange(3, .1, 20.);
+  setRange(2, -150., 100.); setRange(4, -170., 170.);
+  check(rho->yAxis->range() == QCPRange(10, 500) && rho->graph(0)->valueAxis()->range() == QCPRange(.1, 20),
+        "TF columns did not retain independent ranges");
+  for(auto *plot: {rho, phase, tipper, tensor}) check(plot->xAxis->range() == QCPRange(.03, 30), "Ribbon period range is not shared");
+  setRange(0, -1, 30);
+  check(rho->xAxis->range() == QCPRange(.03, 30) && !widget<QLineEdit>(window, "viewRangeMin")->property("validInput").toBool(),
+        "Invalid logarithmic range changed the view");
+  setRange(0, 30, 1);
+  check(rho->xAxis->range() == QCPRange(.03, 30), "Reversed limits changed the range");
+  setRange(0, .03, 30);
+  rho->graph(1)->setSelection(QCPDataSelection(QCPDataRange(0, 1)));
+  const double observed = rho->graph(1)->data()->constBegin()->value;
+  const auto points = rho->graph(1)->data()->size();
+  const auto tensorBefore = tensor->toPixmap().toImage();
+  const auto setColor = [&](int component, const QString &color) {
+    widget<QComboBox>(window, "viewColorTarget")->setCurrentIndex(component);
+    auto *editor = widget<QComboBox>(window, "viewColor"); editor->setEditText(color);
+    QMetaObject::invokeMethod(editor->lineEdit(), "editingFinished");
+  };
+  setColor(1, "#15803d"); setColor(4, "#dc2626"); setColor(5, "#7c3aed"); setColor(7, "#dc2626");
+  setColor(1, "invalid-color");
+  check(rho->graph(1)->scatterStyle().pen().color() == QColor("#15803d"), "Invalid color replaced the applied color");
+  setColor(1, "#15803d");
+  widget<QDoubleSpinBox>(window, "viewMarkerSize")->setValue(9.);
+  widget<QDoubleSpinBox>(window, "viewLineWidth")->setValue(2.);
+  widget<QDoubleSpinBox>(window, "viewArrowScale")->setValue(120.);
+  widget<QDoubleSpinBox>(window, "viewEllipseSize")->setValue(40.);
+  widget<QComboBox>(window, "viewColorMap")->setCurrentText("Thermal");
+  widget<QCheckBox>(window, "viewColorMapReverse")->setChecked(true);
+  widget<QDoubleSpinBox>(window, "viewColorMin")->setValue(10.);
+  widget<QDoubleSpinBox>(window, "viewColorMax")->setValue(70.);
+  widget<QAction>(window, "actionShow_error_bars")->setChecked(false);
+  QApplication::processEvents();
+  check(rho->graph(1)->selection().dataPointCount() == 1 && rho->graph(1)->data()->size() == points &&
+        rho->graph(1)->data()->constBegin()->value == observed && rho->graph(5)->data()->isEmpty(),
+        "Appearance changes altered selection, observations or masks");
+  check(rho->xAxis->range() == QCPRange(.03, 30) && rho->yAxis->range() == QCPRange(10, 500), "Appearance changed zoom");
+  for(auto *plot: {rho, phase}) {
+    check(plot->graph(1)->scatterStyle().size() == 9. && plot->graph(9)->pen().color() == QColor("#15803d") &&
+          plot->graph(9)->pen().widthF() == 2. && plot->graph(5)->scatterStyle().pen().color() == QColor("#dc2626"),
+          "Colors/sizes did not reach observations, masked points and responses");
+    for(auto *bars: plot->findChildren<QCPErrorBars *>()) if(bars->dataPlottable() == plot->graph(1))
+      check(!bars->visible() && bars->pen().color() == QColor("#15803d"), "Error bars ignored view settings");
+  }
+  check(widget<QCPCurve>(*rho, "rhoPlusXY")->pen().color() == QColor("#15803d"), "Rho+ guide color is stale");
+  check(tipper->graph(0)->scatterStyle().pen().color() == QColor("#7c3aed"), "Tipper marker color is stale");
+  bool reference = false;
+  for(auto *arrow: tipper->findChildren<QCPItemLine *>())
+    if(arrow->objectName() == "tipperReferenceArrow") {
+      reference = true;
+      checkNear(QLineF(arrow->start->pixelPosition(), arrow->end->pixelPosition()).length(), 120.);
+      check(arrow->pen().color() == QColor("#7c3aed") && arrow->pen().widthF() == 2., "Tipper reference did not follow appearance");
+    }
+  check(reference, "Tipper reference missing after restyling");
+  auto *scale = tensor->findChild<QCPColorScale *>();
+  check(scale && scale->dataRange() == QCPRange(10, 70) && scale->gradient() == PlotColorMaps::gradient("Thermal").inverted(),
+        "Tensor color scale does not match ribbon");
+  check(tensor->toPixmap().toImage() != tensorBefore, "Ellipse appearance did not repaint");
+  select_station(window, "OUTLIER"); select_station(window, "GUIDE");
+  check(heading->text() == "GUIDE" && rho->xAxis->range() == QCPRange(.03, 30) &&
+        rho->graph(0)->valueAxis()->range() == QCPRange(.1, 20), "Station navigation lost heading or fixed ranges");
+  // Masking remains connected after recoloring and resizing; the paired diagonal follows XY.
+  for(int i = 0; i < 8; ++i) rho->graph(i)->setSelection(QCPDataSelection());
+  rho->graph(1)->setSelection(QCPDataSelection(QCPDataRange(0, 1)));
+  widget<QMenu>(*rho, "")->actions().front()->trigger();
+  check(rho->graph(4)->data()->size() == 1 && rho->graph(5)->data()->size() == 1, "Restyling broke paired masking");
+  widget<QAction>(window, "actionUndo")->trigger();
+  check(rho->graph(4)->data()->isEmpty() && rho->graph(5)->data()->isEmpty(), "Restyled masks cannot be undone");
+  widget<QAction>(window, "actionSave_project")->trigger();
+  {
+    MainWindow restored; file_action(restored, "actionLoad_project", {project}); select_station(restored, "GUIDE");
+    auto *plot = widget<QCustomPlot>(restored, "plot11");
+    check(plot->xAxis->range() == QCPRange(.03, 30) && plot->graph(0)->valueAxis()->range() == QCPRange(.1, 20) &&
+          plot->graph(1)->scatterStyle().size() == 9. && plot->graph(9)->pen().color() == QColor("#15803d"), "Project lost TF appearance/ranges");
+    check(!widget<QAction>(restored, "actionShow_error_bars")->isChecked() &&
+          widget<QComboBox>(restored, "viewColorMap")->currentText() == "Thermal" &&
+          widget<QCheckBox>(restored, "viewColorMapReverse")->isChecked() &&
+          widget<QDoubleSpinBox>(restored, "viewArrowScale")->value() == 120., "Project lost strip settings");
+  }
+  const auto imagePath = directory + "/tf-heading.png";
+  file_action(window, "actionSave_as_PDF", {imagePath});
+  const QImage exported(imagePath);
+  check(!exported.isNull() && exported.height() > widget<QSplitter>(window, "splitter_4")->height(), "Plot image omitted station heading");
+  const auto artifacts = qEnvironmentVariable("EDITOOLS_TEST_ARTIFACT_DIR");
+  if(!artifacts.isEmpty()) {
+    window.showNormal(); window.resize(1400, 1000); QApplication::processEvents();
+    check(window.grab().save(artifacts + "/view-ribbon.png"), "Could not save ribbon preview");
+    window.resize(1000, 800); QApplication::processEvents();
+    auto *referenceArrow = widget<QCPItemLine>(*tipper, "tipperReferenceArrow");
+    check(tipper->axisRect()->rect().contains(referenceArrow->start->pixelPosition().toPoint()) &&
+          tipper->axisRect()->rect().contains(referenceArrow->end->pixelPosition().toPoint()), "Narrow view clipped the reference arrow");
+    check(window.grab().save(artifacts + "/view-ribbon-narrow.png"), "Could not save narrow ribbon preview");
+  }
+  widget<QAction>(window, "actionDecimate")->trigger();
+  check(stations->currentItem()->data(StationListDelegate::PeriodCount).toUInt() == 6, "Decimation left stale period counts");
+  widget<QAction>(window, "actionUndo")->trigger();
+  check(stations->currentItem()->data(StationListDelegate::PeriodCount).toUInt() == 12, "Undo did not restore period counts");
+  QTimer nameTimer;
+  QObject::connect(&nameTimer, &QTimer::timeout, [&] {
+    if(auto *dialog = qobject_cast<QInputDialog *>(QApplication::activeModalWidget())) {
+      dialog->setTextValue("<renamed>"); nameTimer.stop(); dialog->accept();
+    }
+  });
+  nameTimer.start(0); QMetaObject::invokeMethod(&window, "renameStation");
+  check(heading->text() == "<renamed>", "Rename did not refresh the plain-text heading");
+  widget<QAction>(window, "actionUndo")->trigger();
+  check(heading->text() == "GUIDE", "Undo rename left a stale station heading");
+  widget<QAction>(window, "actionFit_TF_axes")->trigger();
+  check(rho->xAxis->range() != QCPRange(.03, 30) && widget<QCheckBox>(window, "viewRangeAuto")->isChecked(), "Fit axes did not restore automatic limits");
+  widget<QAction>(window, "actionReset_TF_appearance")->trigger();
+  check(rho->graph(1)->scatterStyle().size() == 5 && rho->graph(9)->pen().color() == PlotColors::componentColors()[1], "Reset appearance failed");
+  stations->setCurrentRow(-1);
+  check(heading->text() == "No station selected", "Empty selection retained previous station heading");
+}
+
 void rho_plus_overlay(const QString &directory)
 {
   const auto input=directory+"/rho-guide.gofem", project=directory+"/rho-guide.mtd";
@@ -1653,6 +1793,8 @@ void rho_plus_overlay(const QString &directory)
   }
   write(input,text.str());
   auto survey=std::make_shared<MTSurveyData>(); survey->load_from_gofem(input.toStdString());
+  survey->get_station_data("GUIDE").set_position({55., 12., 100.});
+  survey->get_station_data("OUTLIER").set_position({55.1, 12.1, 100.});
   {
     std::ofstream file(project.toStdString(),std::ios::binary); boost::archive::binary_oarchive archive(file);
     const std::uint32_t magic=0x45444954, version=7;
@@ -1749,6 +1891,7 @@ void rho_plus_overlay(const QString &directory)
   check(rho->graph(5)->data()->size()>0 && phase->graph(5)->data()->size()>0,"Auto-masking did not refresh main plots");
   check(undo->isEnabled(),"Main-window refresh lost undo");
   undo->click(); check(rho->graph(5)->data()->isEmpty() && phase->graph(5)->data()->isEmpty(),"Undo did not refresh main plots");
+  tf_view_controls(window, directory, project);
 }
 
 void workflow(const QString &directory)
@@ -1792,6 +1935,11 @@ void workflow(const QString &directory)
   check(!widget<QCheckBox>(window, "stationMapNames")->isChecked(), "New sessions should start with map names hidden");
   file_action(window, "actionLoad_project", {project});
   select_station(window, "S01");
+  const auto stationItem = [&] { return widget<QListWidget>(window, "stationList")->findItems("S01", Qt::MatchExactly).front(); };
+  check(stationItem()->data(StationListDelegate::PeriodCount).toUInt() == 4 &&
+        stationItem()->data(StationListDelegate::Coordinates).toString() == "Lat 55.0000°  Lon 12.0000°",
+        "Station list omitted period count or geographic coordinates");
+  check(stationItem()->text() == "S01" && widget<QLabel>(window, "tfStationName")->text() == "S01", "Station metadata changed identity");
   auto *stationMap = widget<QCustomPlot>(window, "mapPlot");
   const auto firstPosition = stationMap->graph(0)->data()->constBegin()->value;
   auto *mapMode = widget<QComboBox>(window, "mapCoordinateSwitch");
@@ -1800,8 +1948,14 @@ void workflow(const QString &directory)
   check(!centerUtm->isEnabled(), "Geographic map enabled UTM centering");
   mapMode->setCurrentIndex(1);
   check(centerUtm->isEnabled() && !centerUtm->isChecked(), "UTM centering unavailable");
+  const auto absolute = SurveyCoordinates::calculate(survey->geographic_locations(), 33, true, false).transform(survey->geographic_locations());
+  const auto coordinateText = [](const std::array<double, 3> &p) { return QString("E %1  N %2 m").arg(p[1], 0, 'f', 1).arg(p[0], 0, 'f', 1); };
+  check(stationItem()->data(StationListDelegate::Coordinates).toString() == coordinateText(absolute.front()) &&
+        stationItem()->toolTip().contains("UTM 33N"), "Station list does not follow UTM map coordinates");
   const auto expectedCoordinates = SurveyCoordinates::calculate(survey->geographic_locations(), 33, true, true);
   centerUtm->setChecked(true);
+  check(stationItem()->data(StationListDelegate::Coordinates).toString() ==
+          coordinateText(expectedCoordinates.transform(survey->geographic_locations()).front()), "Station list did not subtract UTM origin");
   const QString expectedOrigin = QString::number(expectedCoordinates.origin_easting, 'f', 3);
   check(originInfo->text().contains(expectedOrigin) &&
         originInfo->text().contains(QString::number(expectedCoordinates.origin_northing, 'f', 3)),
@@ -1816,6 +1970,8 @@ void workflow(const QString &directory)
         std::abs(stationMap->graph(0)->data()->constBegin()->value) > 100000., "Absolute UTM not restored");
   centerUtm->setChecked(true);
   mapMode->setCurrentIndex(0);
+  check(stationItem()->data(StationListDelegate::Coordinates).toString() == "Lat 55.0000°  Lon 12.0000°",
+        "Switching to Lat/Lon left projected station coordinates");
   check(!centerUtm->isEnabled() && centerUtm->isChecked() && originInfo->text().contains(expectedOrigin),
         "Geographic view lost shared survey origin");
   widget<QCheckBox>(window, "stationMapNames")->setChecked(true);
@@ -1849,7 +2005,7 @@ void workflow(const QString &directory)
   checkNear(rho.xAxis->range().lower, beforeReportRange.lower); checkNear(rho.xAxis->range().upper, beforeReportRange.upper);
   checkNear(value(rho, 9, 1.), beforeReportValue);
   const std::array<SurveyReport::Options::Axis, 4> guiAxes{{
-    {false, 1., 1000.}, {false, -10., 100.}, {false, -.4, .4}, {false, -2., 2.}}};
+    {false, 1., 1000.}, {false, -10., 100.}, {true, -.4, .4}, {true, -2., 2.}}};
   main_axis_ranges(window, false, guiAxes);
   export_report(window, directory + "/survey-fixed-ranges.pdf", &guiAxes);
   main_axis_ranges(window, true, guiAxes);
@@ -2075,6 +2231,22 @@ void workflow(const QString &directory)
   check(widget<QAction>(restored, "actionLink_tensor_masks")->isChecked(), "Version 6 projects should default to linked masks");
   check_visibility(*widget<QCustomPlot>(restored, "plot11"), 6); check_visibility(*widget<QCustomPlot>(restored, "plot12"), 9);
   check_visibility(*widget<QCustomPlot>(restored, "plot21"), 5); check_visibility(*widget<QCustomPlot>(restored, "plot22"), 10);
+  const auto version8Project = directory + "/tf-view-v8.mtd";
+  {
+    std::ofstream output(version8Project.toStdString(), std::ios::binary);
+    boost::archive::binary_oarchive archive(output);
+    const std::uint32_t magic = 0x45444954, version = 8;
+    LegacyOptionsV8 options;
+    options.axes[0] = {false, 2., 2000.}; options.axes[1] = {false, -160., 160.};
+    archive << magic << version << survey << std::map<std::string, MTSurveyData>{} << options;
+  }
+  file_action(restored, "actionLoad_project", {version8Project}); select_station(restored, "S01");
+  auto *oldRho = widget<QCustomPlot>(restored, "plot11");
+  check(oldRho->yAxis->range() == QCPRange(2, 2000) && oldRho->graph(0)->valueAxis()->range() == QCPRange(2, 2000),
+        "Version 8 fixed ranges were not migrated to both columns");
+  check(widget<QAction>(restored, "actionShow_rho_plus")->isChecked() &&
+        widget<QDoubleSpinBox>(restored, "viewMarkerSize")->value() == 5. &&
+        widget<QComboBox>(restored, "viewColorMap")->currentText() == "Viridis", "Version 8 plot options were not preserved");
 }
 
 void real_run(const QString &project, const QString &directory, const QString &screenshot, bool mixed)

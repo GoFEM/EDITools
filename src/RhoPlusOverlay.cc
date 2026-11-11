@@ -31,6 +31,11 @@ RhoPlusOverlay::RhoPlusOverlay(QCustomPlot *rho, QCustomPlot *phase, std::functi
 void RhoPlusOverlay::hide() {
   for(unsigned c=0;c<4;++c) { rhoLines[c]->setVisible(false); phaseLines[c]->setVisible(false); }
 }
+void RhoPlusOverlay::set_colors(const std::array<std::string, 8> &colors) {
+  for(unsigned c=0;c<4;++c) for(auto *line: {rhoLines[c], phaseLines[c]}) {
+    auto pen=line->pen(); pen.setColor(QColor(QString::fromStdString(colors[c]))); line->setPen(pen);
+  }
+}
 void RhoPlusOverlay::update(const MTStationData *station, bool on, bool wrap,
                            const std::array<bool,4> &rVisible,const std::array<bool,4> &pVisible,
                            const ImpedanceAnalysis::RhoPlusOptions &settings) {

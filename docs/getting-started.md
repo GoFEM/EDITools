@@ -11,7 +11,7 @@
 ## Command ribbon
 
 The compact ribbon groups commands into **Survey**, **Edit**, **Auto mask**,
-**Analysis**, **Maps** and **Report**. Open project, Save, Undo and Redo stay available in the
+**Analysis**, **Maps**, **Report** and **View**. Open project, Save, Undo and Redo stay available in the
 upper left. Component visibility controls remain beside their plots.
 
 Use the arrow or **Ctrl+F1** to collapse the commands; click a tab to expand them.
@@ -22,6 +22,13 @@ survey data are disabled until a survey is loaded.
 
 The instructions below use ribbon labels. The classic menus expose the same
 commands and share their checked and enabled states.
+**Plot → Configure TF view** in classic menus opens the **View** ribbon.
+
+Each station-list entry shows its name, number of periods and coordinates.
+Coordinates follow the map's **Lat/Lon** or **UTM** selection, including
+**Center UTM**. Hover over a station for its full name, coordinates, UTM zone
+and origin. Period counts include masked periods and refresh after decimation
+or undo/redo. Station checkboxes still enable or disable the station.
 
 ## EDI import and nearby periods
 
@@ -123,12 +130,33 @@ original missing-value and error information, then save the project.
 The main plots always use the transfer-function (TF) layout: XY/YX on the left,
 XX/YY on the right, then full-width induction arrows and phase-tensor ellipses.
 This also applies when opening older projects.
+The current station name appears above the plots and in exported plot images.
+
+Configure the display directly in **View**:
+
+- **Axis ranges**: choose the shared period axis or a resistivity/phase column.
+  Enter minimum and maximum, then press **Apply** or Enter to fix the range.
+  Scientific notation is accepted; period and resistivity limits must be positive.
+  **Auto** fits that axis when changing stations; **Fit all TF axes** restores
+  automatic ranges throughout the view. The two impedance columns can have
+  different Y ranges.
+- **Colors**: choose a component, then select a swatch or enter a color name or
+  `#RRGGBB` value. Points, errors, responses, legends and rho+ guides use the
+  corresponding colors. Masked Z/PT and tipper colors are configurable too.
+- **Sizes (pixels)**: adjust marker diameter, line width, tipper arrow scale
+  (pixels per unit magnitude) and phase-tensor ellipse diameter.
+- **Phase tensor · φmin**: choose a colormap, reverse it, and set its phase limits.
+- **Display**: toggle error bars and phase wrapping, fit the axes, or reset
+  colors, sizes and colormap with **Reset TF appearance**.
+
+View settings are saved with the project. Appearance changes preserve the
+current zoom, observations and masks. Invalid limits or colors are marked in
+the ribbon and leave the applied setting unchanged.
 
 Component checkboxes control observations, errors, calculated responses and
 rho+ guides. The period axes pan and zoom together. Diagonal phases remain signed
 (−180° to 180° with automatic ranges); **Wrap phase** applies to YX.
-Fixed resistivity and phase ranges apply to both columns. Masking or
-unmasking XY also edits XX at the same periods; YX similarly edits YY, even if
+Masking or unmasking XY also edits XX at the same periods; YX similarly edits YY, even if
 the paired diagonal is hidden. Selecting a diagonal leaves other impedance
 components unchanged. **Link Z / PT** independently controls the corresponding PT masks.
 
@@ -140,8 +168,9 @@ conflicting instructions for a paired diagonal or linked tensor entry.
 **Undo / Redo** restores the whole edit, including its paired and linked masks.
 
 Ellipses have equal major diameters, with geographic north up and east right.
-Their color shows the minimum principal phase on a fixed 0–90° scale (values
-outside that interval use the end colors). Grey ellipses are masked; unfilled
+Their color shows the minimum principal phase, with a default 0–90° scale (values
+outside the chosen interval use the end colors). Masked ellipses use the
+**Masked Z / PT** color (grey by default); unfilled
 outlines show the selected calculated response. Missing or undefined tensors
 are omitted. Select ellipse centers to mask/unmask all four PT entries at those
 periods. **Link Z / PT** controls the corresponding impedance masks; tipper masks

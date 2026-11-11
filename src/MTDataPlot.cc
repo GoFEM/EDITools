@@ -289,29 +289,53 @@ void MTDataPlot::set_masking_mode(bool on)
     m_plot->setSelectionRectMode(QCP::srmNone);
 }
 
-void MTDataPlot::set_y_axis_autoscale(bool on)
+void MTDataPlot::set_y_axis_autoscale(bool on, bool diagonal)
 {
-  m_yAxisAutoscale = on;
+  (diagonal ? m_diagonalAutoscale : m_yAxisAutoscale) = on;
 }
 
-bool MTDataPlot::y_axis_autoscale() const
+bool MTDataPlot::y_axis_autoscale(bool diagonal) const
 {
-  return m_yAxisAutoscale;
+  return diagonal ? m_diagonalAutoscale : m_yAxisAutoscale;
 }
 
-void MTDataPlot::set_y_axis_range(double lower, double upper)
+void MTDataPlot::set_y_axis_range(double lower, double upper, bool diagonal)
 {
-  m_fixedYRange = QCPRange(lower, upper);
+  (diagonal ? m_fixedDiagonalRange : m_fixedYRange) = QCPRange(lower, upper);
 }
 
-QCPRange MTDataPlot::y_axis_range() const
+QCPRange MTDataPlot::y_axis_range(bool diagonal) const
 {
+  if(diagonal && m_diagonalAxes)
+    return m_diagonalAutoscale ? m_diagonalAxes->axis(QCPAxis::atLeft)->range() : m_fixedDiagonalRange;
   return m_yAxisAutoscale ? m_plot->yAxis->range() : m_fixedYRange;
 }
 
-QCPRange MTDataPlot::fixed_y_axis_range() const
+QCPRange MTDataPlot::fixed_y_axis_range(bool diagonal) const
 {
-  return m_fixedYRange;
+  return diagonal ? m_fixedDiagonalRange : m_fixedYRange;
+}
+
+void MTDataPlot::set_view_style(const TFViewStyle &style)
+{
+  m_viewStyle = style;
+  for(int i = 0; i < m_plot->graphCount(); ++i) {
+    auto *graph = m_plot->graph(i);
+    const auto color = QColor(QString::fromStdString(style.colors[i >= 4 && i < 8 ? 4 : i % 4]));
+    auto pen = graph->pen(); pen.setColor(color); pen.setWidthF(style.lineWidth); graph->setPen(pen);
+    if(i < 8) {
+      auto scatter = graph->scatterStyle();
+      scatter.setPen(QPen(color));
+      scatter.setBrush(i < 4 ? QBrush(color) : QBrush(Qt::NoBrush));
+      scatter.setSize(style.markerSize); graph->setScatterStyle(scatter);
+      auto selected = graph->selectionDecorator()->scatterStyle();
+      selected.setSize(style.markerSize + 4.);
+      graph->selectionDecorator()->setScatterStyle(selected, QCPScatterStyle::spSize);
+      m_errorBars[i]->setPen(QPen(color, style.lineWidth));
+    }
+  }
+  update_component_legend();
+  m_plot->replot(QCustomPlot::rpQueuedReplot);
 }
 
 void MTDataPlot::dataSelected(bool selected)
@@ -525,7 +549,7 @@ void MTDataPlot::apply_axis_ranges(bool rescaleAxes, bool useDefaultYRange,
     m_plot->yAxis->setRange(m_fixedYRange);
   if(m_diagonalAxes) {
     auto *y = m_diagonalAxes->axis(QCPAxis::atLeft);
-    if(!m_yAxisAutoscale) y->setRange(m_fixedYRange);
+    if(!m_diagonalAutoscale) y->setRange(m_fixedDiagonalRange);
     else if(rescaleAxes) {
       if(useDefaultYRange) y->setRange(-180, 180);
       else y->rescale(true);

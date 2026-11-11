@@ -30,6 +30,7 @@ public:
   void set_observed_data(MTStationData &data, bool rescaleAxes = true);
   void set_predicted_data(const MTStationData &data, bool rescaleAxes = false);
   void set_ellipse_mode(bool on);
+  void set_view_style(const TFViewStyle &style) override;
   void clear_observed_data() override;
   void clear_predicted_data() override;
   void showPointToolTip(QMouseEvent *event) override;

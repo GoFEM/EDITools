@@ -140,7 +140,12 @@ void integration()
   classic->setChecked(false);
   collapsed->setChecked(false);
   auto *tabs = control<QTabBar>(*ribbon, "ribbonTabs");
-  check(tabs->count() == 6, "Six workflow tabs including auto masking");
+  check(tabs->count() == 7, "Seven workflow tabs including inline view settings");
+  classic->setChecked(true); collapsed->setChecked(true);
+  control<QAction>(window, "actionPlot_axis_ranges")->trigger();
+  check(!classic->isChecked() && !collapsed->isChecked() && tabs->currentIndex() == 6,
+        "Classic view command must open the View ribbon");
+  check(control<QComboBox>(window, "viewRangeAxis")->isVisible(), "Inline axis controls not visible");
   for(auto *top : window.menuBar()->actions())
     for(auto *action : top->menu()->actions()) {
       if(action->isSeparator() || action->objectName() == "actionAbout_EDI_Tools") continue;

@@ -11,6 +11,7 @@ class RhoPlusOverlay {
 public:
   RhoPlusOverlay(QCustomPlot *rho, QCustomPlot *phase, std::function<void(const QString &)> status);
   void hide();
+  void set_colors(const std::array<std::string, 8> &colors);
   void update(const MTStationData *station, bool enabled, bool phaseWrap,
               const std::array<bool,4> &rhoVisible, const std::array<bool,4> &phaseVisible,
               const ImpedanceAnalysis::RhoPlusOptions &options);

@@ -32,6 +32,7 @@ public:
   void clear_observed_data() override;
   void set_arrow_mode(bool on);
   bool arrow_mode() const;
+  void set_view_style(const TFViewStyle &style) override;
 
 private:
   void apply_component_visibility() override;
@@ -44,7 +45,7 @@ private:
   void update_axis_style();
   void set_arrow_selection_data(const std::vector<std::vector<bool>> &mask,
                                 const dvector &frequencies);
-  void draw_arrow(double period, double xComponent, double yComponent, const QPen &pen);
+  void draw_arrow(double period, double xComponent, double yComponent, const QPen &pen, unsigned colorIndex);
   void draw_reference_arrow();
   void draw_tipper_arrows(const std::vector<dvector> &tipper,
                           const std::vector<std::vector<bool>> *mask,

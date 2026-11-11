@@ -107,6 +107,7 @@ CommandRibbon::CommandRibbon(QMainWindow &window, const std::vector<QAction *> &
       commands->setRowMinimumHeight(0, commandHeight);
       commands->setRowMinimumHeight(1, commandHeight);
       groupLayout->addLayout(commands, 1);
+      if(group.controls) groupLayout->addWidget(group.controls);
       auto *caption = new QLabel(group.title, content);
       caption->setAlignment(Qt::AlignCenter);
       auto font = caption->font();
@@ -159,4 +160,11 @@ void CommandRibbon::updateDisplay()
   collapsed->setEnabled(!classic->isChecked());
   collapseButton->setArrowType(collapsed->isChecked() ? Qt::DownArrow : Qt::UpArrow);
   body->setVisible(!classic->isChecked() && !collapsed->isChecked());
+}
+
+void CommandRibbon::showPage(int index)
+{
+  classic->setChecked(false);
+  collapsed->setChecked(false);
+  tabs->setCurrentIndex(index);
 }

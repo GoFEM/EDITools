@@ -6,6 +6,8 @@ A simple GUI tool to work with large collections of [Magnetitelluric](https://en
 ## Features
 
 - View transfer functions in a single layout: XY/YX and XX/YY columns, induction arrows, and phase-tensor ellipses
+- Configure TF ranges, colors, colormaps and marker sizes directly in the View ribbon
+- See period counts and map-matched coordinates alongside station names
 - Assign error floors (with a proper error propagation from impedances to derived quantities such as apparent resistivity, phase or phase tensor)
 - Decimate data
 - Export a PDF survey report or a PNG image of the current plots

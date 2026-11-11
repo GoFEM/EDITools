@@ -12,11 +12,12 @@ class QToolButton;
 class CommandRibbon : public QToolBar
 {
 public:
-  struct Group { QString title; std::vector<QAction *> actions; };
+  struct Group { QString title; std::vector<QAction *> actions; QWidget *controls = nullptr; };
   struct Page { QString title; std::vector<Group> groups; };
 
   CommandRibbon(QMainWindow &window, const std::vector<QAction *> &quickActions,
                 const std::vector<Page> &pages, QAction *about);
+  void showPage(int index);
 
 private:
   void updateDisplay();

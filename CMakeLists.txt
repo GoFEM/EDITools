@@ -82,6 +82,8 @@ add_library(editools_ui STATIC
   Icons/icons.qrc
   src/CommandIcons.cc
   src/CommandRibbon.cc
+  src/TFViewControls.cc
+  src/StationListDelegate.cc
   src/SurveyHistory.cc
   src/MTDataPlot.cc
   src/RhoPlusOverlay.cc
@@ -116,6 +118,7 @@ add_library(editools_ui STATIC
   ImpedanceAnalysisWindows.cpp
   SurveyReport.cpp
   mainwindow.cpp
+  MainWindowView.cpp
   mainwindow.h
   ExportGOFEMDialog.h
   include/MTDataPlot.h

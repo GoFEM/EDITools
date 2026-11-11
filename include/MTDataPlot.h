@@ -23,6 +23,7 @@
 #include "qcustomplot.h"
 
 #include "include/MTStationData.h"
+#include "TFViewStyle.h"
 
 namespace PlotColors
 {
@@ -78,17 +79,18 @@ public:
 
   void set_associated_plot(MTDataPlot &plot);
   void set_split_components(bool split);
+  virtual void set_view_style(const TFViewStyle &style);
 
   void set_error_bars_visible(bool on);
   void set_component_visibility(const std::array<bool, 4> &visible);
   const std::array<bool, 4> &component_visibility() const { return m_componentVisible; }
   void set_masking_mode(bool on);
   void set_link_tensor_masks(bool on) { m_linkTensorMasks = on; }
-  void set_y_axis_autoscale(bool on);
-  bool y_axis_autoscale() const;
-  void set_y_axis_range(double lower, double upper);
-  QCPRange y_axis_range() const;
-  QCPRange fixed_y_axis_range() const;
+  void set_y_axis_autoscale(bool on, bool diagonal = false);
+  bool y_axis_autoscale(bool diagonal = false) const;
+  void set_y_axis_range(double lower, double upper, bool diagonal = false);
+  QCPRange y_axis_range(bool diagonal = false) const;
+  QCPRange fixed_y_axis_range(bool diagonal = false) const;
 
   std::string get_graph_data_type_name(const QCPGraph *graph) const;
 
@@ -105,6 +107,7 @@ public slots:
   virtual void showPointToolTip(QMouseEvent* event);
 
 protected:
+  QColor view_color(unsigned index) const { return QColor(QString::fromStdString(m_viewStyle.colors.at(index))); }
   virtual void apply_component_visibility();
   virtual void set_legend_component_visible(unsigned component, bool visible);
   void rebuild_component_legend(const std::vector<int> &graphIndices);
@@ -140,6 +143,9 @@ protected:
 
   bool m_yAxisAutoscale;
   QCPRange m_fixedYRange;
+  bool m_diagonalAutoscale = true;
+  QCPRange m_fixedDiagonalRange{.1, 1000.};
+  TFViewStyle m_viewStyle;
   std::array<bool, 4> m_componentVisible{{true, true, true, true}};
   bool m_errorBarsVisible = true;
   bool m_linkTensorMasks = true;

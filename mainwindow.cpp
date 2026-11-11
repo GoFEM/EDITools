@@ -37,9 +37,6 @@
 #include <QDir>
 #include <QCheckBox>
 #include <QDialog>
-#include <QDialogButtonBox>
-#include <QDoubleValidator>
-#include <QGridLayout>
 #include <QLineEdit>
 #include <QVBoxLayout>
 #include <QSignalBlocker>
@@ -66,6 +63,8 @@
 #include "SurveyCoordinatesDialog.h"
 #include "include/SurveyHistory.h"
 #include "include/CommandRibbon.h"
+#include "include/TFViewControls.h"
+#include "include/StationListDelegate.h"
 #include "include/CommandIcons.h"
 #include <QUndoView>
 #include <QVBoxLayout>
@@ -83,7 +82,7 @@ namespace
 // version so the loader can distinguish both layouts and keep old .mtd files
 // readable.
 const std::uint32_t projectFileMagic = 0x45444954; // "EDIT"
-const std::uint32_t projectFileVersion = 8;
+const std::uint32_t projectFileVersion = 9;
 }
 
 MainWindow::MainWindow(QWidget *parent) :
@@ -91,6 +90,8 @@ MainWindow::MainWindow(QWidget *parent) :
   ui(new Ui::MainWindow)
 {
   ui->setupUi(this);
+  ui->stationList->setItemDelegate(new StationListDelegate(ui->stationList));
+  ui->stationList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
   history.reset(new SurveyHistory([this] { restoreSurveyView(); }));
   auto *edit = new QMenu(tr("Edit"), this);
   ui->menuBar->insertMenu(ui->menuData->menuAction(), edit);
@@ -355,13 +356,33 @@ MainWindow::MainWindow(QWidget *parent) :
         other->xAxis->setRange(range); other->replot(QCustomPlot::rpQueuedReplot);
       }
       syncingPeriods = false;
+      if(viewControls) viewControls->refreshRange();
     });
   setupRibbon();
+  for(auto *plot: {plot11, plot12}) for(auto *rect: plot->axisRects())
+    connect(rect->axis(QCPAxis::atLeft), qOverload<const QCPRange &>(&QCPAxis::rangeChanged), this,
+            [this] { viewControls->refreshRange(); });
   this->showMaximized();
 }
 
 void MainWindow::setupTransferFunctionView()
 {
+  tfView = new QWidget;
+  tfView->setObjectName("transferFunctionView");
+  tfView->setSizePolicy(ui->splitter_4->sizePolicy());
+  ui->splitter_5->replaceWidget(ui->splitter_5->indexOf(ui->splitter_4), tfView);
+  auto *layout = new QVBoxLayout(tfView);
+  layout->setContentsMargins(0, 0, 0, 0); layout->setSpacing(0);
+  stationHeading = new QLabel(tr("No station selected"), tfView);
+  stationHeading->setObjectName("tfStationName");
+  stationHeading->setTextFormat(Qt::PlainText);
+  stationHeading->setAlignment(Qt::AlignCenter);
+  stationHeading->setMargin(5);
+  stationHeading->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+  auto font = stationHeading->font(); font.setBold(true);
+  if(font.pointSizeF() > 0) font.setPointSizeF(font.pointSizeF() + 2);
+  stationHeading->setFont(font);
+  layout->addWidget(stationHeading); layout->addWidget(ui->splitter_4, 1);
   ui->splitter_2->setOrientation(Qt::Vertical);
   ui->splitter->setOrientation(Qt::Vertical);
   for(int i = 0; i < 2; ++i) plotHandlers[i]->set_split_components(true);
@@ -391,6 +412,20 @@ void MainWindow::setupRibbon()
   auto *save = command("actionSave_project", tr("Save"), "save", true);
   auto *undo = command("actionUndo", tr("Undo"), "arrow-undo");
   auto *redo = command("actionRedo", tr("Redo"), "arrow-redo");
+  viewControls = new TFViewControls(this, [this](int i) { return viewRange(i); },
+    [this](int i, TFViewRange range) { setViewRange(i, range); }, [this] { applyViewStyle(); });
+  auto *fit = ui->menuPlot->addAction(tr("Fit all TF axes"));
+  fit->setObjectName("actionFit_TF_axes"); fit->setIcon(commandIcon("arrow-expand"));
+  connect(fit, &QAction::triggered, this, [this] {
+    for(int i = 0; i < 5; ++i) { auto range = viewRange(i); range.automatic = true; setViewRange(i, range); }
+  });
+  auto *reset = ui->menuPlot->addAction(tr("Reset TF appearance"));
+  reset->setObjectName("actionReset_TF_appearance"); reset->setIcon(commandIcon("arrow-undo"));
+  connect(reset, &QAction::triggered, this, [this] { viewControls->setStyle({}); applyViewStyle(); });
+  ui->actionPlot_axis_ranges->setText(tr("Configure TF view"));
+  auto viewGroups = viewControls->groups();
+  viewGroups.push_back({tr("Display"), {command("actionShow_error_bars", tr("Error bars"), "ruler"),
+    command("actionPhase_wrap", tr("Wrap phase"), "arrow-repeat-all"), fit, reset}});
   const std::vector<CommandRibbon::Page> pages{
     {tr("&Survey"), {
       {tr("Project"), {open, save}},
@@ -417,11 +452,11 @@ void MainWindow::setupRibbon()
       {tr("Background"), {command("actionMap_layers", tr("Map layers"), "layer"), command("actionTopography", tr("Topography"), "mountain-location-top", true)}}}},
     {tr("&Report"), {
       {tr("Export figures"), {command("actionExport_survey_report", tr("Survey PDF"), "document-pdf", true), command("actionSave_as_PDF", tr("Plot image"), "image")}},
-      {tr("Plot display"), {command("actionPlot_axis_ranges", tr("Axis ranges"), "arrow-expand"), command("actionShow_error_bars", tr("Error bars"), "ruler"),
-        command("actionPhase_wrap", tr("Wrap phase"), "arrow-repeat-all")}}}}
+      {tr("Plot display"), {command("actionPlot_axis_ranges", tr("Configure TF view"), "options")}}}},
+    {tr("&View"), viewGroups}
   };
   ui->actionAbout_EDI_Tools->setIcon(commandIcon("info"));
-  new CommandRibbon(*this, {open, save, undo, redo}, pages, ui->actionAbout_EDI_Tools);
+  ribbon = new CommandRibbon(*this, {open, save, undo, redo}, pages, ui->actionAbout_EDI_Tools);
   updateActionAvailability();
 }
 
@@ -474,6 +509,13 @@ void MainWindow::rememberDirectory(const QString &path)
 MainWindow::PlotOptions MainWindow::currentPlotOptions() const
 {
   PlotOptions options;
+  options.style = viewControls->style();
+  options.period = periodRange;
+  options.errorBars = ui->actionShow_error_bars->isChecked();
+  for(unsigned i = 0; i < 2; ++i) {
+    const auto range = plotHandlers[i]->fixed_y_axis_range(true);
+    options.diagonals[i] = {plotHandlers[i]->y_axis_autoscale(true), range.lower, range.upper};
+  }
   options.rhoPlus = rhoPlusAction->isChecked();
   options.rhoPlusGridDensity = rhoPlusOptions.intervalsPerDecade;
   options.linkTensorMasks = linkTensorMasksAction->isChecked();
@@ -508,6 +550,19 @@ MainWindow::PlotOptions MainWindow::currentPlotOptions() const
 
 void MainWindow::applyPlotOptions(const PlotOptions &options)
 {
+  viewControls->setStyle(options.style);
+  applyViewStyle();
+  periodRange = options.period;
+  if(!std::isfinite(periodRange.lower) || !std::isfinite(periodRange.upper) || periodRange.lower <= 0. ||
+     !QCPRange::validRange(periodRange.lower, periodRange.upper) || periodRange.lower >= periodRange.upper)
+    periodRange = {};
+  for(unsigned i = 0; i < 2; ++i) {
+    plotHandlers[i]->set_y_axis_range(options.diagonals[i].lower, options.diagonals[i].upper, true);
+    plotHandlers[i]->set_y_axis_autoscale(options.diagonals[i].automatic, true);
+  }
+  const QSignalBlocker errorsBlock(ui->actionShow_error_bars);
+  ui->actionShow_error_bars->setChecked(options.errorBars);
+  for(auto &plot: plotHandlers) plot->set_error_bars_visible(options.errorBars);
   const QSignalBlocker rhoPlusBlock(rhoPlusAction);
   rhoPlusAction->setChecked(options.rhoPlus);
   rhoPlusOptions.intervalsPerDecade = options.rhoPlusGridDensity >= 4 && options.rhoPlusGridDensity <= 48 ? options.rhoPlusGridDensity : 12;
@@ -620,6 +675,20 @@ void MainWindow::updateMap()
   coordinateInfoLabel->setToolTip(QString::fromStdString(coordinates.description()));
   mapHandler->set_data(locations,
                        mtSurvey->get_stations_names());
+  const QSignalBlocker blocker(ui->stationList);
+  const auto names = mtSurvey->get_stations_names();
+  std::map<std::string, std::array<double, 3>> byName;
+  for(unsigned i = 0; i < names.size(); ++i) byName.emplace(names[i], locations[i]);
+  for(int i = 0; i < ui->stationList->count(); ++i) {
+    auto *item = ui->stationList->item(i);
+    const auto &p = byName.at(item->text().toStdString());
+    const auto text = !std::isfinite(p[0]) || !std::isfinite(p[1]) ? tr("Coordinates unavailable") :
+      view.utm ? tr("E %1  N %2 m").arg(p[1], 0, 'f', 1).arg(p[0], 0, 'f', 1) :
+                 tr("Lat %1°  Lon %2°").arg(p[0], 0, 'f', 4).arg(p[1], 0, 'f', 4);
+    item->setData(StationListDelegate::Coordinates, text);
+    item->setData(StationListDelegate::CoordinateReference, QString::fromStdString(view.description()));
+  }
+  updateStationDetails();
   on_stationList_itemSelectionChanged();
 }
 
@@ -627,9 +696,14 @@ void MainWindow::updatePlots(bool rescaleAxes)
 {
   // Designer-connected actions can fire while the plots are being constructed.
   if(!rhoPlusOverlay) return;
+  updateStationDetails();
   updateActionAvailability();
   rhoPlusOverlay->hide();
   QListWidgetItem* item = ui->stationList->currentItem();
+  if(stationHeading) {
+    stationHeading->setText(item ? item->text() : tr("No station selected"));
+    stationHeading->setToolTip(stationHeading->text());
+  }
   if(autoMaskWorkflow) autoMaskWorkflow->setData(mtSurvey, item ? item->text() : QString());
   if(item == nullptr) {
     for(auto &plot: plotHandlers) plot->clear_observed_data();
@@ -673,11 +747,13 @@ void MainWindow::updatePlots(bool rescaleAxes)
                              "\t\t\t# path: " + data.file_path().c_str());
   rhoPlusOverlay->update(&data,rhoPlusAction->isChecked(),ui->actionPhase_wrap->isChecked(),
     plotHandlers[0]->component_visibility(),plotHandlers[1]->component_visibility(),rhoPlusOptions);
-  if(rescaleAxes && !data.frequencies().empty()) {
+  if(rescaleAxes && periodRange.automatic && !data.frequencies().empty()) {
     const auto bounds = std::minmax_element(data.frequencies().begin(), data.frequencies().end());
     if(*bounds.first > 0. && std::isfinite(*bounds.second))
       plot11->xAxis->setRange(.5 / *bounds.second, 2. / *bounds.first);
   }
+  if(!periodRange.automatic) plot11->xAxis->setRange(periodRange.lower, periodRange.upper);
+  if(viewControls) viewControls->refreshRange();
 }
 
 void MainWindow::stationSelected(const QCPDataSelection &selection)
@@ -879,9 +955,19 @@ void MainWindow::on_actionLoad_project_triggered()
         ia >> legacyPlotOptions;
         static_cast<PlotOptionsV7 &>(plotOptions) = legacyPlotOptions;
       }
-      else if(version >= 8)
+      else if(version == 8)
+      {
+        PlotOptionsV8 legacyPlotOptions;
+        ia >> legacyPlotOptions;
+        static_cast<PlotOptionsV8 &>(plotOptions) = legacyPlotOptions;
+      }
+      else if(version >= 9)
       {
         ia >> plotOptions;
+      }
+      if(version < 9) for(unsigned i = 0; i < 2 && i < plotOptions.axes.size(); ++i) {
+        const auto &axis = plotOptions.axes[i];
+        plotOptions.diagonals[i] = {axis.autoscale, axis.lower, axis.upper};
       }
       applyPlotOptions(plotOptions);
       loaded = true;
@@ -1047,10 +1133,12 @@ void MainWindow::on_actionSet_error_floor_triggered()
 
 void MainWindow::on_actionShow_error_bars_toggled(bool on)
 {
+  if(plotHandlers.empty()) return;
   for(auto &plot: plotHandlers)
     plot->set_error_bars_visible(on);
 
-  updatePlots();
+  for(auto *plot: {plot11, plot12, plot21, plot22})
+    plot->replot(QCustomPlot::rpQueuedReplot);
 }
 
 void MainWindow::on_actionPhase_wrap_toggled(bool on)
@@ -1150,107 +1238,13 @@ void MainWindow::on_actionSave_as_PDF_triggered()
 
   rememberDirectory(exportFile);
 
-  ui->splitter_4->grab().save(exportFile, "PNG", 100);
+  tfView->grab().save(exportFile, "PNG", 100);
 }
 
 void MainWindow::on_actionPlot_axis_ranges_triggered()
 {
-  QDialog dialog(this);
-  dialog.setWindowTitle(tr("Axis ranges"));
-
-  QVBoxLayout* layout = new QVBoxLayout(&dialog);
-  QCheckBox* autoscaleCheck = new QCheckBox(tr("Autoscale Y ranges when changing station"), &dialog);
-  autoscaleCheck->setChecked(plotHandlers.empty() ? true : plotHandlers.front()->y_axis_autoscale());
-  layout->addWidget(autoscaleCheck);
-
-  QGridLayout* grid = new QGridLayout;
-  grid->addWidget(new QLabel(tr("Plot"), &dialog), 0, 0);
-  grid->addWidget(new QLabel(tr("Y min"), &dialog), 0, 1);
-  grid->addWidget(new QLabel(tr("Y max"), &dialog), 0, 2);
-
-  const QStringList plotNames = {
-    tr("Apparent resistivity"),
-    tr("Phase"),
-    tr("Tipper"),
-    tr("Phase tensor")
-  };
-
-  QVector<QLineEdit*> lowerEdits;
-  QVector<QLineEdit*> upperEdits;
-  QDoubleValidator* rangeValidator = new QDoubleValidator(&dialog);
-  rangeValidator->setNotation(QDoubleValidator::ScientificNotation);
-
-  for(int i = 0; i < plotNames.size(); ++i)
-  {
-    const QCPRange range = plotHandlers[i]->y_axis_range();
-    QLineEdit* lower = new QLineEdit(QString::number(range.lower, 'g', 12), &dialog);
-    QLineEdit* upper = new QLineEdit(QString::number(range.upper, 'g', 12), &dialog);
-    lower->setValidator(rangeValidator);
-    upper->setValidator(rangeValidator);
-
-    grid->addWidget(new QLabel(plotNames[i], &dialog), i + 1, 0);
-    grid->addWidget(lower, i + 1, 1);
-    grid->addWidget(upper, i + 1, 2);
-
-    lowerEdits.push_back(lower);
-    upperEdits.push_back(upper);
-  }
-
-  layout->addLayout(grid);
-
-  auto setRangesEnabled = [&](bool autoscale)
-  {
-    for(auto *edit: lowerEdits)
-      edit->setEnabled(!autoscale);
-    for(auto *edit: upperEdits)
-      edit->setEnabled(!autoscale);
-  };
-  connect(autoscaleCheck, &QCheckBox::toggled, &dialog, setRangesEnabled);
-  setRangesEnabled(autoscaleCheck->isChecked());
-
-  QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
-                                                   Qt::Horizontal, &dialog);
-  layout->addWidget(buttons);
-  connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-  connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-
-  if(dialog.exec() != QDialog::Accepted)
-    return;
-
-  const bool autoscaleY = autoscaleCheck->isChecked();
-  for(int i = 0; i < plotHandlers.size(); ++i)
-  {
-    bool lowerOk = false;
-    bool upperOk = false;
-    const double lower = lowerEdits[i]->text().toDouble(&lowerOk);
-    const double upper = upperEdits[i]->text().toDouble(&upperOk);
-
-    if(!lowerOk || !upperOk)
-    {
-      QMessageBox::warning(this, tr("Invalid axis range"),
-                           tr("Y min and Y max must be valid numbers. Scientific notation such as 1e-6 is accepted."));
-      return;
-    }
-
-    if(lower >= upper)
-    {
-      QMessageBox::warning(this, tr("Invalid axis range"),
-                           tr("Y min must be smaller than Y max."));
-      return;
-    }
-
-    if(i == 0 && (lower <= 0 || upper <= 0))
-    {
-      QMessageBox::warning(this, tr("Invalid axis range"),
-                           tr("Apparent resistivity uses a logarithmic axis, so its Y range must be positive."));
-      return;
-    }
-
-    plotHandlers[i]->set_y_axis_autoscale(autoscaleY);
-    plotHandlers[i]->set_y_axis_range(lower, upper);
-  }
-
-  updatePlots();
+  if(ribbon) ribbon->showPage(6);
+  if(viewControls) viewControls->refreshRange();
 }
 
 void MainWindow::on_actionLoad_responses_triggered()

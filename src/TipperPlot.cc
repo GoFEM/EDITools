@@ -19,11 +19,6 @@
 
 #include "include/TipperPlot.h"
 
-namespace
-{
-constexpr double tipperArrowPixelsPerUnit = 90.0;
-}
-
 TipperPlot::TipperPlot(QCustomPlot *plot):
   MTDataPlot(plot), m_arrowMode(false)
 {
@@ -104,6 +99,33 @@ void TipperPlot::set_arrow_mode(bool on)
 bool TipperPlot::arrow_mode() const
 {
   return m_arrowMode;
+}
+
+void TipperPlot::set_view_style(const TFViewStyle &style)
+{
+  const double scale = style.arrowScale / m_viewStyle.arrowScale;
+  MTDataPlot::set_view_style(style);
+  if(!m_arrowMode) return;
+  for(int i: {0, 2, 4, 6}) {
+    const QColor color = view_color(i >= 4 ? 7 : i == 0 ? 5 : 6);
+    auto *graph = m_plot->graph(i);
+    auto scatter = graph->scatterStyle(); scatter.setPen(QPen(color)); scatter.setBrush(color);
+    graph->setScatterStyle(scatter); graph->setPen(QPen(color, style.lineWidth));
+    m_errorBars[i]->setPen(QPen(color, style.lineWidth));
+  }
+  const auto restyle = [&](QCPItemLine *arrow) {
+    auto pen = arrow->pen(); pen.setColor(view_color(arrow->property("viewColor").toUInt()));
+    pen.setWidthF(style.lineWidth); arrow->setPen(pen);
+    if(arrow->end->type() == QCPItemPosition::ptAxisRectRatio)
+      arrow->start->setCoords(-style.arrowScale, 0);
+    else arrow->end->setCoords(arrow->end->coords() * scale);
+  };
+  for(auto *arrow: m_arrowItems) restyle(arrow);
+  for(auto *item: m_referenceItems) {
+    if(auto *arrow = qobject_cast<QCPItemLine *>(item)) restyle(arrow);
+    if(auto *label = qobject_cast<QCPItemText *>(item)) label->setColor(view_color(5));
+  }
+  update_component_legend();
 }
 
 std::vector<RealDataType> TipperPlot::get_graph_data_types(const QCPGraph *graph) const
@@ -332,7 +354,7 @@ void TipperPlot::set_arrow_selection_data(const std::vector<std::vector<bool>> &
 }
 
 void TipperPlot::draw_arrow(double period, double xComponent,
-                            double yComponent, const QPen &pen)
+                            double yComponent, const QPen &pen, unsigned colorIndex)
 {
   if(!std::isfinite(period) || !std::isfinite(xComponent) || !std::isfinite(yComponent))
     return;
@@ -341,6 +363,7 @@ void TipperPlot::draw_arrow(double period, double xComponent,
   arrow->setSelectable(false);
   arrow->setLayer("overlay");
   arrow->setPen(pen);
+  arrow->setProperty("viewColor", colorIndex);
   arrow->setHead(QCPLineEnding(QCPLineEnding::esSpikeArrow, 6, 8));
 
   arrow->start->setType(QCPItemPosition::ptPlotCoords);
@@ -349,8 +372,8 @@ void TipperPlot::draw_arrow(double period, double xComponent,
 
   arrow->end->setParentAnchor(arrow->start);
   arrow->end->setType(QCPItemPosition::ptAbsolute);
-  arrow->end->setCoords(xComponent * tipperArrowPixelsPerUnit,
-                        -yComponent * tipperArrowPixelsPerUnit);
+  arrow->end->setCoords(xComponent * m_viewStyle.arrowScale,
+                        -yComponent * m_viewStyle.arrowScale);
 
   m_arrowItems.push_back(arrow);
 }
@@ -358,27 +381,31 @@ void TipperPlot::draw_arrow(double period, double xComponent,
 void TipperPlot::draw_reference_arrow()
 {
   QCPItemLine *arrow = new QCPItemLine(m_plot);
+  arrow->setObjectName("tipperReferenceArrow");
   arrow->setSelectable(false);
   arrow->setLayer("overlay");
-  arrow->setPen(QPen(PlotColors::tipperReal()));
+  arrow->setPen(QPen(view_color(5), m_viewStyle.lineWidth));
+  arrow->setProperty("viewColor", 5u);
   arrow->setHead(QCPLineEnding(QCPLineEnding::esSpikeArrow, 6, 8));
-  arrow->start->setType(QCPItemPosition::ptAxisRectRatio);
-  arrow->start->setAxisRect(m_plot->axisRect());
-  arrow->start->setCoords(0.72, 0.12);
-  arrow->end->setParentAnchor(arrow->start);
-  arrow->end->setType(QCPItemPosition::ptAbsolute);
-  arrow->end->setCoords(tipperArrowPixelsPerUnit, 0);
+  // Anchor the head at the right edge so resizing or a larger scale cannot
+  // push the reference and its label outside the plot.
+  arrow->end->setType(QCPItemPosition::ptAxisRectRatio);
+  arrow->end->setAxisRect(m_plot->axisRect());
+  arrow->end->setCoords(.96, .12);
+  arrow->start->setParentAnchor(arrow->end);
+  arrow->start->setType(QCPItemPosition::ptAbsolute);
+  arrow->start->setCoords(-m_viewStyle.arrowScale, 0);
   m_referenceItems.push_back(arrow);
 
   QCPItemText *label = new QCPItemText(m_plot);
   label->setSelectable(false);
   label->setLayer("overlay");
-  label->setPositionAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+  label->setPositionAlignment(Qt::AlignRight | Qt::AlignTop);
   label->position->setParentAnchor(arrow->end);
   label->position->setType(QCPItemPosition::ptAbsolute);
-  label->position->setCoords(8, 0);
+  label->position->setCoords(0, 5);
   label->setText("|T| = 1.0");
-  label->setColor(PlotColors::tipperReal());
+  label->setColor(view_color(5));
   m_referenceItems.push_back(label);
 }
 
@@ -390,15 +417,15 @@ void TipperPlot::draw_tipper_arrows(const std::vector<dvector> &tipper,
   if(tipper.size() < 4)
     return;
 
-  QPen realPen(PlotColors::tipperReal());
-  QPen imagPen(PlotColors::tipperImaginary());
+  QPen realPen(view_color(5), m_viewStyle.lineWidth);
+  QPen imagPen(view_color(6), m_viewStyle.lineWidth);
   if(predicted)
   {
     realPen.setStyle(Qt::DashLine);
     imagPen.setStyle(Qt::DashLine);
   }
 
-  QPen maskedPen(PlotColors::tipperMasked());
+  QPen maskedPen(view_color(7), m_viewStyle.lineWidth);
 
   for(unsigned i = 0; i < frequencies.size(); ++i)
   {
@@ -407,11 +434,12 @@ void TipperPlot::draw_tipper_arrows(const std::vector<dvector> &tipper,
     for(unsigned offset: {0u, 2u}) {
       if(!m_componentVisible[offset] && !m_componentVisible[offset + 1]) continue;
       QPen pen = offset == 0 ? realPen : imagPen;
+      unsigned colorIndex = offset == 0 ? 5 : 6;
       if(mask && ((m_componentVisible[offset] && !(*mask)[offset][i]) ||
                   (m_componentVisible[offset + 1] && !(*mask)[offset + 1][i])))
-        pen = maskedPen;
+        { pen = maskedPen; colorIndex = 7; }
       draw_arrow(period, m_componentVisible[offset] ? tipper[offset][i] : 0.,
-                 m_componentVisible[offset + 1] ? tipper[offset + 1][i] : 0., pen);
+                 m_componentVisible[offset + 1] ? tipper[offset + 1][i] : 0., pen, colorIndex);
     }
   }
 }

@@ -28,17 +28,20 @@ public:
   struct Glyph { double period; MTMapData::PhaseTensor tensor; bool masked; };
   std::vector<Glyph> observed, predicted;
   QCPColorGradient colors = PlotColorMaps::gradient();
+  TFViewStyle style;
 protected:
   QRect clipRect() const override { return mParentPlot->axisRect()->rect(); }
   void applyDefaultAntialiasingHint(QCPPainter *p) const override { p->setAntialiasing(true); }
   void draw(QCPPainter *p) override {
-    const double radius = std::min(13., clipRect().height() * .3);
+    const double radius = std::min(style.ellipseSize / 2., clipRect().height() * .3);
     for(const auto *samples: {&observed, &predicted}) for(const auto &s: *samples) {
       p->save();
       p->translate(mParentPlot->xAxis->coordToPixel(s.period), mParentPlot->yAxis->coordToPixel(0.));
       p->rotate(s.tensor.azimuth);
-      const auto color = s.masked ? PlotColors::masked() : QColor::fromRgb(colors.color(s.tensor.phiMin, {0, 90}));
-      p->setPen(QPen(samples == &predicted ? QColor("#222222") : color, samples == &predicted ? 1.2 : .7));
+      const auto color = s.masked ? QColor(QString::fromStdString(style.colors[4])) :
+        QColor::fromRgb(colors.color(s.tensor.phiMin, {style.colorMin, style.colorMax}));
+      p->setPen(QPen(samples == &predicted ? QColor("#222222") : color,
+                    style.lineWidth * (samples == &predicted ? 1.2 : .7)));
       p->setBrush(samples == &predicted ? QBrush(Qt::NoBrush) : QBrush(color));
       p->drawEllipse(QRectF(-radius*s.tensor.axisRatio, -radius, 2*radius*s.tensor.axisRatio, 2*radius));
       p->restore();
@@ -111,9 +114,20 @@ void PhaseTensorPlot::set_ellipse_mode(bool on)
   m_plot->yAxis->grid()->setVisible(!on);
   m_plot->graph(0)->setName(on ? tr("PT") : QStringLiteral("XX"));
   m_plot->graph(4)->setName(on ? tr("PT") : QStringLiteral("XX"));
-  m_plot->setToolTip(on ? tr("Equal major diameters; color is minimum principal phase (0–90°). North is up, east right. Grey: masked tensor. Outline: calculated response. Select ellipse centers to mask/unmask the whole tensor; Link Z / PT controls impedance linkage.") : QString());
+  m_plot->setToolTip(on ? tr("Equal major diameters; color is minimum principal phase. Configure size, colors and color limits in the View ribbon. North is up, east right. Outline: calculated response. Select ellipse centers to mask/unmask the whole tensor; Link Z / PT controls impedance linkage.") : QString());
   rebuild_component_legend(on ? std::vector<int>{0} : std::vector<int>{0, 1, 2, 3});
   apply_component_visibility();
+}
+
+void PhaseTensorPlot::set_view_style(const TFViewStyle &style)
+{
+  MTDataPlot::set_view_style(style);
+  m_ellipses->style = style;
+  auto gradient = PlotColorMaps::gradient(QString::fromStdString(style.colorMap));
+  if(style.reverseColorMap) gradient = gradient.inverted();
+  m_ellipses->colors = gradient;
+  m_colorScale->setGradient(gradient);
+  m_colorScale->setDataRange({style.colorMin, style.colorMax});
 }
 
 void PhaseTensorPlot::apply_component_visibility()
