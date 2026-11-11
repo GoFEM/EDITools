@@ -25,6 +25,12 @@ public:
   void releaseContext(const QString &key);
 
 private:
+  bool eventFilter(QObject *object, QEvent *event) override;
+  void resizeBody(int height, bool save);
+  QWidget *resizeHandle = nullptr;
+  int defaultBodyHeight = 112;
+  int dragStartY = 0, dragStartHeight = 0;
+  bool dragging = false;
   void updateDisplay();
   void appendPage(const Page &page, const QString &context = {});
   QToolButton *button(QAction *action, QWidget *parent, bool quick = false);

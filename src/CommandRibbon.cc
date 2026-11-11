@@ -12,6 +12,8 @@
 #include <QStackedWidget>
 #include <QTabBar>
 #include <QToolButton>
+#include <QMouseEvent>
+#include <QKeyEvent>
 
 CommandRibbon::CommandRibbon(QMainWindow &window, const std::vector<QAction *> &quickActions,
                              const std::vector<Page> &pages, QAction *about)
@@ -69,7 +71,20 @@ CommandRibbon::CommandRibbon(QMainWindow &window, const std::vector<QAction *> &
   body->setObjectName("ribbonPages");
   layout->addWidget(body);
   for(const auto &page : pages) appendPage(page);
-  body->setFixedHeight(qMax(112, fontMetrics().height() * 3 + 55));
+  defaultBodyHeight = qMax(112, fontMetrics().height() * 3 + 55);
+  resizeBody(QSettings().value("interface/ribbonHeight", defaultBodyHeight).toInt(), false);
+  auto *grip = new QFrame(panel);
+  resizeHandle = grip;
+  grip->setObjectName("ribbonResizeHandle");
+  grip->setFrameShape(QFrame::HLine);
+  grip->setFixedHeight(7);
+  grip->setCursor(Qt::SplitVCursor);
+  grip->setMouseTracking(true);
+  grip->setFocusPolicy(Qt::StrongFocus);
+  grip->setAccessibleName(tr("Ribbon height"));
+  grip->setToolTip(tr("Drag to resize the ribbon. Up/Down adjusts its height; Home or double-click restores the default."));
+  grip->installEventFilter(this);
+  layout->addWidget(grip);
   addWidget(panel);
   window.addToolBar(Qt::TopToolBarArea, this);
 
@@ -104,6 +119,43 @@ void CommandRibbon::updateDisplay()
   collapsed->setEnabled(!classic->isChecked());
   collapseButton->setArrowType(collapsed->isChecked() ? Qt::DownArrow : Qt::UpArrow);
   body->setVisible(!classic->isChecked() && !collapsed->isChecked());
+  resizeHandle->setVisible(!classic->isChecked() && !collapsed->isChecked());
+}
+
+void CommandRibbon::resizeBody(int height, bool save)
+{
+  body->setFixedHeight(qBound(48, height, 600));
+  if(save) QSettings().setValue("interface/ribbonHeight", body->minimumHeight());
+}
+
+bool CommandRibbon::eventFilter(QObject *object, QEvent *event)
+{
+  if(object == resizeHandle) {
+    if(event->type() == QEvent::MouseButtonDblClick) {
+      if(static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton) {
+        dragging = false; resizeBody(defaultBodyHeight, true); return true;
+      }
+    } else if(event->type() == QEvent::MouseButtonPress) {
+      auto *mouse = static_cast<QMouseEvent *>(event);
+      if(mouse->button() == Qt::LeftButton) {
+        dragging = true; dragStartY = qRound(mouse->globalPosition().y()); dragStartHeight = body->minimumHeight();
+        resizeHandle->setFocus(); return true;
+      }
+    } else if(event->type() == QEvent::MouseMove && dragging) {
+      resizeBody(dragStartHeight + qRound(static_cast<QMouseEvent *>(event)->globalPosition().y()) - dragStartY, false);
+      return true;
+    } else if(event->type() == QEvent::MouseButtonRelease && dragging) {
+      dragging = false; resizeBody(body->minimumHeight(), true); return true;
+    } else if(event->type() == QEvent::KeyPress) {
+      const auto *key = static_cast<QKeyEvent *>(event);
+      const int step = key->modifiers().testFlag(Qt::ShiftModifier) ? 32 : 8;
+      if(key->key() == Qt::Key_Up || key->key() == Qt::Key_Down) {
+        resizeBody(body->minimumHeight() + (key->key() == Qt::Key_Up ? -step : step), true); return true;
+      }
+      if(key->key() == Qt::Key_Home) { resizeBody(defaultBodyHeight, true); return true; }
+    }
+  }
+  return QToolBar::eventFilter(object, event);
 }
 
 void CommandRibbon::showPage(int index)
@@ -171,7 +223,7 @@ void CommandRibbon::appendPage(const Page &page, const QString &context)
     auto *scroll = new QScrollArea(body);
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setWidgetResizable(true);
-    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scroll->setWidget(content);
     body->addWidget(scroll);
   record.widget = scroll; records.push_back(record);

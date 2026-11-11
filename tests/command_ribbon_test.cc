@@ -3,6 +3,7 @@
 #include "mainwindow.h"
 #include <QApplication>
 #include <QKeyEvent>
+#include <QMouseEvent>
 #include <QMenuBar>
 #include <QPalette>
 #include <QScrollArea>
@@ -96,6 +97,24 @@ void presentation()
   window.show(); window.activateWindow();
   QApplication::processEvents();
   check(!window.menuBar()->isVisible() && body->isVisible(), "Default ribbon layout");
+  auto *grip = control<QWidget>(*ribbon, "ribbonResizeHandle");
+  const int initialHeight = body->height();
+  const QPointF local = grip->rect().center(), global = grip->mapToGlobal(local.toPoint());
+  QMouseEvent press(QEvent::MouseButtonPress, local, global, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+  QApplication::sendEvent(grip, &press);
+  QMouseEvent move(QEvent::MouseMove, local + QPointF(0, 40), global + QPointF(0, 40), Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+  QApplication::sendEvent(grip, &move);
+  QMouseEvent release(QEvent::MouseButtonRelease, local, global + QPointF(0, 40), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+  QApplication::sendEvent(grip, &release);
+  QApplication::processEvents();
+  check(body->height() == initialHeight + 40, "Dragging ribbon edge must resize it");
+  key(*grip, Qt::Key_Up, Qt::NoModifier);
+  check(body->height() == initialHeight + 32, "Keyboard ribbon resize failed");
+  key(*grip, Qt::Key_Home, Qt::NoModifier);
+  check(body->height() == initialHeight, "Default ribbon height was not restored");
+  key(*grip, Qt::Key_Down, Qt::NoModifier);
+  check(QSettings().value("interface/ribbonHeight").toInt() == body->height(), "Ribbon height not saved");
+
   auto *shared = button(*ribbon, action);
   shared->click();
   check(triggered == 1 && action->isChecked() && shared->isChecked(), "Single shared command dispatch");
@@ -108,7 +127,7 @@ void presentation()
   check(triggered == 2 && action->isChecked(), "Shortcut works on inactive tab with hidden menus");
   collapsed->setChecked(true);
   QApplication::processEvents();
-  check(!body->isVisible() && tabs->isVisible(), "Ribbon collapse");
+  check(!body->isVisible() && tabs->isVisible() && !grip->isVisible(), "Ribbon collapse");
   check(QSettings().value("interface/ribbonCollapsed").toBool(), "Collapse preference saved");
   tabs->tabBarClicked(0);
   check(!collapsed->isChecked() && body->isVisible(), "Click tab expands ribbon");
@@ -137,6 +156,7 @@ void integration()
   auto *classic = control<QAction>(*ribbon, "actionClassic_menus");
   auto *collapsed = control<QAction>(*ribbon, "actionCollapse_ribbon");
   check(classic->isChecked() && collapsed->isChecked(), "Preferences restored in new window");
+  check(control<QStackedWidget>(*ribbon, "ribbonPages")->height() == QSettings().value("interface/ribbonHeight").toInt(), "Ribbon height not restored in new window");
   classic->setChecked(false);
   collapsed->setChecked(false);
   auto *tabs = control<QTabBar>(*ribbon, "ribbonTabs");

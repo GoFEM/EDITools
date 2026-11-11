@@ -439,9 +439,9 @@ void MainWindow::setupRibbon()
   const auto action = [this](const char *name) { return findChild<QAction *>(name); };
   auto viewCommands = pages[3].groups;
   viewCommands.push_back({tr("Maps and profiles"), {ui->actionPeriod_maps, action("actionProfile_analysis")}});
-  viewCommands.push_back({tr("Workspace"), {action("actionNew_view"), action("actionDuplicate_view"), action("actionRename_view"), action("actionClose_view"), action("actionReopen_view")}});
+  viewCommands.push_back({tr("Workspace"), {action("actionNew_view"), action("actionDuplicate_view"), action("actionRename_view"), action("actionClose_view"), action("actionReopen_view"), action("actionStation_navigator")}});
   tfTools = {{tr("TF tools"), {
-    {tr("Navigator"), {action("actionStation_navigator"), ui->actionShow_station_names}},
+    {tr("Station map"), {ui->actionShow_station_names}},
     pages[4].groups[0], pages[4].groups[2],
     {tr("Guides"), {rhoPlusAction, ui->actionActivate_masking_mode}}
   }, "TF tools"}, {tr("TF appearance"), viewGroups, "TF appearance"}, pages[2]};

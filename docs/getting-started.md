@@ -15,7 +15,9 @@
 statistics, neighbouring-station comparison, Rho+ analysis, survey average,
 polarity review, period layout or detailed auto-mask review from **Views**
 or **Auto mask**. The analysis opens beside TF view in the same project window.
-Its plots and tables occupy the workspace; its controls appear in the ribbon.
+The station list, calculated responses and survey map stay on the left across
+all tabs. Only the area to their right switches between TF and analysis views;
+the active view's controls appear in the ribbon.
 
 A view command returns to an existing tab. **Views → New view** opens another
 instance; **Duplicate view** copies the current analysis and its settings.
@@ -37,8 +39,8 @@ preserves the line. Version 10 projects include this workspace state; older
 projects open in TF view. Calculated previews are recomputed from the loaded
 data. Closed-tab recovery lasts for the current session.
 
-**TF tools → Station navigator** collapses the station/map sidebar. Analyses
-use their own full-width workspace. **Open as survey** and **Create survey**
+**Views → Station navigator** collapses or restores the shared station/map
+sidebar. Drag its divider to adjust the width for every view. **Open as survey** and **Create survey**
 produce an independent project window with its own data and edit history.
 
 ## Command ribbon
@@ -55,8 +57,10 @@ options; Manual reveals the angle; automatic strike or PT filtering reveals
 quality thresholds. Arrow settings appear when an arrow layer is enabled, fixed
 limits appear when Auto is off, and resampling shows the fields for its chosen
 grid. Hidden settings keep their values. Commands that apply but lack data or a
-valid preview are disabled. The ribbon height stays fixed; wide groups scroll
-horizontally on smaller screens.
+valid preview are disabled. Drag the ribbon's lower edge to adjust its height;
+the height is remembered across tabs and application sessions. Double-click
+the edge to reset it. With the resize edge focused, Up/Down adjusts the height
+and Home resets it. Groups scroll when the available space is too small.
 
 Use the arrow or **Ctrl+F1** to collapse the commands; click a ribbon tab to
 expand them. **Interface → Classic menus** restores the menu bar. Existing

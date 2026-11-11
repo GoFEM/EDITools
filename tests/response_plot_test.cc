@@ -2244,6 +2244,10 @@ void workspace_tabs(const QString &directory)
   auto *tabs = widget<WorkspaceTabs>(window, "workspaceTabs"); check(tabs->count() == 1 && tabs->type(tabs->currentWidget()) == "tf", "Legacy projects must open TF only");
   widget<QAction>(window, "actionProfile_analysis")->trigger(); QApplication::processEvents();
   auto *first = dynamic_cast<ProfileWindow *>(tabs->currentWidget()); check(first && !first->isWindow() && tabs->count() == 2, "Profile did not embed as a tab");
+  auto *navigator = widget<QSplitter>(window, "splitter_3");
+  auto *sharedMap = widget<QCustomPlot>(window, "mapPlot");
+  check(!tabs->isAncestorOf(navigator) && navigator->isVisible() && sharedMap->isVisible(), "Station navigator must remain outside workspace tabs");
+  check(widget<QSplitter>(window, "splitter_5")->indexOf(tabs) == 1, "Workspace tabs must be beside the shared navigator");
   const auto id = tabs->id(first);
   auto *map = widget<QCustomPlot>(*first, "profileMap");
   const auto projection = SurveyCoordinates::suggested(survey->geographic_locations());
@@ -2292,12 +2296,14 @@ void workspace_tabs(const QString &directory)
     widget<QAction>(window, action)->trigger(); QApplication::processEvents();
     check(dynamic_cast<WorkspaceView *>(tabs->currentWidget()) && !tabs->currentWidget()->isWindow(), "Analysis opened a separate window");
     check(widget<QWidget>(window, "ribbonPages")->height() == ribbonHeight, "Context changes resized ribbon");
+    check(navigator->isVisible() && sharedMap->isVisible(), "Changing analysis tabs hid the shared navigator");
   }
   tabs->setCurrentWidget(first); widget<QAction>(window, "actionSave_project")->trigger();
   const auto artifacts = qEnvironmentVariable("EDITOOLS_TEST_ARTIFACT_DIR");
   if(!artifacts.isEmpty()) { ribbon->showPage("Profile tools"); QApplication::processEvents(); window.grab().save(artifacts + "/workspace-profile.png"); }
   MainWindow restored; file_action(restored, "actionLoad_project", {path});
   auto *restoredTabs = widget<WorkspaceTabs>(restored, "workspaceTabs");
+  check(!restoredTabs->isAncestorOf(widget<QSplitter>(restored, "splitter_3")) && widget<QCustomPlot>(restored, "mapPlot")->isVisible(), "Restored project hid or moved shared map into tab");
   check(restoredTabs->count() == tabs->count() && restoredTabs->id(restoredTabs->currentWidget()) == id, "Project lost tabs or active identity");
   for(int i = 0; i < tabs->count(); ++i) check(tabs->id(tabs->widget(i)) == restoredTabs->id(restoredTabs->widget(i)), "Project changed view order");
   auto *restoredProfile = dynamic_cast<ProfileWindow *>(restoredTabs->currentWidget());

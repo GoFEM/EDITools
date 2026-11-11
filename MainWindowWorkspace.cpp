@@ -25,10 +25,12 @@ const QStringList kinds{"profile", "map", "fit", "comparison", "validity", "aver
 
 void MainWindow::setupWorkspace()
 {
-  workspaces = new WorkspaceTabs(ui->centralWidget);
-  ui->gridLayout->removeWidget(ui->splitter_5);
-  ui->gridLayout->addWidget(workspaces, 0, 0);
-  workspaces->addView(ui->splitter_5, "tf", tr("TF view"), "tf");
+  workspaces = new WorkspaceTabs;
+  ui->splitter_5->replaceWidget(ui->splitter_5->indexOf(tfView), workspaces);
+  ui->splitter_5->setStretchFactor(0, 0);
+  ui->splitter_5->setStretchFactor(1, 1);
+  ui->splitter_5->setCollapsible(0, false);
+  workspaces->addView(tfView, "tf", tr("TF view"), "tf");
   connect(workspaces, &QTabWidget::currentChanged, this, [this] { activateWorkspace(); });
   connect(workspaces, &WorkspaceTabs::closing, this, [this](QWidget *view) {
     if(!restoringWorkspace) { closedViews.append(workspaceSnapshot(view)); if(closedViews.size() > 20) closedViews.removeFirst(); }
