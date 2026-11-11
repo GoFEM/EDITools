@@ -41,6 +41,7 @@ class MainWindow;
 class MapBackground;
 class FitStatisticsWindow;
 class PeriodMapWindow;
+class ProfileWindow;
 class PeriodLayoutWindow;
 class ImpedanceValidityWindow;
 class SurveyAverageWindow;
@@ -263,6 +264,7 @@ private:
   SurveyCoordinates mapCoordinates;
   FitStatisticsWindow *fitStatistics = nullptr;
   PeriodMapWindow *periodMaps = nullptr;
+  ProfileWindow *profile = nullptr;
   PeriodLayoutWindow *periodLayout = nullptr;
   ImpedanceValidityWindow *impedanceValidity = nullptr;
   SurveyAverageWindow *surveyAverage = nullptr;

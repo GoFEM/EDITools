@@ -48,6 +48,7 @@ add_library(editools_data STATIC
   src/MTSpectra.cc
   src/ImpedanceAnalysis.cc
   src/AutoMask.cc
+  src/ProfileAnalysis.cc
   src/PolarityAnalysis.cc
   src/MTStationData.cc
   src/NativeMT.cc
@@ -107,6 +108,8 @@ add_library(editools_ui STATIC
   GroupMaskPlots.cpp
   SurveyCoordinatesDialog.cpp
   FitStatisticsWindow.cpp
+  ProfileWindow.cpp
+  ProfilePlots.cpp
   PeriodMapWindow.cpp
   PeriodLayoutWindow.cpp
   EDIImportDialog.cpp
@@ -183,6 +186,11 @@ if(BUILD_TESTING)
   add_executable(native_mt_dialog_test tests/native_mt_dialog_test.cc)
   target_link_libraries(native_mt_dialog_test PRIVATE editools_ui)
   add_test(NAME native_mt_dialog COMMAND native_mt_dialog_test)
+
+  add_executable(profile_test tests/profile_test.cc)
+  target_link_libraries(profile_test PRIVATE editools_ui)
+  add_test(NAME profile COMMAND profile_test)
+  set_tests_properties(profile PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
 
   add_executable(osm_test tests/osm_test.cc)
   target_link_libraries(osm_test PRIVATE editools_ui)

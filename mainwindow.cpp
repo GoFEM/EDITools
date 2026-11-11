@@ -71,6 +71,7 @@
 #include <QVBoxLayout>
 #include "FitStatisticsWindow.h"
 #include "PeriodMapWindow.h"
+#include "ProfileWindow.h"
 #include "PeriodLayoutWindow.h"
 #include "EDIImportDialog.h"
 #include "include/SurveyReport.h"
@@ -201,6 +202,16 @@ MainWindow::MainWindow(QWidget *parent) :
   connect(mapStationNames, &QCheckBox::toggled, ui->actionShow_station_names, &QAction::setChecked);
   connect(mapsButton, &QPushButton::clicked, ui->actionPeriod_maps, &QAction::trigger);
   connect(ui->actionPeriod_maps, &QAction::changed, mapsButton, [this, mapsButton] { mapsButton->setEnabled(ui->actionPeriod_maps->isEnabled()); });
+  auto *profileAction = ui->menuCoordinates->addAction(tr("Profile analysis…"));
+  profileAction->setObjectName("actionProfile_analysis");
+  profileAction->setToolTip(tr("Draw a profile corridor and view resistivity, phase, tensor sections and strike roses."));
+  connect(profileAction, &QAction::triggered, this, [this] {
+    const bool first = !profile;
+    if(first) profile = new ProfileWindow(this, [this](std::shared_ptr<MTSurveyData> data) { openSurveyCopy(std::move(data)); });
+    profile->setData(mtSurvey, mtResponses);
+    if(first) profile->setMapLayers(mapBackground->layers());
+    profile->show(); profile->raise(); profile->activateWindow();
+  });
   auto *periodLayoutAction = ui->menuData->addAction(tr("Period layout / Resampling…"));
   periodLayoutAction->setObjectName("actionPeriod_layout");
   connect(periodLayoutAction, &QAction::triggered, this, &MainWindow::openPeriodLayout);
@@ -369,7 +380,7 @@ void MainWindow::setupRibbon()
       {tr("Data fit"), {command("actionFit_statistics", tr("Statistics / RMS"), "data-histogram", true)}}}},
     {tr("&Maps"), {
       {tr("Coordinates"), {command("actionConvert_UTM", tr("UTM / origin"), "my-location", true), command("actionGeographic_coordinates", tr("Geographic"), "globe", true)}},
-      {tr("Survey maps"), {command("actionPeriod_maps", tr("PT / induction"), "map", true), command("actionShow_station_names", tr("Station names"), "text-field")}},
+      {tr("Survey maps"), {command("actionPeriod_maps", tr("PT / induction"), "map", true), command("actionProfile_analysis", tr("Profile"), "map", true), command("actionShow_station_names", tr("Station names"), "text-field")}},
       {tr("Background"), {command("actionMap_layers", tr("Map layers"), "layer"), command("actionTopography", tr("Topography"), "mountain-location-top", true)}}}},
     {tr("&Report"), {
       {tr("Export figures"), {command("actionExport_survey_report", tr("Survey PDF"), "document-pdf", true), command("actionSave_as_PDF", tr("Plot image"), "image")}},
@@ -1281,6 +1292,7 @@ void MainWindow::refreshAnalysisWindows()
   updateActionAvailability();
   if(fitStatistics) fitStatistics->setData(mtSurvey, mtResponses);
   if(periodMaps) periodMaps->setData(mtSurvey, mtResponses);
+  if(profile) profile->setData(mtSurvey, mtResponses);
   if(periodLayout) periodLayout->setData(mtSurvey);
   if(impedanceValidity) impedanceValidity->setData(mtSurvey);
   if(surveyAverage) surveyAverage->setData(mtSurvey);

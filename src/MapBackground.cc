@@ -107,13 +107,13 @@ QToolButton *MapBackground::button(QWidget *parent, int initial, const std::func
   for(int i = 0; i < labels.size(); ++i) {
     auto *action = menu->addAction(labels[i]); action->setObjectName(QString("mapLayer%1").arg(1 << i));
     action->setCheckable(true); action->setChecked(initial & available & (1 << i)); action->setEnabled(available & (1 << i));
-    if(!action->isEnabled()) action->setToolTip(QObject::tr("Optional map data unavailable. See README: Geographic map layers.")); action->setData(1 << i);
+    if(!action->isEnabled()) action->setToolTip(QObject::tr("Optional map data unavailable. See the user guide: Maps and geographic layers.")); action->setData(1 << i);
     QObject::connect(action, &QAction::toggled, button, [menu, changed] {
       int mask = 0; for(auto *item: menu->actions()) if(item->isChecked()) mask |= item->data().toInt(); changed(mask);
     });
   }
   if(!available) {
-    auto *hint = menu->addAction(QObject::tr("Natural Earth: install optional data (README)")); hint->setEnabled(false);
+    auto *hint = menu->addAction(QObject::tr("Natural Earth: install optional data (user guide)")); hint->setEnabled(false);
   }
   menu->addSeparator();
   auto *online = menu->addAction(reportOnly ? QObject::tr("OpenStreetMap (viewed tiles)") : QObject::tr("OpenStreetMap (online)"));
