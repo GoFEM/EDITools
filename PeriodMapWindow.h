@@ -33,6 +33,7 @@ public:
                const std::map<std::string, MTSurveyData> &responses);
 
 private:
+  void refreshData(const std::shared_ptr<MTSurveyData> &survey, const Responses &responses) override { setData(survey, responses); }
   struct Site {
     std::string name;
     QPointF position, north, east; // Projected position in km and local unit directions.

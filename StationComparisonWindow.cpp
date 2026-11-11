@@ -40,7 +40,7 @@ protected:
     }
   }
 };
-StationComparisonWindow::StationComparisonWindow(QWidget *parent, QCustomPlot *shared) : WorkspaceView(parent), sharedMap(shared) {
+StationComparisonWindow::StationComparisonWindow(QWidget *parent, QCustomPlot *shared) : WorkspaceView(parent), sharedMap(shared), sharedInteraction(shared) {
   setObjectName("stationComparison");
   setWindowTitle(tr("Neighbouring stations"));
   resize(1180, 760);
@@ -141,9 +141,9 @@ StationComparisonWindow::StationComparisonWindow(QWidget *parent, QCustomPlot *s
   });
   if(sharedMap) {
     overlay = new Overlay(sharedMap);
-    connect(sharedMap, &QCustomPlot::mousePress, this, [this](QMouseEvent *event) { if(sharedActive) sharedPress = event->position().toPoint(); });
+    connect(sharedMap, &QCustomPlot::mousePress, this, [this](QMouseEvent *event) { if(sharedInteraction.active()) sharedPress = event->position().toPoint(); });
     connect(sharedMap, &QCustomPlot::mouseRelease, this, [this](QMouseEvent *event) {
-      if(!sharedActive || !overlay || event->button() != Qt::LeftButton || (event->position().toPoint() - sharedPress).manhattanLength() > 4) return;
+      if(!sharedInteraction.active() || !overlay || event->button() != Qt::LeftButton || (event->position().toPoint() - sharedPress).manhattanLength() > 4) return;
       if(!sharedMap->axisRect()->rect().contains(event->position().toPoint())) return;
       QString nearest; double best = 12.;
       for(const auto &station: overlay->stations) {
@@ -173,18 +173,19 @@ StationComparisonWindow::~StationComparisonWindow() {
   setSharedMapActive(false, sharedCoordinates); delete overlay.data();
 }
 void StationComparisonWindow::setSharedMapActive(bool active, const SurveyCoordinates &coordinates) {
-  if(!sharedMap || !overlay) return;
+  if(!overlay) return;
   if(!active) {
-    if(sharedActive) { sharedMap->setInteractions(savedInteractions); overlay->setVisible(false); sharedMap->replot(QCustomPlot::rpQueuedReplot); }
-    sharedActive = false; return;
+    overlay->setVisible(false);
+    sharedInteraction.deactivate();
+    return;
   }
-  if(!sharedActive) savedInteractions = sharedMap->interactions();
-  sharedActive = true; sharedCoordinates = coordinates;
-  sharedMap->setInteraction(QCP::iSelectPlottables, false);
+  if(!sharedInteraction.activate()) return;
+  sharedCoordinates = coordinates;
+  sharedInteraction.configure(QCP::iSelectPlottables);
   updateSharedMap();
 }
 void StationComparisonWindow::updateSharedMap() {
-  if(!sharedActive || !overlay) return;
+  if(!sharedInteraction.active() || !overlay) return;
   overlay->stations.clear();
   if(survey) for(int i = 0; i < stations->count(); ++i) {
     const auto *item = stations->item(i); const auto name = item->data(Qt::UserRole).toString();
@@ -259,7 +260,7 @@ void StationComparisonWindow::rebuild() {
   }
   draw();
 }
-void StationComparisonWindow::selectReferenceStation(const QString &name) {
+void StationComparisonWindow::selectStation(const QString &name) {
   const int index = anchor->findText(name);
   if(index < 0 || index == anchor->currentIndex()) return;
   const QSignalBlocker block(anchor);

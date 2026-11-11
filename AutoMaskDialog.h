@@ -21,6 +21,7 @@ public:
   QJsonObject saveViewState() const override;
   void restoreViewState(const QJsonObject &state) override;
 private:
+  void refreshData(const std::shared_ptr<MTSurveyData> &survey, const Responses &) override { setData(survey); }
   struct Impl;
   std::unique_ptr<Impl> impl;
 };

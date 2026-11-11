@@ -1,4 +1,5 @@
 #include "ProfileWindow.h"
+#include "include/SharedMapInteraction.h"
 #include <QJsonArray>
 #include "ProfilePlots.h"
 #include "include/FileLabels.h"
@@ -126,9 +127,7 @@ struct ProfileWindow::Impl {
   QPointer<QCustomPlot> sharedMap;
   QPointer<SharedProfileOverlay> sharedOverlay;
   SurveyCoordinates sharedCoordinates;
-  bool sharedActive = false;
-  QCP::Interactions savedInteractions;
-  QCursor savedCursor;
+  SharedMapInteraction sharedInteraction;
   MapBackground *background;
   Corridor *corridor;
   QCPCurve *line;
@@ -156,7 +155,7 @@ struct ProfileWindow::Impl {
   double manualStrike = 0., rotation = 0.;
 
   Impl(ProfileWindow *w, std::function<void(std::shared_ptr<MTSurveyData>)> callback, QCustomPlot *shared)
-      : owner(w), extracted(std::move(callback)), sharedMap(shared) {
+      : owner(w), extracted(std::move(callback)), sharedMap(shared), sharedInteraction(shared) {
     auto *layout = new QVBoxLayout(w);
     auto *top = new QHBoxLayout;
     dataset = combo(w, "profileDataset", {});
@@ -607,10 +606,10 @@ struct ProfileWindow::Impl {
     if(sharedMap) {
       sharedOverlay = new SharedProfileOverlay(sharedMap);
       QObject::connect(sharedMap, &QCustomPlot::mousePress, w, [this](QMouseEvent *e) {
-        if(sharedActive) press = e->position().toPoint();
+        if(sharedInteraction.active()) press = e->position().toPoint();
       });
       QObject::connect(sharedMap, &QCustomPlot::mouseRelease, w, [this](QMouseEvent *e) {
-        if(!sharedActive || !drawing->isChecked() || !sharedMap->axisRect()->rect().contains(e->position().toPoint())) return;
+        if(!sharedInteraction.active() || !drawing->isChecked() || !sharedMap->axisRect()->rect().contains(e->position().toPoint())) return;
         if(e->button() == Qt::RightButton) { drawing->setChecked(false); return; }
         if(e->button() != Qt::LeftButton || (e->position().toPoint() - press).manhattanLength() > 4) return;
         try {
@@ -637,17 +636,14 @@ struct ProfileWindow::Impl {
     delete sharedOverlay.data();
   }
   void deactivateSharedMap() {
-    if(!sharedActive) return;
-    sharedActive = false;
     if(sharedOverlay) sharedOverlay->setVisible(false);
-    if(sharedMap) { sharedMap->setInteractions(savedInteractions); sharedMap->setCursor(savedCursor); sharedMap->replot(QCustomPlot::rpQueuedReplot); }
+    sharedInteraction.deactivate();
   }
   void sharedInteractions() {
-    if(!sharedActive || !sharedMap) return;
-    sharedMap->setInteractions(savedInteractions);
-    sharedMap->setInteraction(QCP::iRangeDrag, !drawing->isChecked() && savedInteractions.testFlag(QCP::iRangeDrag));
-    sharedMap->setInteraction(QCP::iSelectPlottables, !drawing->isChecked() && savedInteractions.testFlag(QCP::iSelectPlottables));
-    sharedMap->setCursor(drawing->isChecked() ? QCursor(Qt::CrossCursor) : savedCursor);
+    if(drawing->isChecked()) {
+      const QCursor cursor(Qt::CrossCursor);
+      sharedInteraction.configure(QCP::iRangeDrag | QCP::iSelectPlottables, &cursor);
+    } else sharedInteraction.configure();
   }
   QPolygonF toSharedMap(const std::vector<Point> &points) const {
     std::vector<std::array<double, 3>> projected;
@@ -657,7 +653,7 @@ struct ProfileWindow::Impl {
     return result;
   }
   void updateSharedMap() {
-    if(!sharedActive || !sharedMap || !sharedOverlay) return;
+    if(!sharedInteraction.active() || !sharedMap || !sharedOverlay) return;
     try {
       sharedOverlay->line = toSharedMap(vertices);
       sharedOverlay->corridor.clear();
@@ -824,7 +820,7 @@ struct ProfileWindow::Impl {
       map->yAxis->setRange(y0 - margin, y1 + margin);
     }
     map->replot();
-    if(sharedActive && sharedMap) {
+    if(sharedInteraction.active() && sharedMap) {
       std::vector<Point> points = vertices;
       for(const auto &station: stations) points.push_back(station.position);
       const auto bounds = toSharedMap(points).boundingRect();
@@ -1150,9 +1146,8 @@ ProfileWindow::~ProfileWindow() = default;
 void ProfileWindow::setSharedMapActive(bool active, const SurveyCoordinates &coordinates) {
   auto &s = *impl;
   if(!active) { s.deactivateSharedMap(); return; }
-  if(!s.sharedMap) return;
-  if(!s.sharedActive) { s.savedInteractions = s.sharedMap->interactions(); s.savedCursor = s.sharedMap->cursor(); }
-  s.sharedActive = true; s.sharedCoordinates = coordinates;
+  if(!s.sharedInteraction.activate()) return;
+  s.sharedCoordinates = coordinates;
   s.sharedInteractions(); s.updateSharedMap();
 }
 void ProfileWindow::selectStation(const QString &name) { impl->highlight(name, false); }

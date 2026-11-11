@@ -14,12 +14,13 @@ public:
   void setData(const std::shared_ptr<MTSurveyData> &survey,
                const std::map<std::string, MTSurveyData> &responses);
   void setMapLayers(int layers);
-  void setSharedMapActive(bool active, const SurveyCoordinates &coordinates);
-  void selectStation(const QString &name);
+  void setSharedMapActive(bool active, const SurveyCoordinates &coordinates) override;
+  void selectStation(const QString &name) override;
   QJsonObject saveViewState() const override;
   void restoreViewState(const QJsonObject &state) override;
 
 private:
+  void refreshData(const std::shared_ptr<MTSurveyData> &survey, const Responses &responses) override { setData(survey, responses); }
   struct Impl;
   std::unique_ptr<Impl> impl;
 };

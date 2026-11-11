@@ -2,6 +2,7 @@
 #define EDITOOLS_STATION_COMPARISON_WINDOW_H
 #include "include/WorkspaceView.h"
 #include "include/SurveyCoordinates.h"
+#include "include/SharedMapInteraction.h"
 #include "qcustomplot.h"
 #include <memory>
 #include <vector>
@@ -17,11 +18,12 @@ class StationComparisonWindow : public WorkspaceView {
 public:
   explicit StationComparisonWindow(QWidget *parent = nullptr, QCustomPlot *sharedMap = nullptr);
   ~StationComparisonWindow();
-  void setSharedMapActive(bool active, const SurveyCoordinates &coordinates);
+  void setSharedMapActive(bool active, const SurveyCoordinates &coordinates) override;
   void setData(std::shared_ptr<MTSurveyData> survey, const QStringList &selected = {});
-  void selectReferenceStation(const QString &name);
+  void selectStation(const QString &name) override;
 
 private:
+  void refreshData(const std::shared_ptr<MTSurveyData> &survey, const Responses &) override { setData(survey); }
   void rebuild();
   void selectNearest();
   void draw();
@@ -31,8 +33,7 @@ private:
   QPointer<Overlay> overlay;
   QPointer<QCustomPlot> sharedMap;
   SurveyCoordinates sharedCoordinates;
-  bool sharedActive = false;
-  QCP::Interactions savedInteractions;
+  SharedMapInteraction sharedInteraction;
   QPoint sharedPress;
   std::shared_ptr<MTSurveyData> survey;
   QComboBox *anchor, *family, *component;

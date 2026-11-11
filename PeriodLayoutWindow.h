@@ -20,6 +20,7 @@ public:
   explicit PeriodLayoutWindow(QWidget *parent, std::function<void(std::shared_ptr<MTSurveyData>)> createSurvey);
   void setData(const std::shared_ptr<MTSurveyData> &survey);
 private:
+  void refreshData(const std::shared_ptr<MTSurveyData> &survey, const Responses &) override { setData(survey); }
   std::vector<double> targetPeriods() const;
   void invalidate();
   void preview();

@@ -286,8 +286,7 @@ struct ImpedanceValidityWindow::Impl {
     }
     status->setText(summary.isEmpty() ? QObject::tr("Check XY or YX to show a response.") : summary.join('\n'));
     refreshPreview(); draw();
-    const auto ranges = owner->property("pendingPlotRanges").toJsonObject();
-    if(!ranges.isEmpty()) { WorkspaceView::restorePlotRanges(owner, ranges); owner->setProperty("pendingPlotRanges", QVariant()); }
+    owner->restorePendingPlotRanges();
   }
   std::vector<MaskEdit> collectEdits(const MTStationData &s, std::vector<Series> &entries, unsigned &linkedCount, unsigned &diagonalCount) {
     const MaskState state(s);
@@ -570,8 +569,7 @@ struct SurveyAverageWindow::Impl {
     status->setText(QObject::tr("%1 checked stations · %2 usable mean periods / %3 groups · equal station weights · no interpolation")
       .arg(curves.size()).arg(available).arg(mean.size()));
     plots.finish();
-    const auto ranges = owner->property("pendingPlotRanges").toJsonObject();
-    if(!ranges.isEmpty()) { WorkspaceView::restorePlotRanges(owner, ranges); owner->setProperty("pendingPlotRanges", QVariant()); }
+    owner->restorePendingPlotRanges();
 
   }
 };

@@ -43,17 +43,11 @@ namespace Ui {
 class MainWindow;
 }
 class MapBackground;
-class FitStatisticsWindow;
 class PeriodMapWindow;
-class ProfileWindow;
 class QStackedWidget;
-class PeriodLayoutWindow;
 class ImpedanceValidityWindow;
-class SurveyAverageWindow;
 class RhoPlusOverlay;
 class SurveyHistory;
-class StationComparisonWindow;
-class PolarityWindow;
 class AutoMaskWorkflow;
 class TFViewControls;
 class WorkspaceTabs;
@@ -245,6 +239,10 @@ private:
   void setupRibbon();
   void setupWorkspace();
   QWidget *openWorkspace(const QString &type, bool create = false, const QJsonObject &saved = {});
+  WorkspaceView *createWorkspaceView(const QString &type);
+  WorkspaceView *activeAnalysis() const;
+  QString currentStationName() const;
+  void updateWorkspaceActions();
   void activateWorkspace();
   void syncCentralMap();
   void updateStationCoordinates(const SurveyCoordinates &coordinates);
@@ -286,8 +284,6 @@ private:
 
   std::shared_ptr<MTSurveyData> mtSurvey;
   std::unique_ptr<SurveyHistory> history;
-  QPointer<StationComparisonWindow> stationComparison;
-  QPointer<PolarityWindow> polarity;
   void restoreSurveyView();
   std::map<std::string, MTSurveyData> mtResponses;
   std::vector<std::shared_ptr<MTDataPlot>> plotHandlers;
@@ -311,12 +307,10 @@ private:
   QCheckBox *mapStationNames;
   QAction *linkTensorMasksAction;
   SurveyCoordinates mapCoordinates;
-  QPointer<FitStatisticsWindow> fitStatistics;
-  QPointer<PeriodMapWindow> periodMaps;
-  QPointer<ProfileWindow> profile;
-  QPointer<PeriodLayoutWindow> periodLayout;
-  QPointer<ImpedanceValidityWindow> impedanceValidity;
-  QPointer<SurveyAverageWindow> surveyAverage;
+  // Last-created views supply defaults for reports and global plot options.
+  // All analysis instances themselves belong to WorkspaceTabs.
+  QPointer<PeriodMapWindow> lastPeriodMap;
+  QPointer<ImpedanceValidityWindow> lastImpedanceValidity;
   AutoMaskWorkflow *autoMaskWorkflow = nullptr;
   QAction *rhoPlusAction;
   std::unique_ptr<RhoPlusOverlay> rhoPlusOverlay;

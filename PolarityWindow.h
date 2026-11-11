@@ -19,6 +19,7 @@ public:
   PolarityWindow(QWidget *parent, SurveyHistory &history, std::function<void()> changed);
   void setData(std::shared_ptr<MTSurveyData> data, const QString &selected = {});
 private:
+  void refreshData(const std::shared_ptr<MTSurveyData> &survey, const Responses &) override { setData(survey); }
   void analyse();
   void select();
   void preview();

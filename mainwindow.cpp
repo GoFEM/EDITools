@@ -56,8 +56,6 @@
 #include "ExportGOFEMDialog.h"
 #include "ExportNativeMTDialog.h"
 #include "ExportPreview.h"
-#include "StationComparisonWindow.h"
-#include "PolarityWindow.h"
 #include "GroupMaskDialog.h"
 #include "AutoMaskWorkflow.h"
 #include "SurveyCoordinatesDialog.h"
@@ -69,13 +67,10 @@
 #include "include/CommandIcons.h"
 #include <QUndoView>
 #include <QVBoxLayout>
-#include "FitStatisticsWindow.h"
 #include "PeriodMapWindow.h"
-#include "ProfileWindow.h"
 #include "include/WorkspaceTabs.h"
 #include <QJsonDocument>
 #include <QSaveFile>
-#include "PeriodLayoutWindow.h"
 #include "EDIImportDialog.h"
 #include "include/SurveyReport.h"
 
@@ -500,7 +495,7 @@ void MainWindow::exportSurveyReport()
   options.phaseWrap = plots.phaseWrap;
   options.tipperArrows = plots.tipperArrows;
   options.mapLayers = mapBackground->layers();
-  if(periodMaps) { options.mapSettings = periodMaps->displaySettings(); options.useMapSettings = true; }
+  if(lastPeriodMap) { options.mapSettings = lastPeriodMap->displaySettings(); options.useMapSettings = true; }
   options.components = plots.componentVisible;
   for(unsigned i = 0; i < options.axes.size() && i < plots.axes.size(); ++i)
     options.axes[i] = {plots.axes[i].autoscale, plots.axes[i].lower, plots.axes[i].upper};
@@ -583,7 +578,7 @@ void MainWindow::applyPlotOptions(const PlotOptions &options)
   const QSignalBlocker rhoPlusBlock(rhoPlusAction);
   rhoPlusAction->setChecked(options.rhoPlus);
   rhoPlusOptions.intervalsPerDecade = options.rhoPlusGridDensity >= 4 && options.rhoPlusGridDensity <= 48 ? options.rhoPlusGridDensity : 12;
-  if(impedanceValidity) impedanceValidity->setFitOptions(rhoPlusOptions);
+  if(lastImpedanceValidity) lastImpedanceValidity->setFitOptions(rhoPlusOptions);
   linkTensorMasksAction->setChecked(options.linkTensorMasks);
   const QSignalBlocker phaseBlock(ui->actionPhase_wrap);
   const QSignalBlocker namesBlock(ui->actionShow_station_names);
@@ -696,10 +691,7 @@ void MainWindow::updateMap()
                        mtSurvey->get_stations_names());
   if(sharedMapHost) syncCentralMap(); else updateStationCoordinates(view);
   on_stationList_itemSelectionChanged();
-  if(workspaces) if(auto *view = dynamic_cast<ProfileWindow *>(workspaces->currentWidget()))
-    view->setSharedMapActive(true, mapCoordinates);
-  if(workspaces) if(auto *view = dynamic_cast<StationComparisonWindow *>(workspaces->currentWidget()))
-    view->setSharedMapActive(true, mapCoordinates);
+  if(auto *view = activeAnalysis()) view->setSharedMapActive(true, mapCoordinates);
 }
 
 void MainWindow::updateStationCoordinates(const SurveyCoordinates &view)
@@ -742,10 +734,7 @@ void MainWindow::updatePlots(bool rescaleAxes)
   updateActionAvailability();
   rhoPlusOverlay->hide();
   QTreeWidgetItem* item = ui->stationList->currentItem();
-  if(workspaces) if(auto *view = dynamic_cast<ProfileWindow *>(workspaces->currentWidget()))
-    view->selectStation(item ? item->text(0) : QString());
-  if(workspaces) if(auto *view = dynamic_cast<StationComparisonWindow *>(workspaces->currentWidget()))
-    view->selectReferenceStation(item ? item->text(0) : QString());
+  if(auto *view = activeAnalysis()) view->selectStation(currentStationName());
   if(stationHeading) {
     stationHeading->setText(item ? item->text(0) : tr("No station selected"));
     stationHeading->setToolTip(stationHeading->text());
@@ -1361,7 +1350,8 @@ void MainWindow::refreshAnalysisWindows()
 {
   updateActionAvailability();
   if(!workspaces) return;
-  for(int i = 1; i < workspaces->count(); ++i) workspaces->widget(i)->setProperty("workspaceDirty", true);
+  for(int i = 1; i < workspaces->count(); ++i)
+    if(auto *view = dynamic_cast<WorkspaceView *>(workspaces->widget(i))) view->markSurveyDirty();
   refreshWorkspace(workspaces->currentWidget());
 }
 

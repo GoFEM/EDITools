@@ -1,6 +1,10 @@
 #include "include/CommandRibbon.h"
 #include "include/CommandIcons.h"
 #include "mainwindow.h"
+#include "include/WorkspaceView.h"
+#include "include/SharedMapInteraction.h"
+#include <QListWidget>
+#include <QTreeWidget>
 #include <QApplication>
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -149,6 +153,91 @@ void presentation()
   classic->setChecked(true);
   collapsed->setChecked(true);
 }
+void workspaceLifecycle()
+{
+  struct View : WorkspaceView {
+    QCustomPlot *plot = new QCustomPlot(this);
+    QCustomPlot *map = new QCustomPlot(this);
+    int refreshes = 0;
+    bool deferred = false;
+    View() {
+      plot->setObjectName("section"); map->setObjectName("map");
+      setCentralMaps({map}, {}, {});
+    }
+    void refreshData(const std::shared_ptr<MTSurveyData> &, const Responses &) override {
+      ++refreshes;
+      plot->xAxis->setRange(1., 10.); map->xAxis->setRange(1., 10.);
+    }
+    bool hasDeferredPlots() const override { return deferred; }
+  };
+  QWidget host;
+  auto view = std::make_unique<View>();
+  QPointer<QCustomPlot> map = view->map;
+  map->setParent(&host);
+  auto survey = std::make_shared<MTSurveyData>("Workspace test");
+  view->refreshSurvey(survey, {});
+  view->plot->xAxis->setRange(2., 3.); map->xAxis->setRange(4., 6.);
+  view->refreshSurvey(survey, {});
+  check(view->refreshes == 1, "Clean views must not recompute data");
+  view->markSurveyDirty(); view->refreshSurvey(survey, {});
+  check(view->refreshes == 2 && view->plot->xAxis->range() == QCPRange(2., 3.) &&
+        map->xAxis->range() == QCPRange(4., 6.), "Refresh lost zoom in the view or reparented map");
+  view->deferred = true;
+  view->markSurveyDirty(); view->refreshSurvey(survey, {});
+  view->plot->xAxis->setRange(10., 20.); view->restorePendingPlotRanges();
+  check(view->plot->xAxis->range() == QCPRange(2., 3.), "Deferred refresh lost zoom");
+  view->markSurveyDirty(); view->refreshSurvey(survey, {});
+  SurveyCoordinates frame; frame.utm = true; frame.zone = 32;
+  survey->set_coordinates(frame);
+  view->markSurveyDirty(); view->refreshSurvey(survey, {});
+  view->plot->xAxis->setRange(10., 20.); view->restorePendingPlotRanges();
+  check(map->xAxis->range() == QCPRange(1., 10.) && view->plot->xAxis->range() == QCPRange(10., 20.),
+        "Changing coordinates reapplied stale plot ranges");
+
+  auto *list = new QListWidget(view.get()); list->setObjectName("stations");
+  auto *site = new QListWidgetItem("Displayed name", list);
+  site->setData(Qt::UserRole, "station-id"); site->setCheckState(Qt::Checked);
+  auto *tree = new QTreeWidget(view.get()); tree->setObjectName("responses");
+  auto *response = new QTreeWidgetItem(tree, {"Response"});
+  response->setData(0, Qt::UserRole, "response-id"); response->setCheckState(0, Qt::Checked);
+  const auto saved = view->saveViewState();
+  site->setCheckState(Qt::Unchecked); site->setText("Renamed display label");
+  response->setCheckState(0, Qt::Unchecked);
+  int changes = 0;
+  QObject::connect(list, &QListWidget::itemChanged, [&] { ++changes; });
+  QObject::connect(tree, &QTreeWidget::itemChanged, [&] { ++changes; });
+  view->restoreViewState(saved);
+  check(site->checkState() == Qt::Checked && response->checkState(0) == Qt::Checked && changes == 0,
+        "Restoring view selections lost stable identities or emitted editing signals");
+  view.reset();
+  check(map.isNull(), "Closing a view did not release its reparented map");
+}
+
+void sharedMapInteractions()
+{
+  QCustomPlot map;
+  const auto original = QCP::iRangeDrag | QCP::iRangeZoom | QCP::iSelectPlottables;
+  map.setInteractions(original); map.setCursor(Qt::PointingHandCursor);
+  {
+    SharedMapInteraction session(&map);
+    check(session.activate(), "Could not activate shared map");
+    const QCursor drawing(Qt::CrossCursor);
+    session.configure(QCP::iRangeDrag | QCP::iSelectPlottables, &drawing);
+    check(map.interactions() == QCP::iRangeZoom && map.cursor().shape() == Qt::CrossCursor,
+          "Drawing mode did not suspend map dragging and selection");
+    session.activate(); session.configure();
+    check(map.interactions() == original && map.cursor().shape() == Qt::PointingHandCursor,
+          "Repeated activation overwrote the original map settings");
+    session.configure(QCP::iSelectPlottables);
+  }
+  check(map.interactions() == original && map.cursor().shape() == Qt::PointingHandCursor,
+        "Closing a map session did not restore interaction settings");
+  auto *temporary = new QCustomPlot;
+  SharedMapInteraction session(temporary); session.activate();
+  delete temporary;
+  check(!session.active() && !session.activate(), "Map session retained a destroyed map");
+}
+
 void integration()
 {
   MainWindow window;
@@ -197,7 +286,7 @@ int main(int argc, char **argv)
   QTemporaryDir settings;
   QSettings::setDefaultFormat(QSettings::IniFormat);
   QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settings.path());
-  try { iconRendering(); presentation(); integration(); }
+  try { iconRendering(); presentation(); workspaceLifecycle(); sharedMapInteractions(); integration(); }
   catch(const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }
   return 0;
 }

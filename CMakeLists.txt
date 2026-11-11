@@ -83,6 +83,7 @@ add_library(editools_ui STATIC
   src/CommandIcons.cc
   src/CommandRibbon.cc
   src/WorkspaceView.cc
+  src/WorkspaceState.cc
   src/WorkspaceTabs.cc
   include/WorkspaceView.h
   include/WorkspaceTabs.h

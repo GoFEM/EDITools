@@ -24,6 +24,7 @@ public:
                const std::map<std::string, MTSurveyData> &responses);
 
 private:
+  void refreshData(const std::shared_ptr<MTSurveyData> &survey, const Responses &responses) override { setData(survey, responses); }
   struct Response {
     QString path, name;
     QColor color;

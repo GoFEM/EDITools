@@ -20,6 +20,8 @@ public:
   void setFitOptions(const ImpedanceAnalysis::RhoPlusOptions &options);
   void setLinkTensorMasks(bool linked);
 protected:
+  void refreshData(const std::shared_ptr<MTSurveyData> &survey, const Responses &) override { setData(survey); }
+  bool hasDeferredPlots() const override { return true; }
   void showEvent(QShowEvent *event) override;
 private:
   struct Impl;
@@ -31,6 +33,8 @@ public:
   ~SurveyAverageWindow() override;
   void setData(const std::shared_ptr<MTSurveyData> &survey);
 protected:
+  void refreshData(const std::shared_ptr<MTSurveyData> &survey, const Responses &) override { setData(survey); }
+  bool hasDeferredPlots() const override { return true; }
   void showEvent(QShowEvent *event) override;
 private:
   struct Impl;

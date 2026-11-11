@@ -48,6 +48,8 @@ cmake --build build/Release --config Release
 
 The build shares the data and plotting libraries between the app and tests.
 Run checks with `ctest --test-dir build/Release -C Release --output-on-failure`.
+See [workspace implementation](docs/development.md) for view lifecycle, shared
+map and ribbon ownership, saved-state conventions, and regression checks.
 
 ### Rebuilding v1.0
 
