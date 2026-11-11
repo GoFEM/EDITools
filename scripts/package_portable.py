@@ -2,8 +2,8 @@
 """Assemble a relocatable Qt/GDAL runtime from a release build and Conda prefix.
 
 Build tools only: Python, patchelf (Linux), pefile (Windows dependency inspection).
-The prefix must contain the exact libraries used by the compiler. Source archives
-are assembled separately and must accompany redistribution of these bundles.
+The prefix must contain the exact libraries used by the compiler. The matching
+repository revision must provide build instructions and dependency source locations.
 """
 import argparse
 from collections import deque
@@ -65,7 +65,7 @@ def archive_licenses(output):
         shutil.rmtree(output / 'licenses')
 
 
-def write_launch_note(output, platform):
+def write_launch_note(output, platform, source_ref):
     launch = ('Start EDITools.exe (Windows x64).' if platform == 'windows' else
               'Run ./EDITools (Linux x86-64, glibc >= 2.34, X11/XWayland).')
     (output / 'README.txt').write_text(
@@ -74,7 +74,7 @@ def write_launch_note(output, platform):
         'Offline geographic map layers are included.\n\n'
         'Help: https://github.com/GoFEM/EDITools#usage\n'
         'Licenses and dependency details: licenses.zip (no extraction needed).\n'
-        'Matching source: the EDITools-source archive alongside this download.\n', encoding='utf-8')
+        f'Source and build instructions: https://github.com/GoFEM/EDITools/tree/{source_ref}#building\n', encoding='utf-8')
 
 
 def copy_map_data(source, output):
@@ -104,6 +104,7 @@ def main():
     parser.add_argument('--eigen', type=Path, required=True, help='Eigen source directory')
     parser.add_argument('--qt-source', type=Path, required=True, help='Matching Qt source tar archive (for notices)')
     parser.add_argument('--map-data', type=Path, required=True, help='Packed Natural Earth directory from tools/pack_natural_earth.py')
+    parser.add_argument('--source-ref', required=True, help='Public repository tag or commit matching the executable')
     args = parser.parse_args()
     win = args.platform == 'windows'
     prefix, output = args.prefix.resolve(), args.output.resolve()
@@ -296,7 +297,7 @@ def main():
     copy_map_data(args.map_data, output)
     (output / 'SYSTEM-DEPENDENCIES.txt').write_text('\n'.join(sorted(system_dependencies)) + '\n')
     archive_licenses(output)
-    write_launch_note(output, args.platform)
+    write_launch_note(output, args.platform, args.source_ref)
     (output / ('qt.conf' if win else 'bin/qt.conf')).write_text('[Paths]\nPlugins=' + ('plugins' if win else '../plugins') + '\n')
     if not win:
         launcher = output / 'EDITools'
