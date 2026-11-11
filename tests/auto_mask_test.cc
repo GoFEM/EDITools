@@ -7,6 +7,7 @@
 #include <QAction>
 #include <QElapsedTimer>
 #include <QListWidget>
+#include <QTreeWidget>
 #include <QProgressDialog>
 #include <QSettings>
 #include <QTabBar>
@@ -246,8 +247,8 @@ void workflow(const QString &directory) {
     if(dialog) { dialog->selectFile(path); QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection); }
   });
   action("actionLoad_project")->trigger();
-  auto *list = control<QListWidget>(window, "stationList"); check(list->count() == 6, "Workflow project did not load");
-  list->setCurrentRow(0); list->clearSelection(); list->item(0)->setSelected(true); list->item(2)->setSelected(true);
+  auto *list = control<QTreeWidget>(window, "stationList"); check(list->topLevelItemCount() == 6, "Workflow project did not load");
+  list->setCurrentItem(list->topLevelItem(0)); list->clearSelection(); list->topLevelItem(0)->setSelected(true); list->topLevelItem(2)->setSelected(true);
   auto *rho = control<QCustomPlot>(window, "plot11"), *phase = control<QCustomPlot>(window, "plot12"), *tip = control<QCustomPlot>(window, "plot21"), *pt = control<QCustomPlot>(window, "plot22");
   auto markers = [](QCustomPlot *plot) { int n = 0; for(int i = 0; i < plot->itemCount(); ++i) n += plot->item(i)->objectName() == "autoMaskMarker"; return n; };
   for(const auto *name : {"actionAuto_mask_check0", "actionAuto_mask_check1", "actionAuto_mask_check2"}) action(name)->setChecked(false);
@@ -262,7 +263,7 @@ void workflow(const QString &directory) {
   action("actionAuto_mask_preview")->setChecked(false); check(markers(rho) == 0 && markers(tip) == 0, "Disabling preview left markers");
   action("actionAuto_mask_preview")->setChecked(true); settle();
   action("actionAuto_mask_apply_next")->trigger();
-  check(list->currentItem()->text() == "B" && list->selectedItems().size() == 2 && list->item(0)->isSelected() && list->item(2)->isSelected(), "Apply/next changed batch selection or failed navigation");
+  check(list->currentItem()->text(0) == "B" && list->selectedItems().size() == 2 && list->topLevelItem(0)->isSelected() && list->topLevelItem(2)->isSelected(), "Apply/next changed batch selection or failed navigation");
   check(!action("actionAuto_mask_apply")->isEnabled(), "Navigation retained stale Apply"); settle();
   check(control<QLabel>(window, "autoMaskStatus")->text().contains("B:"), "Current station not identified while preserving batch selection");
   check(tip->graph(4)->dataCount() == 0 && tip->graph(6)->dataCount() == 0, "Apply current also masked next station");
@@ -277,14 +278,14 @@ void workflow(const QString &directory) {
   check(tip->graph(4)->dataCount() == 1 && rho->graph(5)->dataCount() == 1, "Batch missed current selected station");
   action("actionAuto_mask_next")->trigger(); settle(); check(tip->graph(4)->dataCount() == 0 && tip->graph(6)->dataCount() == 0, "Batch changed unselected station");
   action("actionAuto_mask_next")->trigger(); settle(); check(tip->graph(4)->dataCount() == 1 && rho->graph(5)->dataCount() == 0, "Batch missed second selection or propagated tipper to Z");
-  check(list->item(0)->isSelected() && list->item(2)->isSelected(), "Batch navigation lost selection");
+  check(list->topLevelItem(0)->isSelected() && list->topLevelItem(2)->isSelected(), "Batch navigation lost selection");
   action("actionUndo")->trigger(); settle(); check(!action("actionUndo")->isEnabled() && tip->graph(4)->dataCount() == 0, "Selected-site batch was not one Undo step");
   action("actionRedo")->trigger(); settle(); check(tip->graph(4)->dataCount() == 1, "Batch redo failed");
   list->clearSelection(); check(!action("actionAuto_mask_selected")->isEnabled(), "Batch enabled for empty selection");
-  list->setCurrentRow(5, QItemSelectionModel::NoUpdate); check(!action("actionAuto_mask_next")->isEnabled(), "Next enabled beyond last station");
+  list->setCurrentItem(list->topLevelItem(5), 0, QItemSelectionModel::NoUpdate); check(!action("actionAuto_mask_next")->isEnabled(), "Next enabled beyond last station");
   const auto artifacts = qEnvironmentVariable("EDITOOLS_TEST_ARTIFACT_DIR");
   if(!artifacts.isEmpty()) {
-    list->setCurrentRow(1, QItemSelectionModel::NoUpdate); settle();
+    list->setCurrentItem(list->topLevelItem(1), 0, QItemSelectionModel::NoUpdate); settle();
     action("actionClassic_menus")->setChecked(false); control<QTabBar>(window, "ribbonTabs")->setCurrentIndex(2);
     window.showNormal(); window.resize(1500, 900); settle(); window.grab().save(artifacts + "/auto-mask-workflow.png");
   }

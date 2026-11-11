@@ -25,6 +25,7 @@
 #include <QJsonObject>
 #include "include/CommandRibbon.h"
 #include <QListWidgetItem>
+#include <QTreeWidgetItem>
 #include <QMenu>
 #include <QAction>
 #include <QComboBox>
@@ -92,8 +93,8 @@ private slots:
   void on_actionSave_as_PDF_triggered();
   void on_actionPlot_axis_ranges_triggered();
 
-  void on_stationList_currentRowChanged(int currentRow);
-  void on_stationList_itemChanged(QListWidgetItem *item);
+  void on_stationList_currentItemChanged(QTreeWidgetItem *current, QTreeWidgetItem *previous);
+  void on_stationList_itemChanged(QTreeWidgetItem *item, int column);
   void on_stationList_itemSelectionChanged();
   void on_stationList_customContextMenuRequested(const QPoint &pos);
 
@@ -291,7 +292,7 @@ private:
   QMenu* listContextMenu;
   QVector<QAction*> listContextActions;
 
-  QListWidgetItem* pointedItem = nullptr;
+  QTreeWidgetItem* pointedItem = nullptr;
 
   QCustomPlot *plot11;
   QCustomPlot *plot12;

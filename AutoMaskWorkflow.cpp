@@ -64,7 +64,9 @@ AutoMaskWorkflow::AutoMaskWorkflow(QMainWindow &window, SurveyHistory &history,
 void AutoMaskWorkflow::setData(std::shared_ptr<MTSurveyData> data, const QString &station) {
   survey = std::move(data); current = station.toStdString(); refresh();
 }
-void AutoMaskWorkflow::setSelection(const std::set<std::string> &stations) { selected = stations; updateActions(); }
+void AutoMaskWorkflow::setSelection(const std::set<std::string> &stations, const std::vector<std::string> &order) {
+  selected = stations; stationOrder = order; updateActions();
+}
 void AutoMaskWorkflow::syncOptions() {
   for(unsigned k = 0; k < criteria.size(); ++k) { const QSignalBlocker b(criteria[k]); criteria[k]->setChecked(options.criteria[k]); }
   for(unsigned c = 0; c < components.size(); ++c) { const QSignalBlocker b(components[c]); components[c]->setChecked(options.components[c]); }
@@ -88,9 +90,9 @@ void AutoMaskWorkflow::updateActions() {
   for(auto *a : criteria) a->setEnabled(!busy);
   for(auto *a : components) a->setEnabled(!busy);
   pair->setEnabled(!busy);
-  const auto names = hasData ? survey->get_stations_names() : std::vector<std::string>{};
+  const auto &names = stationOrder;
   const auto it = std::find(names.begin(), names.end(), current);
-  previous->setEnabled(!busy && hasCurrent && it != names.begin());
+  previous->setEnabled(!busy && hasCurrent && it != names.end() && it != names.begin());
   next->setEnabled(!busy && hasCurrent && it != names.end() && std::next(it) != names.end());
   apply->setEnabled(!busy && preview->isChecked() && !pending.empty());
   applyNext->setEnabled(apply->isEnabled() && next->isEnabled());

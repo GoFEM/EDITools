@@ -15,7 +15,7 @@
 statistics, neighbouring-station comparison, Rho+ analysis, survey average,
 polarity review, period layout or detailed auto-mask review from **Views**
 or **Auto mask**. The analysis opens beside TF view in the same project window.
-The station list, calculated responses and survey map stay on the left across
+The station table, calculated responses and survey map stay on the left across
 all tabs. Only the area to their right switches between TF and analysis views;
 the active view's controls appear in the ribbon.
 
@@ -42,6 +42,13 @@ data. Closed-tab recovery lasts for the current session.
 **Views → Station navigator** collapses or restores the shared station/map
 sidebar. Drag its divider to adjust the width for every view. **Open as survey** and **Create survey**
 produce an independent project window with its own data and edit history.
+
+The station table has separate **Station**, **# periods**, and coordinate columns.
+Coordinates follow the map: latitude/longitude in degrees, UTM easting/northing
+in metres, or east/north offsets when **Center UTM** is enabled. Click a column
+heading to sort; drag the header dividers to resize columns. Selecting any cell
+selects its station. Ctrl/Shift selects multiple rows, and the station checkboxes
+retain their enable/disable behavior. Period counts update after edits and Undo.
 
 ## Command ribbon
 

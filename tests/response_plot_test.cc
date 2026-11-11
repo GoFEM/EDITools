@@ -205,29 +205,29 @@ void edi_import_tests(const QString &directory)
     timer.start(0); file_action(window, "actionLoad_EDI", files); check(reviewed, "EDI import did not show review dialog");
   };
   import({a, b}, false, true);
-  check(widget<QListWidget>(window, "stationList")->count() == 0, "Canceled import changed the survey");
+  check(widget<QTreeWidget>(window, "stationList")->topLevelItemCount() == 0, "Canceled import changed the survey");
   import({a, b}, true, true);
-  check(widget<QListWidget>(window, "stationList")->count() == 2, "Accepted EDI stations missing");
-  auto *list = widget<QListWidget>(window, "stationList"); list->setCurrentRow(1);
+  check(widget<QTreeWidget>(window, "stationList")->topLevelItemCount() == 2, "Accepted EDI stations missing");
+  auto *list = widget<QTreeWidget>(window, "stationList"); list->setCurrentItem(list->topLevelItem(1));
   const auto graph = widget<QCustomPlot>(window, "plot11")->graph(1)->data();
   check(graph->size() == 2 && graph->constBegin()->key == 1., "GUI import did not apply the period merge");
   const auto title = window.windowTitle(); import({c}, false, true);
-  check(list->count() == 2 && window.windowTitle() == title && list->currentRow() == 1, "Canceled append changed the open survey");
-  import({c}, true, false); list->setCurrentRow(2);
-  check(list->count() == 3 && widget<QCustomPlot>(window, "plot11")->graph(1)->data()->constBegin()->key == 1.0013,
+  check(list->topLevelItemCount() == 2 && window.windowTitle() == title && list->indexOfTopLevelItem(list->currentItem()) == 1, "Canceled append changed the open survey");
+  import({c}, true, false); list->setCurrentItem(list->topLevelItem(2));
+  check(list->topLevelItemCount() == 3 && widget<QCustomPlot>(window, "plot11")->graph(1)->data()->constBegin()->key == 1.0013,
         "Keep-original import changed a period");
   const auto interpolatedPath = directory + "/EDI_interpolated.edi";
   write_edi(interpolatedPath, {2., 1., .5, .1});
   import({interpolatedPath}, false, 2);
-  check(list->count() == 3, "Canceled interpolation added a station");
+  check(list->topLevelItemCount() == 3, "Canceled interpolation added a station");
   import({interpolatedPath}, true, 2);
   auto matches = list->findItems("EDI_interpolated", Qt::MatchExactly);
   check(matches.size() == 1, "Interpolated station missing"); list->setCurrentItem(matches.front());
   auto data = widget<QCustomPlot>(window, "plot11")->graph(1)->data();
   check(data->size() == 3 && std::abs(data->constBegin()->key - 1.) < 1e-12 &&
         std::abs((data->constBegin()+1)->key - 1.0013) < 1e-12, "Import did not use the existing-period union");
-  widget<QAction>(window, "actionUndo")->trigger(); check(list->count() == 3, "Cannot undo interpolated import");
-  widget<QAction>(window, "actionRedo")->trigger(); check(list->count() == 4, "Cannot redo interpolated import");
+  widget<QAction>(window, "actionUndo")->trigger(); check(list->topLevelItemCount() == 3, "Cannot undo interpolated import");
+  widget<QAction>(window, "actionRedo")->trigger(); check(list->topLevelItemCount() == 4, "Cannot redo interpolated import");
 }
 QByteArray read_report(const QString &path)
 {
@@ -259,9 +259,9 @@ void export_report(MainWindow &window, const QString &path,
                    const std::array<SurveyReport::Options::Axis, 4> *expectedAxes = nullptr,
                    const std::function<void(QDialog &)> &configure = {}, int expectedPages = -1)
 {
-  auto *stations = widget<QListWidget>(window, "stationList");
+  auto *stations = widget<QTreeWidget>(window, "stationList");
   auto *responses = widget<QListWidget>(window, "responsesList");
-  const int stationRow = stations->currentRow(), responseRow = responses->currentRow();
+  const int stationRow = stations->indexOfTopLevelItem(stations->currentItem()), responseRow = responses->currentRow();
   QTimer inspectTimer; unsigned inspected = 0;
   if(expectedAxes) {
     QObject::connect(&inspectTimer, &QTimer::timeout, [&] {
@@ -301,8 +301,8 @@ void export_report(MainWindow &window, const QString &path,
   timer.start(10); file_action(window, "actionExport_survey_report", {enteredPath});
   check(handled, "Report options did not open");
   check(!expectedAxes || inspected > 0, "GUI fixed ranges were not checked during export");
-  report_pages(path, expectedPages < 0 ? stations->count() + 1 : expectedPages);
-  check(stations->currentRow() == stationRow && responses->currentRow() == responseRow, "Report changed current selection");
+  report_pages(path, expectedPages < 0 ? stations->topLevelItemCount() + 1 : expectedPages);
+  check(stations->indexOfTopLevelItem(stations->currentItem()) == stationRow && responses->currentRow() == responseRow, "Report changed current selection");
 }
 void main_axis_ranges(MainWindow &window, bool autoscale, const std::array<SurveyReport::Options::Axis, 4> &axes)
 {
@@ -553,7 +553,7 @@ void checkNear(double actual, double expected)
 }
 void select_station(MainWindow &window, const QString &name)
 {
-  auto *list = widget<QListWidget>(window, "stationList");
+  auto *list = widget<QTreeWidget>(window, "stationList");
   const auto items = list->findItems(name, Qt::MatchExactly);
   check(items.size() == 1, "Station name did not match observations");
   list->setCurrentItem(items.front());
@@ -1037,7 +1037,7 @@ void linked_mask_tests(const QString &directory)
   check(rho.graph(4)->data()->isEmpty() && rho.graph(5)->data()->isEmpty(), "One undo did not restore both impedance masks");
   widget<QAction>(window, "actionRedo")->trigger();
   check(rho.graph(4)->dataCount() == 1 && rho.graph(5)->dataCount() == 1, "Redo omitted paired diagonal");
-  auto *stations = widget<QListWidget>(window, "stationList");
+  auto *stations = widget<QTreeWidget>(window, "stationList");
   bool componentEdited = false;
   QTimer::singleShot(0, [&] {
     auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
@@ -1444,35 +1444,35 @@ void station_selection_edits(const QString &directory)
   }
   MainWindow window;
   file_action(window, "actionLoad_project", {project});
-  auto *list = widget<QListWidget>(window, "stationList");
+  auto *list = widget<QTreeWidget>(window, "stationList");
   auto *remove = widget<QAction>(window, "actionDelete_stations");
   auto *undo = widget<QAction>(window, "actionUndo");
   auto *redo = widget<QAction>(window, "actionRedo");
   auto *map = widget<QCustomPlot>(window, "mapPlot");
-  list->setCurrentRow(1); list->clearSelection();
+  list->setCurrentItem(list->topLevelItem(1)); list->clearSelection();
   remove->trigger();
-  check(list->count() == 3 && !undo->isEnabled(), "Empty selection deleted the current station");
-  list->item(0)->setSelected(true); list->item(2)->setSelected(true);
+  check(list->topLevelItemCount() == 3 && !undo->isEnabled(), "Empty selection deleted the current station");
+  list->topLevelItem(0)->setSelected(true); list->topLevelItem(2)->setSelected(true);
   remove->trigger();
-  check(list->count() == 1 && list->item(0)->text() == "B" && map->graph(0)->dataCount() == 1,
+  check(list->topLevelItemCount() == 1 && list->topLevelItem(0)->text(0) == "B" && map->graph(0)->dataCount() == 1,
         "Delete did not remove exactly the selected stations and update the map");
   undo->trigger();
-  check(list->count() == 3 && map->graph(0)->dataCount() == 3 && !undo->isEnabled(),
+  check(list->topLevelItemCount() == 3 && map->graph(0)->dataCount() == 3 && !undo->isEnabled(),
         "Batch deletion was not restored in one undo step");
   redo->trigger();
-  check(list->count() == 1 && list->item(0)->text() == "B", "Redo did not repeat batch deletion");
+  check(list->topLevelItemCount() == 1 && list->topLevelItem(0)->text(0) == "B", "Redo did not repeat batch deletion");
   list->selectAll(); remove->trigger();
-  check(list->count() == 0 && map->graph(0)->dataCount() == 0 &&
+  check(list->topLevelItemCount() == 0 && map->graph(0)->dataCount() == 0 &&
         !widget<QAction>(window, "actionExport_native_MT")->isEnabled(), "Deleting the last station left stale survey state");
   remove->trigger(); undo->trigger();
-  check(list->count() == 1 && list->item(0)->text() == "B", "Empty deletion added an undo step");
+  check(list->topLevelItemCount() == 1 && list->topLevelItem(0)->text(0) == "B", "Empty deletion added an undo step");
   undo->trigger(); list->selectAll(); remove->trigger();
-  check(list->count() == 0, "Delete all left stations behind");
-  undo->trigger(); check(list->count() == 3, "Undo did not restore all deleted stations");
+  check(list->topLevelItemCount() == 0, "Delete all left stations behind");
+  undo->trigger(); check(list->topLevelItemCount() == 3, "Undo did not restore all deleted stations");
   list->clearSelection();
   auto *groupMask = widget<QAction>(window, "actionGroup_masking");
   check(!groupMask->isEnabled(), "Group masking enabled without selected stations");
-  list->item(0)->setSelected(true); list->item(2)->setSelected(true);
+  list->topLevelItem(0)->setSelected(true); list->topLevelItem(2)->setSelected(true);
   QTimer::singleShot(0, [&] {
     auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
     check(dialog && dialog->objectName() == "groupMaskDialog", "Group masking action did not open dialog");
@@ -1616,13 +1616,57 @@ void tensor_strip()
   check(plot.legend->itemCount() == 4, "Scalar PT controls were not restored");
 }
 
+void station_table(const QString &directory)
+{
+  const auto source = directory + "/station-table.gofem", project = directory + "/station-table.mtd";
+  std::string rows;
+  const std::array<unsigned, 3> counts{{12, 2, 6}};
+  const std::array<double, 3> latitudes{{55., 9., 35.}};
+  for(unsigned i = 0; i < counts.size(); ++i)
+    for(unsigned f = 1; f <= counts[i]; ++f)
+      rows += "RealZxy " + std::to_string(f) + " Plane_wave " + char('A' + i) + " .002 .0001\n";
+  write(source, rows);
+  auto survey = std::make_shared<MTSurveyData>(); survey->load_from_gofem(source.toStdString());
+  for(unsigned i = 0; i < counts.size(); ++i)
+    survey->get_station_data(std::string(1, char('A' + i))).set_position({{latitudes[i], 12., 0.}});
+  { std::ofstream file(project.toStdString(), std::ios::binary); boost::archive::binary_oarchive archive(file); archive << survey << std::map<std::string, MTSurveyData>{}; }
+  MainWindow window; file_action(window, "actionLoad_project", {project});
+  auto *table = widget<QTreeWidget>(window, "stationList");
+  check(table->columnCount() == 4 && !table->isHeaderHidden() && !table->rootIsDecorated(), "Stations must display a flat table with four columns");
+  auto *station = table->findItems("A", Qt::MatchExactly).front();
+  table->setCurrentItem(station, 3);
+  table->findItems("B", Qt::MatchExactly).front()->setSelected(true);
+  table->sortByColumn(1, Qt::AscendingOrder);
+  check(table->topLevelItem(0)->text(0) == "B" && table->topLevelItem(2)->text(0) == "A", "Period counts sorted as text");
+  check(table->currentItem() == station && table->selectedItems().size() == 2 && widget<QLabel>(window, "tfStationName")->text() == "A", "Sorting or selecting a coordinate cell changed station identity");
+  auto *previous = widget<QAction>(window, "actionAuto_mask_previous"), *next = widget<QAction>(window, "actionAuto_mask_next");
+  check(previous->isEnabled() && !next->isEnabled(), "Navigation boundaries ignore the table sort order");
+  previous->trigger();
+  check(table->currentItem()->text(0) == "C" && table->selectedItems().size() == 2, "Sorted navigation lost station or batch selection");
+  next->trigger();
+  check(table->currentItem() == station, "Sorted next navigation failed");
+  table->sortByColumn(2, Qt::AscendingOrder);
+  check(table->topLevelItem(0)->text(0) == "B" && table->topLevelItem(2)->text(0) == "A", "Coordinates sorted as text");
+  checkNear(station->data(2, Qt::DisplayRole).toDouble(), 55.);
+  checkNear(station->data(3, Qt::DisplayRole).toDouble(), 12.);
+  station->setCheckState(0, Qt::Unchecked);
+  check(table->findItems("B", Qt::MatchExactly).front()->checkState(0) == Qt::Unchecked && table->findItems("C", Qt::MatchExactly).front()->checkState(0) == Qt::Checked, "Sorted table checkboxes changed the wrong stations");
+  widget<QAction>(window, "actionUndo")->trigger();
+  check(table->currentItem()->text(0) == "A" && table->currentItem()->checkState(0) == Qt::Checked, "Table checkbox undo lost station identity");
+  table->sortByColumn(1, Qt::AscendingOrder);
+  widget<QAction>(window, "actionDecimate")->trigger();
+  check(table->currentItem()->data(1, Qt::DisplayRole).toUInt() == 6 && table->topLevelItem(0)->data(1, Qt::DisplayRole).toUInt() == 1, "Sorted period counts became stale after decimation");
+  widget<QAction>(window, "actionUndo")->trigger();
+  check(table->currentItem()->data(1, Qt::DisplayRole).toUInt() == 12, "Undo did not restore table period counts");
+}
+
 void tf_view_controls(MainWindow &window, const QString &directory, const QString &project)
 {
   select_station(window, "GUIDE");
   auto *heading = widget<QLabel>(window, "tfStationName");
   check(heading->text() == "GUIDE" && heading->textFormat() == Qt::PlainText, "TF heading is not the current station");
-  auto *stations = widget<QListWidget>(window, "stationList");
-  check(stations->currentItem()->data(StationListDelegate::PeriodCount).toUInt() == 12, "Missing station period count");
+  auto *stations = widget<QTreeWidget>(window, "stationList");
+  check(stations->currentItem()->data(0, StationListDelegate::PeriodCount).toUInt() == 12, "Missing station period count");
   widget<QAction>(window, "actionPlot_axis_ranges")->trigger();
   check(!QApplication::activeModalWidget() && widget<QTabBar>(window, "ribbonTabs")->tabText(widget<QTabBar>(window, "ribbonTabs")->currentIndex()) == "TF appearance",
         "View controls must be in the ribbon");
@@ -1729,9 +1773,9 @@ void tf_view_controls(MainWindow &window, const QString &directory, const QStrin
     check(window.grab().save(artifacts + "/view-ribbon-narrow.png"), "Could not save narrow ribbon preview");
   }
   widget<QAction>(window, "actionDecimate")->trigger();
-  check(stations->currentItem()->data(StationListDelegate::PeriodCount).toUInt() == 6, "Decimation left stale period counts");
+  check(stations->currentItem()->data(0, StationListDelegate::PeriodCount).toUInt() == 6, "Decimation left stale period counts");
   widget<QAction>(window, "actionUndo")->trigger();
-  check(stations->currentItem()->data(StationListDelegate::PeriodCount).toUInt() == 12, "Undo did not restore period counts");
+  check(stations->currentItem()->data(0, StationListDelegate::PeriodCount).toUInt() == 12, "Undo did not restore period counts");
   QTimer nameTimer;
   QObject::connect(&nameTimer, &QTimer::timeout, [&] {
     if(auto *dialog = qobject_cast<QInputDialog *>(QApplication::activeModalWidget())) {
@@ -1746,7 +1790,7 @@ void tf_view_controls(MainWindow &window, const QString &directory, const QStrin
   check(rho->xAxis->range() != QCPRange(.03, 30) && widget<QCheckBox>(window, "viewRangeAuto")->isChecked(), "Fit axes did not restore automatic limits");
   widget<QAction>(window, "actionReset_TF_appearance")->trigger();
   check(rho->graph(1)->scatterStyle().size() == 5 && rho->graph(9)->pen().color() == PlotColors::componentColors()[1], "Reset appearance failed");
-  stations->setCurrentRow(-1);
+  stations->setCurrentItem(stations->topLevelItem(-1));
   check(heading->text() == "No station selected", "Empty selection retained previous station heading");
 }
 
@@ -1853,9 +1897,9 @@ void rho_plus_overlay(const QString &directory)
   auto *restoredValidity=widget<WorkspaceView>(restored, "impedanceValidityWindow");
   check(!restoredValidity->findChild<QDoubleSpinBox *>("validityErrorFloor"),"Project restored an obsolete floor control");
   check(widget<QSpinBox>(*restoredValidity,"validityGridDensity")->value()==16,"Project lost rho+ grid density");
-  auto *list=widget<QListWidget>(window,"stationList"); list->currentItem()->setCheckState(Qt::Unchecked); settle();
+  auto *list=widget<QTreeWidget>(window,"stationList"); list->currentItem()->setCheckState(0, Qt::Unchecked); settle();
   check(!xy->visible(),"Disabled station retained a guide");
-  list->currentItem()->setCheckState(Qt::Checked); settle(); check(xy->visible(),"Re-enabled station lost its guide");
+  list->currentItem()->setCheckState(0, Qt::Checked); settle(); check(xy->visible(),"Re-enabled station lost its guide");
   toggle->setChecked(false); check(!xy->visible() && !yxPhase->visible(),"Overlay switch ignored");
   select_station(window,"OUTLIER");
   widget<QAction>(window,"actionImpedance_validity")->trigger();
@@ -1914,27 +1958,36 @@ void workflow(const QString &directory)
   check(!widget<QCheckBox>(window, "stationMapNames")->isChecked(), "New sessions should start with map names hidden");
   file_action(window, "actionLoad_project", {project});
   select_station(window, "S01");
-  const auto stationItem = [&] { return widget<QListWidget>(window, "stationList")->findItems("S01", Qt::MatchExactly).front(); };
-  check(stationItem()->data(StationListDelegate::PeriodCount).toUInt() == 4 &&
-        stationItem()->data(StationListDelegate::Coordinates).toString() == "Lat 55.0000°  Lon 12.0000°",
+  const auto stationItem = [&] { return widget<QTreeWidget>(window, "stationList")->findItems("S01", Qt::MatchExactly).front(); };
+  check(stationItem()->data(0, StationListDelegate::PeriodCount).toUInt() == 4 &&
+        stationItem()->data(0, StationListDelegate::Coordinates).toString() == "Lat 55.0000°  Lon 12.0000°",
         "Station list omitted period count or geographic coordinates");
-  check(stationItem()->text() == "S01" && widget<QLabel>(window, "tfStationName")->text() == "S01", "Station metadata changed identity");
+  check(stationItem()->text(0) == "S01" && widget<QLabel>(window, "tfStationName")->text() == "S01", "Station metadata changed identity");
   auto *stationMap = widget<QCustomPlot>(window, "mapPlot");
   const auto firstPosition = stationMap->graph(0)->data()->constBegin()->value;
   auto *mapMode = widget<QComboBox>(window, "mapCoordinateSwitch");
   auto *centerUtm = widget<QCheckBox>(window, "mapCenterUtm");
   auto *originInfo = widget<QLabel>(window, "mapCoordinateInfo");
+  const auto table = widget<QTreeWidget>(window, "stationList");
+  check(table->headerItem()->text(2) == "Latitude (°)" && table->headerItem()->text(3) == "Longitude (°)", "Geographic table headings incorrect");
   check(!centerUtm->isEnabled(), "Geographic map enabled UTM centering");
   mapMode->setCurrentIndex(1);
   check(centerUtm->isEnabled() && !centerUtm->isChecked(), "UTM centering unavailable");
   const auto absolute = SurveyCoordinates::calculate(survey->geographic_locations(), 33, true, false).transform(survey->geographic_locations());
   const auto coordinateText = [](const std::array<double, 3> &p) { return QString("E %1  N %2 m").arg(p[1], 0, 'f', 1).arg(p[0], 0, 'f', 1); };
-  check(stationItem()->data(StationListDelegate::Coordinates).toString() == coordinateText(absolute.front()) &&
-        stationItem()->toolTip().contains("UTM 33N"), "Station list does not follow UTM map coordinates");
+  check(stationItem()->data(0, StationListDelegate::Coordinates).toString() == coordinateText(absolute.front()) &&
+        stationItem()->toolTip(0).contains("UTM 33N"), "Station list does not follow UTM map coordinates");
+  check(table->headerItem()->text(2) == "Easting (m)" && table->headerItem()->text(3) == "Northing (m)", "UTM table headings incorrect");
+  checkNear(stationItem()->data(2, Qt::DisplayRole).toDouble(), absolute.front()[1]);
+  checkNear(stationItem()->data(3, Qt::DisplayRole).toDouble(), absolute.front()[0]);
   const auto expectedCoordinates = SurveyCoordinates::calculate(survey->geographic_locations(), 33, true, true);
   centerUtm->setChecked(true);
-  check(stationItem()->data(StationListDelegate::Coordinates).toString() ==
+  check(stationItem()->data(0, StationListDelegate::Coordinates).toString() ==
           coordinateText(expectedCoordinates.transform(survey->geographic_locations()).front()), "Station list did not subtract UTM origin");
+  check(table->headerItem()->text(2) == "East offset (m)" && table->headerItem()->text(3) == "North offset (m)", "Centered table headings incorrect");
+  const auto centered = expectedCoordinates.transform(survey->geographic_locations()).front();
+  checkNear(stationItem()->data(2, Qt::DisplayRole).toDouble(), centered[1]);
+  checkNear(stationItem()->data(3, Qt::DisplayRole).toDouble(), centered[0]);
   const QString expectedOrigin = QString::number(expectedCoordinates.origin_easting, 'f', 3);
   check(originInfo->text().contains(expectedOrigin) &&
         originInfo->text().contains(QString::number(expectedCoordinates.origin_northing, 'f', 3)),
@@ -1949,7 +2002,7 @@ void workflow(const QString &directory)
         std::abs(stationMap->graph(0)->data()->constBegin()->value) > 100000., "Absolute UTM not restored");
   centerUtm->setChecked(true);
   mapMode->setCurrentIndex(0);
-  check(stationItem()->data(StationListDelegate::Coordinates).toString() == "Lat 55.0000°  Lon 12.0000°",
+  check(stationItem()->data(0, StationListDelegate::Coordinates).toString() == "Lat 55.0000°  Lon 12.0000°",
         "Switching to Lat/Lon left projected station coordinates");
   check(!centerUtm->isEnabled() && centerUtm->isChecked() && originInfo->text().contains(expectedOrigin),
         "Geographic view lost shared survey origin");
@@ -2099,11 +2152,11 @@ void workflow(const QString &directory)
   check(QFileInfo(pdf).size() > 1000, "Fit PDF was not written");
   // Checkbox choices survive refresh and statistics react to station masks.
   checks->topLevelItem(1)->setCheckState(0, Qt::Unchecked);
-  auto *observedStations = widget<QListWidget>(window, "stationList");
-  observedStations->currentItem()->setCheckState(Qt::Unchecked);
+  auto *observedStations = widget<QTreeWidget>(window, "stationList");
+  observedStations->currentItem()->setCheckState(0, Qt::Unchecked);
   check(checks->topLevelItem(0)->text(2) == "0 / 4" &&
         checks->topLevelItem(1)->checkState(0) == Qt::Unchecked, "Fit refresh ignored station mask or checkbox state");
-  observedStations->currentItem()->setCheckState(Qt::Checked);
+  observedStations->currentItem()->setCheckState(0, Qt::Checked);
   check(checks->topLevelItem(0)->text(2) == "4 / 4", "Fit refresh did not restore active station");
   widget<QAction>(window, "actionPhase_wrap")->setChecked(false);
   checkNear(value(phase, 10, 1.), -135.);
@@ -2274,7 +2327,7 @@ void workspace_tabs(const QString &directory)
   tabs->setCurrentWidget(first);
   check(widget<QTableWidget>(*first, "profileStations")->rowCount() == 2, "Changing UTM origin erased corridor");
   widget<QTableWidget>(*first, "profileStations")->setCurrentCell(1, 0);
-  check(tabs->currentWidget() == first && widget<QListWidget>(window, "stationList")->currentItem()->text() == "WS_B", "Profile station selection did not update TF in place");
+  check(tabs->currentWidget() == first && widget<QTreeWidget>(window, "stationList")->currentItem()->text(0) == "WS_B", "Profile station selection did not update TF in place");
   const int profileSamples = widget<QCustomPlot>(*first, "profileSection0")->property("profileSampleCount").toInt();
   tabs->setCurrentIndex(0); widget<QAction>(window, "actionLink_tensor_masks")->setChecked(false);
   auto *rho = widget<QCustomPlot>(window, "plot11"); rho->graph(1)->setSelection(QCPDataSelection(QCPDataRange(0, 1)));
@@ -2345,13 +2398,13 @@ void real_run(const QString &project, const QString &directory, const QString &s
     std::cout << "Testing one selection containing alternating native and GoFEM rows, all with .txt filenames.\n";
   }
   file_action(window, "actionLoad_responses", paths);
-  auto *stations = widget<QListWidget>(window, "stationList");
+  auto *stations = widget<QTreeWidget>(window, "stationList");
   auto *responses = widget<QListWidget>(window, "responsesList");
   check(responses->count() >= paths.size(), "Real iterations failed to import");
   auto &rho = *widget<QCustomPlot>(window, "plot11");
   unsigned plotted = 0;
-  for(int i = 0; i < stations->count(); ++i) {
-    stations->setCurrentRow(i);
+  for(int i = 0; i < stations->topLevelItemCount(); ++i) {
+    stations->setCurrentItem(stations->topLevelItem(i));
     if(!rho.graph(9)->data()->isEmpty()) ++plotted;
   }
   check(plotted > 0, "No real station names matched");
@@ -2498,7 +2551,7 @@ int main(int argc, char **argv)
   try {
     check(directory.isValid(), "No temporary directory");
     if(argc >= 3) real_run(argv[1], argv[2], argc >= 4 ? argv[3] : QString(), argc >= 5 && QString(argv[4]) == "mixed");
-    else { workspace_tabs(directory.path()); tensor_strip(); station_selection_edits(directory.path()); rho_plus_overlay(directory.path()); map_backgrounds(directory.path()); linked_mask_tests(directory.path()); edi_import_tests(directory.path()); statistics(directory.path()); gofem_responses(directory.path()); period_maps(directory.path()); period_resampling_tests(directory.path()); resampling_project_workflow(directory.path()); survey_reports(directory.path()); workflow(directory.path()); }
+    else { station_table(directory.path()); workspace_tabs(directory.path()); tensor_strip(); station_selection_edits(directory.path()); rho_plus_overlay(directory.path()); map_backgrounds(directory.path()); linked_mask_tests(directory.path()); edi_import_tests(directory.path()); statistics(directory.path()); gofem_responses(directory.path()); period_maps(directory.path()); period_resampling_tests(directory.path()); resampling_project_workflow(directory.path()); survey_reports(directory.path()); workflow(directory.path()); }
     std::cout << "Response import, curves and project workflow checks passed.\n";
   } catch(const std::exception &e) {
     std::cerr << e.what() << '\n';

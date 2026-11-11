@@ -90,14 +90,14 @@ QWidget *MainWindow::openWorkspace(const QString &type, bool create, const QJson
   else if(type == "periods") { periodLayout = new PeriodLayoutWindow(this, copy); view = periodLayout; }
   else if(type == "automask") {
     std::set<std::string> selection;
-    for(const auto *item: ui->stationList->selectedItems()) selection.insert(item->text().toStdString());
-    if(selection.empty() && ui->stationList->currentItem()) selection.insert(ui->stationList->currentItem()->text().toStdString());
+    for(const auto *item: ui->stationList->selectedItems()) selection.insert(item->text(0).toStdString());
+    if(selection.empty() && ui->stationList->currentItem()) selection.insert(ui->stationList->currentItem()->text(0).toStdString());
     view = new AutoMaskReview(this, mtSurvey, selection, linkTensorMasksAction->isChecked(), autoMaskWorkflow->currentOptions(), autoMaskWorkflow->pairDiagonals(), [this, changed] { history->record(tr("Auto masking")); changed(); });
   }
   if(!view) return nullptr;
   view->setEmbedded(); view->setProperty("workspaceDirty", true);
   refreshWorkspace(view);
-  const auto station = ui->stationList->currentItem() ? ui->stationList->currentItem()->text() : QString();
+  const auto station = ui->stationList->currentItem() ? ui->stationList->currentItem()->text(0) : QString();
   if(type == "comparison") stationComparison->setData(mtSurvey, {station});
   if(type == "polarity") polarity->setData(mtSurvey, station);
   if(type == "validity") impedanceValidity->setData(mtSurvey, station);
@@ -117,7 +117,7 @@ QWidget *MainWindow::openWorkspace(const QString &type, bool create, const QJson
   });
   connect(view, &WorkspaceView::stationActivated, this, [this](const QString &name) {
     const auto items = ui->stationList->findItems(name, Qt::MatchExactly);
-    if(!items.isEmpty()) ui->stationList->setCurrentItem(items.front(), QItemSelectionModel::NoUpdate);
+    if(!items.isEmpty()) ui->stationList->setCurrentItem(items.front(), 0, QItemSelectionModel::NoUpdate);
   });
   workspaces->addView(view, type, title, saved["id"].toString());
   if(ribbon && !restoringWorkspace) ribbon->setContext(workspaces->id(view), view->toolPages(), true);
@@ -168,7 +168,7 @@ QJsonObject MainWindow::workspaceSnapshot(QWidget *view) const
 {
   QJsonObject state;
   if(auto *analysis = dynamic_cast<WorkspaceView *>(view)) state = analysis->saveViewState();
-  else state = {{"station", ui->stationList->currentItem() ? ui->stationList->currentItem()->text() : QString()},
+  else state = {{"station", ui->stationList->currentItem() ? ui->stationList->currentItem()->text(0) : QString()},
     {"response", ui->responsesList->currentItem() ? ui->responsesList->currentItem()->toolTip() : QString()},
     {"autoMask", autoMaskWorkflow->settingsView()->saveViewState()},
     {"coordinates", mapCoordinateSwitch->currentIndex()}, {"responses", ui->responsesToggle->isChecked()},

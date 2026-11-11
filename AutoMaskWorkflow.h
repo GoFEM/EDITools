@@ -21,7 +21,7 @@ public:
   AutoMask::Options currentOptions() const { return options; }
   bool pairDiagonals() const;
   void setData(std::shared_ptr<MTSurveyData> survey, const QString &station);
-  void setSelection(const std::set<std::string> &stations);
+  void setSelection(const std::set<std::string> &stations, const std::vector<std::string> &order);
 signals:
   void masksApplied();
   void settingsRequested();
@@ -42,6 +42,7 @@ private:
   std::shared_ptr<MTSurveyData> survey;
   std::string current;
   std::set<std::string> selected;
+  std::vector<std::string> stationOrder;
   AutoMask::Options options;
   AutoMaskSettings *settingsEditor = nullptr;
   WorkspaceView *settingsWorkspace = nullptr;

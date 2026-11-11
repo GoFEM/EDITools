@@ -65,6 +65,7 @@
 #include "include/CommandRibbon.h"
 #include "include/TFViewControls.h"
 #include "include/StationListDelegate.h"
+#include <QHeaderView>
 #include "include/CommandIcons.h"
 #include <QUndoView>
 #include <QVBoxLayout>
@@ -94,7 +95,18 @@ MainWindow::MainWindow(QWidget *parent) :
 {
   ui->setupUi(this);
   ui->stationList->setItemDelegate(new StationListDelegate(ui->stationList));
-  ui->stationList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  ui->stationList->setHeaderLabels({tr("Station"), tr("# periods"), tr("Latitude (°)"), tr("Longitude (°)")});
+  ui->stationList->setRootIsDecorated(false);
+  ui->stationList->setItemsExpandable(false);
+  ui->stationList->setUniformRowHeights(true);
+  ui->stationList->setAlternatingRowColors(true);
+  ui->stationList->setSelectionBehavior(QAbstractItemView::SelectRows);
+  ui->stationList->header()->setSectionResizeMode(QHeaderView::Interactive);
+  ui->stationList->setColumnWidth(0, 150);
+  ui->stationList->setColumnWidth(1, 80);
+  ui->stationList->setColumnWidth(2, 115);
+  ui->stationList->setColumnWidth(3, 115);
+  ui->stationList->sortByColumn(0, Qt::AscendingOrder);
   history.reset(new SurveyHistory([this] { restoreSurveyView(); }));
   auto *edit = new QMenu(tr("Edit"), this);
   ui->menuBar->insertMenu(ui->menuData->menuAction(), edit);
@@ -249,19 +261,20 @@ MainWindow::MainWindow(QWidget *parent) :
   connect(groupMasks, &QAction::triggered, this, [this] {
     if(!mtSurvey) return;
     std::set<std::string> names;
-    for(const auto *item : ui->stationList->selectedItems()) names.insert(item->text().toStdString());
+    for(const auto *item : ui->stationList->selectedItems()) names.insert(item->text(0).toStdString());
     if(names.empty() || !editGroupMasks(this, *mtSurvey, names, linkTensorMasksAction->isChecked())) return;
     history->record(tr("Group masking"));
     updatePlots(false); refreshAnalysisWindows();
   });
   autoMaskWorkflow = new AutoMaskWorkflow(*this, *history, plotHandlers, linkTensorMasksAction);
+  connect(ui->stationList->model(), &QAbstractItemModel::layoutChanged, this, [this] { updateActionAvailability(); });
   connect(autoMaskWorkflow, &AutoMaskWorkflow::masksApplied, this, [this] { updatePlots(false); refreshAnalysisWindows(); });
   connect(autoMaskWorkflow, &AutoMaskWorkflow::reviewRequested, this, [this] { openWorkspace("automask"); });
   connect(autoMaskWorkflow, &AutoMaskWorkflow::settingsRequested, this, [this] { workspaces->setCurrentIndex(0); ribbon->showPage("Mask settings"); });
 
   connect(autoMaskWorkflow, &AutoMaskWorkflow::navigateRequested, this, [this](int direction) {
-    const int row = ui->stationList->currentRow() + direction;
-    if(row >= 0 && row < ui->stationList->count()) ui->stationList->setCurrentRow(row, QItemSelectionModel::NoUpdate);
+    const int row = ui->stationList->indexOfTopLevelItem(ui->stationList->currentItem()) + direction;
+    if(row >= 0 && row < ui->stationList->topLevelItemCount()) ui->stationList->setCurrentItem(ui->stationList->topLevelItem(row), 0, QItemSelectionModel::NoUpdate);
   });
   auto *autoMenu = new QMenu(tr("Auto mask"), this); ui->menuBar->insertMenu(ui->menuData->menuAction(), autoMenu);
   for(const char *name : {"actionAuto_mask_preview", "actionAuto_mask_settings", "actionAuto_masking", "actionAuto_mask_previous", "actionAuto_mask_next",
@@ -466,8 +479,11 @@ void MainWindow::updateActionAvailability()
   ui->actionSave_as_PDF->setEnabled(hasData && ui->stationList->currentItem());
   if(autoMaskWorkflow) {
     std::set<std::string> selected;
-    for(const auto *item : ui->stationList->selectedItems()) selected.insert(item->text().toStdString());
-    autoMaskWorkflow->setSelection(selected);
+    std::vector<std::string> order;
+    for(const auto *item : ui->stationList->selectedItems()) selected.insert(item->text(0).toStdString());
+    for(int row = 0; row < ui->stationList->topLevelItemCount(); ++row)
+      order.push_back(ui->stationList->topLevelItem(row)->text(0).toStdString());
+    autoMaskWorkflow->setSelection(selected, order);
   }
 }
 
@@ -627,7 +643,7 @@ void MainWindow::on_actionLoad_EDI_triggered()
     createStationsList();
     updateMap();
     refreshAnalysisWindows();
-    if(ui->stationList->count()) ui->stationList->setCurrentRow(0);
+    if(ui->stationList->topLevelItemCount()) ui->stationList->setCurrentItem(ui->stationList->topLevelItem(0));
   } catch(const std::exception &error) {
     QMessageBox::critical(this, tr("EDI import"), QString::fromUtf8(error.what()));
   }
@@ -641,8 +657,8 @@ void MainWindow::createStationsList()
   const auto names = mtSurvey->get_stations_names();
   for(unsigned i = 0; i < names.size(); ++i)
   {
-    QListWidgetItem* item = new QListWidgetItem(QString(names[i].c_str()), ui->stationList);
-    item->setCheckState(mtSurvey->is_active(names[i]) ? Qt::Checked : Qt::Unchecked);
+    auto *item = new QTreeWidgetItem(ui->stationList, {QString::fromStdString(names[i])});
+    item->setCheckState(0, mtSurvey->is_active(names[i]) ? Qt::Checked : Qt::Unchecked);
   }
 
   ui->label->setText("Stations (" + QString("%1").arg(mtSurvey->n_stations()) + "):");
@@ -675,19 +691,31 @@ void MainWindow::updateMap()
   mapHandler->set_data(locations,
                        mtSurvey->get_stations_names());
   const QSignalBlocker blocker(ui->stationList);
+  const bool sorting = ui->stationList->isSortingEnabled();
+  ui->stationList->setSortingEnabled(false);
   const auto names = mtSurvey->get_stations_names();
+  ui->stationList->setHeaderLabels({tr("Station"), tr("# periods"),
+    view.utm ? (view.centered ? tr("East offset (m)") : tr("Easting (m)")) : tr("Latitude (°)"),
+    view.utm ? (view.centered ? tr("North offset (m)") : tr("Northing (m)")) : tr("Longitude (°)")});
   std::map<std::string, std::array<double, 3>> byName;
   for(unsigned i = 0; i < names.size(); ++i) byName.emplace(names[i], locations[i]);
-  for(int i = 0; i < ui->stationList->count(); ++i) {
-    auto *item = ui->stationList->item(i);
-    const auto &p = byName.at(item->text().toStdString());
+  for(int i = 0; i < ui->stationList->topLevelItemCount(); ++i) {
+    auto *item = ui->stationList->topLevelItem(i);
+    const auto &p = byName.at(item->text(0).toStdString());
     const auto text = !std::isfinite(p[0]) || !std::isfinite(p[1]) ? tr("Coordinates unavailable") :
       view.utm ? tr("E %1  N %2 m").arg(p[1], 0, 'f', 1).arg(p[0], 0, 'f', 1) :
                  tr("Lat %1°  Lon %2°").arg(p[0], 0, 'f', 4).arg(p[1], 0, 'f', 4);
-    item->setData(StationListDelegate::Coordinates, text);
-    item->setData(StationListDelegate::CoordinateReference, QString::fromStdString(view.description()));
+    item->setData(0, StationListDelegate::Coordinates, text);
+    item->setData(0, StationListDelegate::CoordinateReference, QString::fromStdString(view.description()));
+    for(int column = 2; column < 4; ++column) {
+      const double value = p[view.utm ? 3 - column : column - 2];
+      item->setData(column, Qt::DisplayRole, std::isfinite(value) ? QVariant(value) : QVariant(tr("—")));
+      item->setData(column, StationListDelegate::CoordinatePrecision, view.utm ? 1 : 4);
+      item->setTextAlignment(column, Qt::AlignRight | Qt::AlignVCenter);
+    }
   }
   updateStationDetails();
+  ui->stationList->setSortingEnabled(sorting);
   on_stationList_itemSelectionChanged();
 }
 
@@ -698,12 +726,12 @@ void MainWindow::updatePlots(bool rescaleAxes)
   updateStationDetails();
   updateActionAvailability();
   rhoPlusOverlay->hide();
-  QListWidgetItem* item = ui->stationList->currentItem();
+  QTreeWidgetItem* item = ui->stationList->currentItem();
   if(stationHeading) {
-    stationHeading->setText(item ? item->text() : tr("No station selected"));
+    stationHeading->setText(item ? item->text(0) : tr("No station selected"));
     stationHeading->setToolTip(stationHeading->text());
   }
-  if(autoMaskWorkflow) autoMaskWorkflow->setData(mtSurvey, item ? item->text() : QString());
+  if(autoMaskWorkflow) autoMaskWorkflow->setData(mtSurvey, item ? item->text(0) : QString());
   if(item == nullptr) {
     for(auto &plot: plotHandlers) plot->clear_observed_data();
     rhoPlusOverlay->update(nullptr,rhoPlusAction->isChecked(),ui->actionPhase_wrap->isChecked(),
@@ -711,7 +739,7 @@ void MainWindow::updatePlots(bool rescaleAxes)
     return;
   }
 
-  MTStationData& data = mtSurvey->get_station_data(item->text().toStdString());
+  MTStationData& data = mtSurvey->get_station_data(item->text(0).toStdString());
   for(auto &ph: plotHandlers) {
     ph->clear_predicted_data();
     ph->set_observed_data(data, rescaleAxes);
@@ -726,9 +754,9 @@ void MainWindow::updatePlots(bool rescaleAxes)
     if(it != mtResponses.end())
     {
       MTSurveyData &survey = it->second;
-      if(survey.is_station_present(item->text().toStdString()))
+      if(survey.is_station_present(item->text(0).toStdString()))
       {
-        MTStationData& resp_data = survey.get_station_data(item->text().toStdString());
+        MTStationData& resp_data = survey.get_station_data(item->text(0).toStdString());
 
         for(auto &ph: plotHandlers)
           ph->set_predicted_data(resp_data);
@@ -774,7 +802,7 @@ void MainWindow::stationSelected(const QCPDataSelection &selection)
 
 void MainWindow::maskDataType(bool on)
 {
-  const std::string station_name = pointedItem->text().toStdString();
+  const std::string station_name = pointedItem->text(0).toStdString();
   QAction* action = qobject_cast<QAction*>(sender());
   const RealDataType type = static_cast<RealDataType>(action->data().toInt());
 
@@ -791,7 +819,7 @@ void MainWindow::deleteStations()
   const auto selected = ui->stationList->selectedItems();
   if(selected.isEmpty() || !mtSurvey) return;
   for(const auto *item : selected)
-    mtSurvey->remove_station(item->text().toStdString());
+    mtSurvey->remove_station(item->text(0).toStdString());
   history->record(tr("Delete %n station(s)", nullptr, selected.size()));
   restoreSurveyView();
 }
@@ -799,35 +827,35 @@ void MainWindow::deleteStations()
 void MainWindow::restoreSurveyView()
 {
   const auto *item = ui->stationList->currentItem();
-  const QString selected = item ? item->text() : QString();
+  const QString selected = item ? item->text(0) : QString();
   std::set<QString> selection;
-  for(const auto *entry : ui->stationList->selectedItems()) selection.insert(entry->text());
+  for(const auto *entry : ui->stationList->selectedItems()) selection.insert(entry->text(0));
   {
     const QSignalBlocker blocker(ui->stationList);
     createStationsList();
     const auto matches = ui->stationList->findItems(selected, Qt::MatchExactly);
-    if(!matches.isEmpty()) ui->stationList->setCurrentItem(matches.front(), QItemSelectionModel::NoUpdate);
-    else if(ui->stationList->count()) ui->stationList->setCurrentRow(0, QItemSelectionModel::NoUpdate);
-    for(int i = 0; i < ui->stationList->count(); ++i)
-      ui->stationList->item(i)->setSelected(selection.count(ui->stationList->item(i)->text()) || (selected.isEmpty() && selection.empty() && i == 0));
+    if(!matches.isEmpty()) ui->stationList->setCurrentItem(matches.front(), 0, QItemSelectionModel::NoUpdate);
+    else if(ui->stationList->topLevelItemCount()) ui->stationList->setCurrentItem(ui->stationList->topLevelItem(0), 0, QItemSelectionModel::NoUpdate);
+    for(int i = 0; i < ui->stationList->topLevelItemCount(); ++i)
+      ui->stationList->topLevelItem(i)->setSelected(selection.count(ui->stationList->topLevelItem(i)->text(0)) || (selected.isEmpty() && selection.empty() && i == 0));
   }
   updateMap(); updatePlots(false); refreshAnalysisWindows();
 }
 
 void MainWindow::renameStation()
 {
-  QListWidgetItem* item = ui->stationList->currentItem();
+  QTreeWidgetItem* item = ui->stationList->currentItem();
 
   if(!item || !mtSurvey) return;
   bool ok;
   QString newName = QInputDialog::getText(this, tr("Name"),
                                           tr("New name:"), QLineEdit::Normal,
-                                          item->text(), &ok);
+                                          item->text(0), &ok);
   if (ok && !newName.isEmpty())
   {
     try {
-      mtSurvey->rename_station(item->text().toStdString(), newName.toStdString());
-      { const QSignalBlocker block(ui->stationList); item->setText(newName); }
+      mtSurvey->rename_station(item->text(0).toStdString(), newName.toStdString());
+      { const QSignalBlocker block(ui->stationList); item->setText(0, newName); }
       history->record(tr("Rename station"));
       updateMap();
       updatePlots(false);
@@ -1034,27 +1062,28 @@ void MainWindow::on_actionLoad_project_triggered()
   restoreWorkspace(loadedWorkspace);
 }
 
-void MainWindow::on_stationList_currentRowChanged(int /*currentRow*/)
+void MainWindow::on_stationList_currentItemChanged(QTreeWidgetItem *, QTreeWidgetItem *)
 {
   updatePlots();
 }
 
-void MainWindow::on_stationList_itemChanged(QListWidgetItem *item)
+void MainWindow::on_stationList_itemChanged(QTreeWidgetItem *item, int column)
 {
+  if(column != 0 || !mtSurvey) return;
   const QSignalBlocker blocker(ui->stationList);
-  bool checked = item->checkState() == Qt::Checked;
-  mtSurvey->set_active_flag(item->text().toStdString(), checked);
+  bool checked = item->checkState(0) == Qt::Checked;
+  mtSurvey->set_active_flag(item->text(0).toStdString(), checked);
 
   if(checked)
-    item->setForeground(Qt::black);
+    item->setForeground(0, Qt::black);
   else
-    item->setForeground(Qt::gray);
+    item->setForeground(0, Qt::gray);
 
   auto selection = ui->stationList->selectedItems();
   for(auto sitem: selection)
   {
-    sitem->setCheckState(item->checkState());
-    mtSurvey->set_active_flag(sitem->text().toStdString(), checked);
+    sitem->setCheckState(0, item->checkState(0));
+    mtSurvey->set_active_flag(sitem->text(0).toStdString(), checked);
   }
 
   history->record(tr("Enable / disable stations"));
@@ -1081,7 +1110,7 @@ void MainWindow::on_stationList_itemSelectionChanged()
 
   auto selection = ui->stationList->selectedItems();
   for(auto sitem: selection)
-    geographic.push_back(mtSurvey->get_station_data(sitem->text().toStdString()).position());
+    geographic.push_back(mtSurvey->get_station_data(sitem->text(0).toStdString()).position());
 
   mapHandler->set_selected_points(mapCoordinates.transform(geographic));
 }
@@ -1177,7 +1206,7 @@ void MainWindow::on_stationList_customContextMenuRequested(const QPoint &pos)
   pointedItem = ui->stationList->itemAt(pos);
   if(pointedItem)
   {
-    std::set<RealDataType> types = mtSurvey->get_active_types(pointedItem->text().toStdString());
+    std::set<RealDataType> types = mtSurvey->get_active_types(pointedItem->text(0).toStdString());
 
     for(auto action: listContextActions)
     {
@@ -1188,7 +1217,7 @@ void MainWindow::on_stationList_customContextMenuRequested(const QPoint &pos)
         action->setChecked(true);
     }
 
-    listContextMenu->exec(ui->stationList->mapToGlobal(pos));
+    listContextMenu->exec(ui->stationList->viewport()->mapToGlobal(pos));
   }
 }
 
@@ -1233,12 +1262,12 @@ void MainWindow::on_actionActivate_masking_mode_toggled(bool on)
 
 void MainWindow::on_actionSave_as_PDF_triggered()
 {
-  QListWidgetItem* item = ui->stationList->currentItem();
+  QTreeWidgetItem* item = ui->stationList->currentItem();
 
   if(!item)
     return;
 
-  QString sname = item->text();
+  QString sname = item->text(0);
 
   QString exportFile = QFileDialog::getSaveFileName(
         this,
@@ -1331,7 +1360,7 @@ void MainWindow::openSurveyCopy(std::shared_ptr<MTSurveyData> data)
   window->projectFile.clear();
   window->applyPlotOptions(currentPlotOptions());
   window->createStationsList(); window->createResponsesList(); window->updateMap();
-  if(window->ui->stationList->count()) window->ui->stationList->setCurrentRow(0);
+  if(window->ui->stationList->topLevelItemCount()) window->ui->stationList->setCurrentItem(window->ui->stationList->topLevelItem(0));
   const auto name = QString::fromStdString(window->mtSurvey->get_survey_name()).trimmed();
   window->setWindowTitle(tr("EDITools — %1").arg(name.isEmpty() ? tr("Survey copy") : name));
   window->show();

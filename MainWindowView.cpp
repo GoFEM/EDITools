@@ -41,7 +41,7 @@ void MainWindow::fitViewRange(int index)
   if(index == 0) {
     const auto *item = ui->stationList->currentItem();
     if(!mtSurvey || !item) return;
-    const auto &frequencies = mtSurvey->get_station_data(item->text().toStdString()).frequencies();
+    const auto &frequencies = mtSurvey->get_station_data(item->text(0).toStdString()).frequencies();
     if(frequencies.empty()) return;
     const auto bounds = std::minmax_element(frequencies.begin(), frequencies.end());
     if(*bounds.first > 0. && std::isfinite(*bounds.second))
@@ -66,13 +66,18 @@ void MainWindow::updateStationDetails()
 {
   if(!mtSurvey) return;
   const QSignalBlocker blocker(ui->stationList);
-  for(int i = 0; i < ui->stationList->count(); ++i) {
-    auto *item = ui->stationList->item(i);
-    const auto count = mtSurvey->get_station_data(item->text().toStdString()).frequencies().size();
-    item->setData(StationListDelegate::PeriodCount, qulonglong(count));
-    const auto details = tr("%1\n%2 periods\n%3\n%4").arg(item->text()).arg(count)
-      .arg(item->data(StationListDelegate::Coordinates).toString(), item->data(StationListDelegate::CoordinateReference).toString());
-    item->setToolTip(details);
-    item->setData(Qt::AccessibleTextRole, details);
+  const bool sorting = ui->stationList->isSortingEnabled();
+  ui->stationList->setSortingEnabled(false);
+  for(int i = 0; i < ui->stationList->topLevelItemCount(); ++i) {
+    auto *item = ui->stationList->topLevelItem(i);
+    const auto count = mtSurvey->get_station_data(item->text(0).toStdString()).frequencies().size();
+    item->setData(0, StationListDelegate::PeriodCount, qulonglong(count));
+    item->setData(1, Qt::DisplayRole, qulonglong(count));
+    item->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
+    const auto details = tr("%1\n%2 periods\n%3\n%4").arg(item->text(0)).arg(count)
+      .arg(item->data(0, StationListDelegate::Coordinates).toString(), item->data(0, StationListDelegate::CoordinateReference).toString());
+    for(int column = 0; column < 4; ++column) item->setToolTip(column, details);
+    item->setData(0, Qt::AccessibleTextRole, details);
   }
+  ui->stationList->setSortingEnabled(sorting);
 }
