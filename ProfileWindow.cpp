@@ -109,6 +109,15 @@ struct ProfileWindow::Impl {
   ProfileSectionPlot *tensors;
   ProfileRosePlot *roses;
   QPoint press;
+  QString selectedStation;
+  QCheckBox *rotate;
+  QComboBox *strikeMode;
+  QDoubleSpinBox *strikeAngle;
+  QPushButton *swapStrike;
+  QLabel *strikeInfo;
+  ProfileAnalysis::Strike inferredStrike;
+  bool swappedStrike = false, manualStrikeSet = false;
+  double manualStrike = 0., rotation = 0.;
 
   Impl(ProfileWindow *w, std::function<void(std::shared_ptr<MTSurveyData>)> callback)
       : owner(w), extracted(std::move(callback)) {
@@ -126,11 +135,37 @@ struct ProfileWindow::Impl {
                             "changes the vertical axis, not the underlying selection."));
     top->addWidget(periodMax);
     palette = combo(w, "profilePalette", PlotColorMaps::names());
-    label(top, palette, ProfileWindow::tr("Colors:"));
+
     pdfButton = new QPushButton(ProfileWindow::tr("Save PDF…"), w);
     pdfButton->setObjectName("profileSavePdf");
     top->addWidget(pdfButton);
     layout->addLayout(top);
+    auto *rotationRow = new QHBoxLayout;
+    rotate = new QCheckBox(ProfileWindow::tr("Rotate to strike"), w);
+    rotate->setObjectName("profileRotateStrike");
+    rotate->setToolTip(ProfileWindow::tr(
+        "Rotate the displayed data axes clockwise from geographic north, assuming stored x/y channels use "
+        "north/east axes. The drawn line, station "
+        "coordinates, original data, errors and masks stay unchanged. XY uses electric field parallel to the "
+        "chosen strike axis. Phase-tensor strike has a 90° ambiguity; +90° swaps the axes."));
+    rotationRow->addWidget(rotate);
+    strikeMode =
+        combo(w, "profileStrikeMode", {ProfileWindow::tr("Auto (observed)"), ProfileWindow::tr("Manual")});
+    rotationRow->addWidget(strikeMode);
+    strikeAngle = spin(w, "profileStrikeAngle", -181., 180., 0., 2);
+    strikeAngle->setSuffix("°");
+    label(rotationRow, strikeAngle, ProfileWindow::tr("Strike:"),
+          ProfileWindow::tr("Clockwise from north. Auto uses the selected corridor's observed phase tensors, "
+                            "period range and rose band, with the skew/ellipticity thresholds and station "
+                            "weighting below. Manual accepts a chosen angle."));
+    swapStrike = new QPushButton("+90°", w);
+    swapStrike->setObjectName("profileSwapStrike");
+    rotationRow->addWidget(swapStrike);
+    strikeInfo = new QLabel(w);
+    strikeInfo->setObjectName("profileStrikeInfo");
+    rotationRow->addWidget(strikeInfo);
+    rotationRow->addStretch();
+    layout->addLayout(rotationRow);
     auto *split = new QSplitter(w);
     layout->addWidget(split, 1);
     auto *left = new QWidget(split);
@@ -186,7 +221,7 @@ struct ProfileWindow::Impl {
     map->setMinimumSize(320, 260);
     background = new MapBackground(map);
     corridor = new Corridor(map);
-    mapTools->addWidget(MapBackground::button(left, 0, [this](int layers) {
+    mapTools->addWidget(MapBackground::button(left, background->layers(), [this](int layers) {
       background->setLayers(layers);
       map->replot();
     }));
@@ -206,6 +241,13 @@ struct ProfileWindow::Impl {
     line->setPen(QPen(QColor("#2563eb"), 1.4));
     line->setSelectable(QCP::stNone);
     line->removeFromLegend();
+    auto *highlighted = map->addGraph();
+    highlighted->setObjectName("profileHighlightedStation");
+    highlighted->setLineStyle(QCPGraph::lsNone);
+    highlighted->setSelectable(QCP::stNone);
+    highlighted->setScatterStyle(
+        QCPScatterStyle(QCPScatterStyle::ssCircle, QPen(QColor("#d81b60"), 2.), QBrush(Qt::white), 12));
+    highlighted->setLayer("overlay");
     map->xAxis->setLabel(ProfileWindow::tr("Easting (km)"));
     map->yAxis->setLabel(ProfileWindow::tr("Northing (km)"));
     map->setInteractions(QCP::iRangeZoom);
@@ -222,11 +264,15 @@ struct ProfileWindow::Impl {
     table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     table->setSelectionBehavior(QAbstractItemView::SelectRows);
+    table->setSelectionMode(QAbstractItemView::SingleSelection);
     table->verticalHeader()->hide();
     ml->addWidget(table, 1);
     auto *outputs = new QHBoxLayout;
     extractButton = new QPushButton(ProfileWindow::tr("Open as survey"), w);
     extractButton->setObjectName("profileExtract");
+    extractButton->setToolTip(
+        ProfileWindow::tr("Open a copy of the corridor stations with their original data and masks. Display "
+                          "rotation is not applied to the copied survey."));
     outputs->addWidget(extractButton);
     csvButton = new QPushButton(ProfileWindow::tr("Station CSV…"), w);
     csvButton->setObjectName("profileCsv");
@@ -242,8 +288,9 @@ struct ProfileWindow::Impl {
                         ProfileWindow::tr("Determinant")});
     label(scalarTools, quantities, ProfileWindow::tr("Response:"));
     quantities->setToolTip(ProfileWindow::tr(
-        "Uses the same complex impedance quantities and masks as impedance analysis. YX is sign-reversed. No "
-        "rotation into the profile direction is applied; XY/YX remain the stored components."));
+        "Uses the same complex impedance quantities and masks as impedance analysis. YX is sign-reversed. "
+        "The "
+        "Rotate to strike option changes the data axes; otherwise XY/YX remain the stored components."));
     cells = new QCheckBox(ProfileWindow::tr("Cells"), w);
     cells->setObjectName("profileCells");
     cells->setChecked(true);
@@ -256,6 +303,7 @@ struct ProfileWindow::Impl {
     label(scalarTools, gap, ProfileWindow::tr("Gap ratio:"),
           ProfileWindow::tr("Maximum period ratio spanned by one sample cell. Larger gaps remain blank; this "
                             "never fills missing or masked data."));
+    label(scalarTools, palette, ProfileWindow::tr("Colormap:"));
     sl->addLayout(scalarTools);
     auto *ranges = new QHBoxLayout;
     rhoMin = spin(w, "profileRhoMin", .0001, 1e9 - 1, 1., 4);
@@ -290,14 +338,24 @@ struct ProfileWindow::Impl {
     glyphSize = spin(w, "profileGlyphSize", 3., 80., 14., 0);
     label(ptTools, glyphSize, ProfileWindow::tr("Size:"),
           ProfileWindow::tr("Ellipse major diameter in pixels. Geometry is independent of axis aspect ratio. "
-                            "Up within each ellipse means geographic north; right means east. Vertical "
+                            "Up within each ellipse is the selected data x axis (north unless rotated); "
+                            "right is +90°. Vertical "
                             "placement is period/frequency, not depth."));
+    auto *tensorPalette = combo(w, "profileTensorPalette", PlotColorMaps::names());
+    label(ptTools, tensorPalette, ProfileWindow::tr("Colormap:"));
+    QObject::connect(tensorPalette, QOverload<int>::of(&QComboBox::currentIndexChanged), palette,
+                     &QComboBox::setCurrentIndex);
+    QObject::connect(palette, QOverload<int>::of(&QComboBox::currentIndexChanged), tensorPalette,
+                     &QComboBox::setCurrentIndex);
     pl->addLayout(ptTools);
+    auto *tensorSplit = new QSplitter(Qt::Vertical, ptPage);
+    tensorSplit->setObjectName("profileTensorRoseSplit");
+    pl->addWidget(tensorSplit, 1);
     tensors = new ProfileSectionPlot(w);
     tensors->setObjectName("profileTensorPlot");
-    pl->addWidget(tensors, 1);
-    tabs->addTab(ptPage, ProfileWindow::tr("Phase tensors"));
-    auto *rosePage = new QWidget(tabs);
+    tensorSplit->addWidget(tensors);
+    tabs->addTab(ptPage, ProfileWindow::tr("Phase tensors / strike"));
+    auto *rosePage = new QWidget(tensorSplit);
     auto *rl = new QVBoxLayout(rosePage);
     auto *roseTools = new QHBoxLayout;
     const QStringList titles{ProfileWindow::tr("PT azimuth"), ProfileWindow::tr("Real tipper normal"),
@@ -313,7 +371,8 @@ struct ProfileWindow::Impl {
     equalStations->setChecked(true);
     roseTools->addWidget(equalStations);
     equalStations->setToolTip(ProfileWindow::tr(
-        "Give each contributing station total weight one, so denser period sampling does not dominate. "
+        "Give each contributing station total weight one in roses and automatic strike, so denser period "
+        "sampling does not dominate. "
         "Otherwise every valid station-period sample has equal weight. Roses are axial (0–180°), mirrored on "
         "the opposite side; PT strike has an additional 90° ambiguity. Tipper normals are perpendicular to "
         "the induction direction, not an independently determined geological strike."));
@@ -330,21 +389,28 @@ struct ProfileWindow::Impl {
     filterTools->addWidget(filterTensor);
     skew = spin(w, "profileMaxSkew", 0., 90., 3.);
     ellipticity = spin(w, "profileMinEllipticity", 0., 1., .1);
-    label(
-        filterTools, skew, ProfileWindow::tr("|β| ≤"),
-        ProfileWindow::tr(
-            "PT rose only: maximum absolute skew, in degrees. Does not change masks or section visibility."));
+    label(filterTools, skew, ProfileWindow::tr("|β| ≤"),
+          ProfileWindow::tr("Auto strike and filtered PT rose: maximum absolute skew, in degrees. Does not "
+                            "change masks or section visibility."));
     label(filterTools, ellipticity, ProfileWindow::tr("Ellipticity ≥"),
           ProfileWindow::tr(
-              "PT rose only: (1 − axis ratio)/(1 + axis ratio). Nearly circular tensors have poorly defined "
+              "Auto strike and filtered PT rose: (1 − axis ratio)/(1 + axis ratio). Nearly circular tensors "
+              "have poorly defined "
               "azimuths. Exactly circular tensors and zero tipper vectors are always excluded from roses."));
     rl->addLayout(filterTools);
     roses = new ProfileRosePlot(w);
     roses->setObjectName("profileRosePlot");
     rl->addWidget(roses, 1);
-    tabs->addTab(rosePage, ProfileWindow::tr("Strike roses"));
+    tensorSplit->addWidget(rosePage);
+    tensorSplit->setSizes({450, 350});
     std::vector<ProfileSectionPlot *> linked(sections.begin(), sections.end());
     linked.push_back(tensors);
+    for (auto *plot : linked)
+      QObject::connect(plot, &ProfileSectionPlot::stationClicked, w,
+                       [this](const QString &name) { highlight(name); });
+    QObject::connect(table, &QTableWidget::currentCellChanged, w, [this](int row, int, int, int) {
+      highlight(row >= 0 && table->item(row, 0) ? table->item(row, 0)->text() : QString());
+    });
     for (auto *plot : linked)
       for (bool horizontal : {true, false}) {
         auto *axis = horizontal ? plot->xAxis : plot->yAxis;
@@ -367,6 +433,30 @@ struct ProfileWindow::Impl {
     status->setWordWrap(true);
     layout->addWidget(status);
 
+    QObject::connect(rotate, &QCheckBox::toggled, w, [this] { plots(false); });
+    QObject::connect(strikeMode, QOverload<int>::of(&QComboBox::currentIndexChanged), w, [this] {
+      if (strikeMode->currentIndex() == 1 && !manualStrikeSet) {
+        manualStrike =
+            std::isfinite(inferredStrike.degrees) ? inferredStrike.degrees + (swappedStrike ? 90. : 0.) : 0.;
+        manualStrikeSet = true;
+      }
+      plots(false);
+    });
+    QObject::connect(strikeAngle, QOverload<double>::of(&QDoubleSpinBox::valueChanged), w,
+                     [this](double angle) {
+                       if (strikeMode->currentIndex() == 1) {
+                         manualStrike = angle;
+                         manualStrikeSet = true;
+                         plots(false);
+                       }
+                     });
+    QObject::connect(swapStrike, &QPushButton::clicked, w, [this] {
+      if (strikeMode->currentIndex() == 0)
+        swappedStrike = !swappedStrike;
+      else
+        manualStrike = std::remainder(manualStrike + 90., 180.);
+      plots(false);
+    });
     QObject::connect(drawing, &QCheckBox::toggled, w, [this](bool on) {
       map->setInteraction(QCP::iRangeDrag, !on);
       map->setCursor(on ? Qt::CrossCursor : Qt::ArrowCursor);
@@ -502,10 +592,31 @@ struct ProfileWindow::Impl {
                           decade);
     roseBand->setCurrentIndex(std::max(0, roseBand->findText(old)));
   }
+  void highlight(const QString &name) {
+    int row = -1;
+    for (unsigned i = 0; i < offsets.size(); ++i)
+      if (QString::fromStdString(offsets[i].name) == name) {
+        row = int(i);
+        break;
+      }
+    selectedStation = row < 0 ? QString() : name;
+    const QSignalBlocker block(table);
+    table->clearSelection();
+    table->setCurrentCell(row, row < 0 ? -1 : 0);
+    if (row >= 0) {
+      table->selectRow(row);
+      table->scrollToItem(table->item(row, 0));
+    }
+    for (auto *plot : sections)
+      plot->setSelectedStation(selectedStation);
+    tensors->setSelectedStation(selectedStation);
+    updateMap();
+  }
   void select() {
     offsets = ProfileAnalysis::select(stations, vertices, distance->value());
     corridor->line = vertices;
     corridor->distance = distance->value();
+    const QSignalBlocker block(table);
     table->setRowCount(int(offsets.size()));
     for (unsigned i = 0; i < offsets.size(); ++i) {
       const auto &s = offsets[i];
@@ -516,19 +627,11 @@ struct ProfileWindow::Impl {
     extractButton->setEnabled(!offsets.empty());
     csvButton->setEnabled(!offsets.empty());
     pdfButton->setEnabled(!offsets.empty());
-    status->setText(
-        vertices.size() < 2
-            ? ProfileWindow::tr("Click at least two map vertices to define a profile. Right-click to finish.")
-            : ProfileWindow::tr("%1 stations · %2 km profile · ±%3 km corridor · distances use the displayed "
-                                "UTM projection")
-                  .arg(offsets.size())
-                  .arg(ProfileAnalysis::length(vertices), 0, 'f', 2)
-                  .arg(distance->value(), 0, 'f', 3));
-    updateMap();
     plots(true);
+    highlight(selectedStation);
   }
   void updateMap() {
-    QVector<double> x, y, sx, sy, vx, vy, order;
+    QVector<double> x, y, sx, sy, vx, vy, order, hx, hy;
     std::set<std::string> selected;
     for (const auto &s : offsets)
       selected.insert(s.name);
@@ -540,13 +643,20 @@ struct ProfileWindow::Impl {
         sx.push_back(s.position[0]);
         sy.push_back(s.position[1]);
       }
-      if (names->isChecked()) {
+      const bool highlighted = QString::fromStdString(s.name) == selectedStation;
+      if (highlighted) {
+        hx.push_back(s.position[0]);
+        hy.push_back(s.position[1]);
+      }
+      if (names->isChecked() || highlighted) {
         auto *label = new QCPItemText(map);
         label->setText(QString::fromStdString(s.name));
         label->position->setCoords(s.position[0], s.position[1]);
         label->setPositionAlignment(Qt::AlignLeft | Qt::AlignBottom);
         label->setFont(QFont(owner->font().family(), 8));
         label->setSelectable(false);
+        if (highlighted)
+          label->setColor(QColor("#d81b60"));
       }
     }
     for (unsigned i = 0; i < vertices.size(); ++i) {
@@ -557,6 +667,7 @@ struct ProfileWindow::Impl {
     map->graph(0)->setData(x, y);
     map->graph(1)->setData(sx, sy);
     map->graph(2)->setData(vx, vy);
+    map->graph(3)->setData(hx, hy);
     line->setData(order, vx, vy);
     map->replot();
   }
@@ -578,12 +689,86 @@ struct ProfileWindow::Impl {
     }
     map->replot();
   }
+  bool inRoseBand(double period) const {
+    if (roseBand->currentIndex() <= 0)
+      return true;
+    const int decade = roseBand->currentData().toInt();
+    return period >= std::pow(10., decade) * (1. - 1e-10) &&
+           period < std::pow(10., decade + 1) * (1. - 1e-10);
+  }
+  bool tensorForStrike(const MTMapData::PhaseTensor &tensor) const {
+    const double shape = (1. - tensor.axisRatio) / (1. + tensor.axisRatio);
+    return shape > 1e-8 && shape >= ellipticity->value() && std::abs(tensor.skew) <= skew->value();
+  }
+  QString frame() const {
+    if (!rotate->isChecked())
+      return ProfileWindow::tr("geographic north");
+    return std::isfinite(rotation)
+               ? ProfileWindow::tr("strike %1° clockwise from north").arg(rotation, 0, 'f', 2)
+               : ProfileWindow::tr("strike unavailable");
+  }
+  void updateStrike(double low, double high) {
+    std::vector<ProfileAnalysis::Direction> directions;
+    if (survey)
+      for (const auto &site : offsets) {
+        const auto &station = survey->get_station_data(site.name);
+        for (unsigned f = 0; f < station.frequencies().size(); ++f) {
+          const double period = 1. / station.frequencies()[f];
+          MTMapData::PhaseTensor tensor;
+          if (!std::isfinite(period) || period < low * (1. - 1e-10) || period > high * (1. + 1e-10) ||
+              !inRoseBand(period))
+            continue;
+          if (MTMapData::phase_tensor(station, f, tensor) && tensorForStrike(tensor))
+            directions.push_back({site.name, tensor.azimuth});
+        }
+      }
+    inferredStrike = ProfileAnalysis::estimateStrike(directions, equalStations->isChecked());
+    const bool automatic = strikeMode->currentIndex() == 0;
+    const double chosen = automatic ? inferredStrike.degrees + (swappedStrike ? 90. : 0.) : manualStrike;
+    {
+      QSignalBlocker block(strikeAngle);
+      strikeAngle->setMinimum(automatic ? -181. : -180.);
+      strikeAngle->setSpecialValueText(automatic ? QStringLiteral("—") : QString());
+      strikeAngle->setReadOnly(automatic);
+      strikeAngle->setValue(std::isfinite(chosen) ? chosen : -181.);
+    }
+    swapStrike->setEnabled(std::isfinite(chosen));
+    rotation = rotate->isChecked() ? chosen : 0.;
+    strikeInfo->setText(automatic
+                            ? (!std::isfinite(chosen) ? ProfileWindow::tr("No estimate — choose Manual")
+                                                      : ProfileWindow::tr("%1 sites · R₄ %2%3")
+                                                            .arg(inferredStrike.stations)
+                                                            .arg(inferredStrike.concentration, 0, 'f', 2)
+                                                            .arg(inferredStrike.concentration < .25
+                                                                     ? ProfileWindow::tr(" · weak agreement")
+                                                                     : QString()))
+                            : ProfileWindow::tr("Manual axes"));
+    strikeInfo->setToolTip(
+        ProfileWindow::tr(
+            "Observed phase tensors: %1 samples from %2 stations. The fourth circular moment averages "
+            "principal axes modulo 90°. R₄ measures directional agreement, not statistical confidence. +90° "
+            "chooses the other ambiguous axis. Skew and ellipticity thresholds always apply to automatic "
+            "strike, even when the rose filter is off.")
+            .arg(inferredStrike.samples)
+            .arg(inferredStrike.stations));
+    status->setText(
+        vertices.size() < 2
+            ? ProfileWindow::tr("Click at least two map vertices to define a profile. Right-click to finish.")
+            : ProfileWindow::tr(
+                  "%1 stations · %2 km profile · ±%3 km corridor · UTM distances · data x axis: %4")
+                  .arg(offsets.size())
+                  .arg(ProfileAnalysis::length(vertices), 0, 'f', 2)
+                  .arg(distance->value(), 0, 'f', 3)
+                  .arg(frame()));
+    pdfButton->setEnabled(!offsets.empty() && std::isfinite(rotation));
+  }
   void plots(bool fit) {
     updatingPlots = true;
     std::array<std::vector<ProfileGlyph>, 5> data;
     std::array<std::vector<ProfileAnalysis::Direction>, 3> angles;
     const auto *active = source();
     const double low = periodMin->currentData().toDouble(), high = periodMax->currentData().toDouble();
+    updateStrike(low, high);
     const bool frequency = vertical->currentIndex() == 1;
     const std::array<Quantity, 2> components =
         quantities->currentIndex() == 0 ? std::array<Quantity, 2>{{Quantity::XY, Quantity::YX}}
@@ -594,9 +779,12 @@ struct ProfileWindow::Impl {
     for (const auto &s : offsets)
       along.push_back(s.along);
     const auto horizontal = ProfileAnalysis::cells(along, stationSpacing);
+    for (auto *plot : sections)
+      plot->setStations(offsets, stationSpacing);
+    tensors->setStations(offsets, stationSpacing);
     for (unsigned i = 0; i < offsets.size(); ++i) {
       const auto &offset = offsets[i];
-      if (!active || !active->is_station_present(offset.name))
+      if (!std::isfinite(rotation) || !active || !active->is_station_present(offset.name))
         continue;
       const auto &station = active->get_station_data(offset.name);
       if (!station.active())
@@ -627,7 +815,7 @@ struct ProfileWindow::Impl {
                            NAN,
                            {}};
         for (unsigned c = 0; c < 2; ++c) {
-          const auto sample = ImpedanceAnalysis::sample(station, components[c], f);
+          const auto sample = ImpedanceAnalysis::sample(station, components[c], f, rotation);
           glyph.value = sample.resistivity();
           if (std::isfinite(glyph.value) && glyph.value > 0.)
             data[c].push_back(glyph);
@@ -637,41 +825,40 @@ struct ProfileWindow::Impl {
         }
         const bool tensor = MTMapData::phase_tensor(station, f, glyph.tensor);
         if (tensor) {
+          glyph.tensor.azimuth = std::fmod(glyph.tensor.azimuth - rotation + 540., 180.);
           glyph.value = tensorColor->currentIndex() == 0   ? glyph.tensor.phiMax
                         : tensorColor->currentIndex() == 1 ? glyph.tensor.phiMin
                                                            : glyph.tensor.skew;
           data[4].push_back(glyph);
         }
-        if (roseBand->currentIndex() > 0) {
-          const int decade = roseBand->currentData().toInt();
-          if (p < std::pow(10., decade) || p >= std::pow(10., decade + 1))
-            continue;
-        }
-        const double ellipticityValue =
-            tensor ? (1. - glyph.tensor.axisRatio) / (1. + glyph.tensor.axisRatio) : 0.;
-        if (tensor && ellipticityValue > 1e-8 &&
-            (!filterTensor->isChecked() ||
-             (std::abs(glyph.tensor.skew) <= skew->value() && ellipticityValue >= ellipticity->value())))
+        if (!inRoseBand(p))
+          continue;
+        if (tensor && glyph.tensor.axisRatio < 1. - 1e-8 &&
+            (!filterTensor->isChecked() || tensorForStrike(glyph.tensor)))
           angles[0].push_back({offset.name, glyph.tensor.azimuth});
         for (unsigned component = 0; component < 2; ++component) {
           std::array<double, 2> v;
           if (MTMapData::induction_vector(station, f, component == 1, v) && std::hypot(v[0], v[1]) > 1e-12)
             angles[component + 1].push_back(
-                {offset.name, std::atan2(v[1], v[0]) * 180. / std::acos(-1.) + 90.});
+                {offset.name, std::atan2(v[1], v[0]) * 180. / std::acos(-1.) + 90. - rotation});
         }
       }
     }
-    const auto colors = PlotColorMaps::gradient(palette->currentText());
+    auto colors = PlotColorMaps::gradient(palette->currentText());
     for (unsigned i = 0; i < 4; ++i) {
       const bool rho = i < 2;
       sections[i]->setVisible(i % 2 == 0 || quantities->currentIndex() != 2);
-      const auto title = QString(rho ? "ρa %1 (Ω m)" : "Phase %1 (°)")
-                             .arg(QString::fromUtf8(ImpedanceAnalysis::name(components[i % 2])));
+      const auto title =
+          QString(rho ? "ρa %1 (Ω m)" : "Phase %1 (°)")
+              .arg(
+                  QString::fromUtf8(ImpedanceAnalysis::name(components[i % 2])) +
+                  (rotate->isChecked() && quantities->currentIndex() == 0 ? QStringLiteral("′") : QString()));
       sections[i]->setSamples(
           std::move(data[i]), frequency, false, cells->isChecked(), glyphSize->value(), title, colors,
           rho ? QCPRange(rhoMin->value(), rhoMax->value()) : QCPRange(phaseMin->value(), phaseMax->value()),
           rho);
     }
+    tensors->setReference(frame());
     tensors->setSamples(std::move(data[4]), frequency, true, false, glyphSize->value(),
                         tensorColor->currentText(), colors, QCPRange(tensorMin->value(), tensorMax->value()),
                         false);
@@ -691,16 +878,19 @@ struct ProfileWindow::Impl {
     updatingPlots = false;
     std::vector<ProfileRosePlot::Panel> panels;
     const unsigned binValues[]{5, 10, 15, 30};
-    const QColor colorsRose[]{QColor("#2563eb"), QColor("#c2410c"), QColor("#00897b")};
+
     for (unsigned i = 0; i < 3; ++i)
       if (directions[i]->isChecked())
         panels.push_back(
-            {directions[i]->text(), colorsRose[i],
+            {directions[i]->text(), QColor::fromRgb(colors.color(.2 + .3 * i, QCPRange(0., 1.))),
              ProfileAnalysis::rose(angles[i], binValues[bins->currentIndex()], equalStations->isChecked())});
-    roses->setPanels(std::move(panels), ProfileWindow::tr("%1 · %2–%3 s · axial directions, north = 0°")
-                                            .arg(roseBand->currentText())
-                                            .arg(low, 0, 'g', 5)
-                                            .arg(high, 0, 'g', 5));
+    roses->setPanels(std::move(panels),
+                     ProfileWindow::tr("%1 · %2–%3 s · 0° = %4")
+                         .arg(roseBand->currentText())
+                         .arg(low, 0, 'g', 5)
+                         .arg(high, 0, 'g', 5)
+                         .arg(frame()),
+                     rotate->isChecked());
   }
   void saveCsv() {
     const auto path = QFileDialog::getSaveFileName(owner, ProfileWindow::tr("Export profile stations"),
@@ -720,6 +910,9 @@ struct ProfileWindow::Impl {
         << "; origin_easting_m=" << coordinates.origin_easting
         << "; origin_northing_m=" << coordinates.origin_northing << '\n';
     out << "# corridor_half_width_km=" << distance->value() << '\n';
+    out << "# displayed_data_x_axis=" << frame()
+        << "; strike_mode=" << (rotate->isChecked() ? strikeMode->currentText() : ProfileWindow::tr("Off"))
+        << '\n';
     for (const auto &p : vertices)
       out << "# vertex_east_km=" << p[0] << ",north_km=" << p[1] << '\n';
     out << "station,along_km,offset_km,latitude,longitude\n";
@@ -760,7 +953,7 @@ struct ProfileWindow::Impl {
           if (i % 2 == 0 || quantities->currentIndex() != 2)
             pages.push_back({i < 2 ? ProfileWindow::tr("Apparent resistivity") : ProfileWindow::tr("Phase"),
                              sections[i]});
-        pages.push_back({ProfileWindow::tr("Phase tensor ellipses — glyph up = north"), tensors});
+        pages.push_back({ProfileWindow::tr("Phase tensor ellipses — glyph up = %1").arg(frame()), tensors});
         pages.push_back({ProfileWindow::tr("Strike direction roses"), roses});
         for (unsigned i = 0; i < pages.size(); ++i) {
           if (i && !pdf.newPage()) {
@@ -816,6 +1009,7 @@ void ProfileWindow::setData(const std::shared_ptr<MTSurveyData> &survey,
   const auto previous = s.coordinates.description();
   if (changed) {
     s.vertices.clear();
+    s.selectedStation.clear();
     s.automaticDistance = true;
   }
   s.survey = survey;

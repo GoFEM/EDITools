@@ -31,9 +31,9 @@ const char *name(Quantity q) {
 bool Sample::usable() const { return std::isfinite(period) && period > 0. && finite(impedance) && std::abs(impedance) > 0.; }
 double Sample::resistivity() const { return usable() ? std::norm(impedance) * period / (2. * pi * mu) : NAN; }
 double Sample::phase() const { return usable() ? std::arg(impedance) * 180. / pi : NAN; }
-Sample sample(const MTStationData &station, Quantity quantity, unsigned f) {
+Sample sample(const MTStationData &station, Quantity quantity, unsigned f, double clockwiseDegrees) {
   Sample sample;
-  if(f >= station.frequencies().size()) return sample;
+  if(f >= station.frequencies().size() || !std::isfinite(clockwiseDegrees)) return sample;
   const double frequency = station.frequencies()[f];
   if(!std::isfinite(frequency) || frequency <= 0.) return sample;
   sample.period = 1. / frequency;
@@ -46,7 +46,28 @@ Sample sample(const MTStationData &station, Quantity quantity, unsigned f) {
     z[c] = {r, i}; errors[c] = e;
   }
   const unsigned component = unsigned(quantity);
-  if(component < 4) {
+  const double angle = std::remainder(clockwiseDegrees, 180.) * pi / 180.;
+  if(component < 4 && angle != 0.) {
+    double c = std::cos(angle), s = std::sin(angle);
+    if(std::abs(c) < 1e-14) c = 0.;
+    if(std::abs(s) < 1e-14) s = 0.;
+    const double rotation[2][2]{{c, s}, {-s, c}};
+    Complex value{}; double variance = 0.;
+    for(unsigned k = 0; k < 4; ++k) {
+      const double weight = rotation[component / 2][k / 2] * rotation[component % 2][k % 2];
+      if(weight == 0.) continue;
+      if(!valid[k]) return sample;
+      value += weight * z[k];
+      variance += std::isfinite(errors[k]) && errors[k] >= 0. ? weight * weight * errors[k] * errors[k] : NAN;
+    }
+    sample.impedance = (quantity == Quantity::YX ? -1. : 1.) * value;
+    sample.error = std::sqrt(variance);
+    if(sample.usable()) {
+      const double relative = sample.error / std::abs(sample.impedance);
+      sample.rhoError = 2. * sample.resistivity() * relative;
+      sample.phaseError = relative * 180. / pi;
+    }
+  } else if(component < 4) {
     if(valid[component]) { sample.impedance = (quantity == Quantity::YX ? -1. : 1.) * z[component]; sample.error = errors[component];
       double value;
       station.scalar_value(rho[component], f, value, sample.rhoError);

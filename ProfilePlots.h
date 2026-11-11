@@ -11,13 +11,22 @@ struct ProfileGlyph {
 };
 
 class ProfileSectionPlot : public QCustomPlot {
+  Q_OBJECT
 public:
   explicit ProfileSectionPlot(QWidget *parent = nullptr);
+  void setStations(const std::vector<ProfileAnalysis::Offset> &stations, double cellWidth);
+  void setSelectedStation(const QString &name);
+  void setReference(const QString &up);
   void setSamples(std::vector<ProfileGlyph> samples, bool frequency, bool ellipses, bool cells,
                   double glyphSize, const QString &label, QCPColorGradient colors, QCPRange range,
                   bool logarithmic);
 
+signals:
+  void stationClicked(const QString &name);
+
 private:
+  QPoint pressPosition;
+  bool dragged = false;
   class Canvas;
   Canvas *canvas;
   QCPColorScale *scale;
@@ -31,7 +40,7 @@ public:
     ProfileAnalysis::Rose histogram;
   };
   explicit ProfileRosePlot(QWidget *parent = nullptr);
-  void setPanels(std::vector<Panel> panels, const QString &title);
+  void setPanels(std::vector<Panel> panels, const QString &title, bool strikeFrame = false);
 
 private:
   class Canvas;

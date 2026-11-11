@@ -83,6 +83,7 @@ MapBackground::MapBackground(QCustomPlot *plot): QCPLayerable(plot) {
   terrain = new TopographyLayer(plot);
   if(!plot->layer("geography")) plot->addLayer("geography", plot->layer("grid"), QCustomPlot::limBelow);
   setLayer("geography");
+  setLayers(availableLayers());
 }
 void MapBackground::setCoordinates(const SurveyCoordinates &value, double units) {
   terrain->setCoordinates(value, units);

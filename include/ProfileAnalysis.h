@@ -2,6 +2,7 @@
 #define EDITOOLS_PROFILE_ANALYSIS_H
 
 #include <array>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -34,5 +35,12 @@ struct Rose {
   double mean = 0., concentration = 0.; // Axial circular mean; NaN when undefined.
 };
 Rose rose(const std::vector<Direction> &directions, unsigned binDegrees, bool equalStations);
+struct Strike {
+  double degrees = std::numeric_limits<double>::quiet_NaN(), concentration = 0.;
+  unsigned samples = 0, stations = 0;
+};
+// Principal-axis mean modulo 90 degrees, using the fourth circular moment.
+// The perpendicular branch remains ambiguous; no data are rotated here.
+Strike estimateStrike(const std::vector<Direction> &directions, bool equalStations);
 } // namespace ProfileAnalysis
 #endif

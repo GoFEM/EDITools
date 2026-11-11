@@ -183,7 +183,7 @@ MainWindow::MainWindow(QWidget *parent) :
   mapStationNames = new QCheckBox(tr("Station names"), mapControls);
   mapStationNames->setObjectName("stationMapNames");
   mapActions->addWidget(mapStationNames);
-  auto *layersButton = MapBackground::button(mapControls, 0, [this](int layers) { mapBackground->setLayers(layers); ui->mapPlot->replot(); });
+  auto *layersButton = MapBackground::button(mapControls, mapBackground->layers(), [this](int layers) { mapBackground->setLayers(layers); ui->mapPlot->replot(); });
   mapActions->addWidget(layersButton);
   auto *layersAction = ui->menuCoordinates->addAction(tr("Map layers…"));
   layersAction->setObjectName("actionMap_layers");
@@ -202,9 +202,15 @@ MainWindow::MainWindow(QWidget *parent) :
   connect(mapStationNames, &QCheckBox::toggled, ui->actionShow_station_names, &QAction::setChecked);
   connect(mapsButton, &QPushButton::clicked, ui->actionPeriod_maps, &QAction::trigger);
   connect(ui->actionPeriod_maps, &QAction::changed, mapsButton, [this, mapsButton] { mapsButton->setEnabled(ui->actionPeriod_maps->isEnabled()); });
-  auto *profileAction = ui->menuCoordinates->addAction(tr("Profile analysis…"));
+  auto *profileAction = ui->menuCoordinates->addAction(tr("2D profile analysis…"));
   profileAction->setObjectName("actionProfile_analysis");
   profileAction->setToolTip(tr("Draw a profile corridor and view resistivity, phase, tensor sections and strike roses."));
+  auto *profileButton = new QPushButton(tr("2D profile…"), mapControls);
+  profileButton->setObjectName("openProfile");
+  profileButton->setToolTip(profileAction->toolTip());
+  mapActions->addWidget(profileButton);
+  connect(profileButton, &QPushButton::clicked, profileAction, &QAction::trigger);
+  connect(profileAction, &QAction::changed, profileButton, [profileButton, profileAction] { profileButton->setEnabled(profileAction->isEnabled()); });
   connect(profileAction, &QAction::triggered, this, [this] {
     const bool first = !profile;
     if(first) profile = new ProfileWindow(this, [this](std::shared_ptr<MTSurveyData> data) { openSurveyCopy(std::move(data)); });
@@ -380,7 +386,7 @@ void MainWindow::setupRibbon()
       {tr("Data fit"), {command("actionFit_statistics", tr("Statistics / RMS"), "data-histogram", true)}}}},
     {tr("&Maps"), {
       {tr("Coordinates"), {command("actionConvert_UTM", tr("UTM / origin"), "my-location", true), command("actionGeographic_coordinates", tr("Geographic"), "globe", true)}},
-      {tr("Survey maps"), {command("actionPeriod_maps", tr("PT / induction"), "map", true), command("actionProfile_analysis", tr("Profile"), "map", true), command("actionShow_station_names", tr("Station names"), "text-field")}},
+      {tr("Survey maps"), {command("actionPeriod_maps", tr("PT / induction"), "map", true), command("actionProfile_analysis", tr("2D profile"), "map", true), command("actionShow_station_names", tr("Station names"), "text-field")}},
       {tr("Background"), {command("actionMap_layers", tr("Map layers"), "layer"), command("actionTopography", tr("Topography"), "mountain-location-top", true)}}}},
     {tr("&Report"), {
       {tr("Export figures"), {command("actionExport_survey_report", tr("Survey PDF"), "document-pdf", true), command("actionSave_as_PDF", tr("Plot image"), "image")}},

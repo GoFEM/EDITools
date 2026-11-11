@@ -136,4 +136,12 @@ Rose rose(const std::vector<Direction> &directions, unsigned binDegrees, bool eq
   }
   return result;
 }
+Strike estimateStrike(const std::vector<Direction> &directions, bool equalStations) {
+  std::vector<Direction> doubled;
+  doubled.reserve(directions.size());
+  for (const auto &direction : directions)
+    doubled.push_back({direction.station, 2. * direction.degrees});
+  const auto axes = rose(doubled, 10, equalStations);
+  return {axes.mean * .5, axes.concentration, axes.samples, axes.stations};
+}
 } // namespace ProfileAnalysis

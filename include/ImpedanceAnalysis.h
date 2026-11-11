@@ -17,7 +17,11 @@ struct Sample {
   double phase() const; // Degrees, without folding anomalous phases.
 };
 // A single frequency index, with the same masks, conventions and errors as curve().
-Sample sample(const MTStationData &station, Quantity quantity, unsigned frequencyIndex);
+// Optional clockwise rotation of the horizontal data axes: Z' = R Z R^T.
+// Only contributing unmasked components are used; errors propagate independently.
+// Rotational invariants retain their original values and uncertainties.
+Sample sample(const MTStationData &station, Quantity quantity, unsigned frequencyIndex,
+              double clockwiseDegrees = 0.);
 // Keeps missing/masked periods as NaNs so plots do not bridge missing samples.
 std::vector<Sample> curve(const MTStationData &station, Quantity quantity);
 

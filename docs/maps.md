@@ -79,6 +79,10 @@ The tensor geometry follows
 
 ## Geographic map layers
 
+Available Natural Earth layers are enabled by default: coastlines, country and
+state/province boundaries, rivers and lakes. Use **Map layers…** to turn individual
+layers off. OpenStreetMap remains optional and starts disabled.
+
 **Map layers…** adds optional coastlines, country boundaries, state/province
 boundaries, and rivers/lakes to station maps, RMS maps and period maps. Each layer
 has one checkbox. Report export has the same menu and applies its choices to all

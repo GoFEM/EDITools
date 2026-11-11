@@ -4,11 +4,13 @@
 
 - [Draw and select](#draw-and-select)
 - [Resistivity and phase sections](#resistivity-and-phase-sections)
+- [Rotate to strike](#rotate-to-strike)
 - [Phase-tensor section](#phase-tensor-section)
 - [Strike roses](#strike-roses)
 - [Extract and export](#extract-and-export)
 
-Open **Maps → Profile** to draw a corridor and inspect the stations along it.
+Open **Maps → 2D profile**, or click **2D profile…** beside the station map,
+to draw a corridor and inspect the stations along it.
 The source survey, coordinates, errors and masks are unchanged.
 
 ## Draw and select
@@ -40,37 +42,84 @@ Select observed data or a loaded calculated response under **Data**. Calculated
 stations are matched by name to the corridor's observed stations. Choose
 **XY / YX**, **Berdichevsky / SSQ**, or **Determinant**. These use the same complex
 impedance definitions as [survey averages](analysis.md#survey-impedance-averages).
-YX is sign-reversed; components are not rotated into the profile direction.
+YX is sign-reversed. Components use their original axes unless **Rotate to strike** is checked.
 
 Horizontal position is cumulative profile distance. **Vertical** switches between
 period and frequency; longer periods always lie lower. The **Periods (s)** bounds
 filter all sections and roses. Section axes pan and zoom together, including
-the tensor section. Hover over a sample to identify its station, period and value.
+the tensor section. Small vertical station labels above each section follow the distance axis; zoom
+in to separate crowded labels.
+Click a column to highlight its station on the map and select and scroll to its
+row in the table. Selecting a table row also updates the map and column highlight.
+Dragging pans without changing the selected station. Hover over a sample to
+identify its station, period and value.
 
 **Cells** paints bounded cells around measured samples; uncheck it for markers.
 There is no interpolation. Masked and missing samples stay blank. **Gap ratio**
 limits a cell's width in logarithmic period, and station cells are capped by the
 survey's median nearest-neighbour spacing. Large gaps therefore remain blank.
-Stations with identical along-profile distances overlap; narrow the corridor
-or use the table to identify them.
+Stations with identical along-profile distances overlap. Their label names the
+frontmost station and counts the additional sites; select each site separately
+in the table, or narrow the corridor. Long labels are shortened to fit; hover over
+a sample or use the table for the full station name.
 
 Choose the palette and separate resistivity/phase color limits. Resistivity
 colors are logarithmic, phase colors linear; values beyond the limits use the
 endpoint colors. Changing color limits never changes masks.
 
+## Rotate to strike
+
+Check **Rotate to strike** to rotate the displayed transfer-function axes while
+keeping the drawn line, station positions, offsets and distances fixed. Angles
+are clockwise from north, assuming the stored x/y channels already use common
+north/east axes. This is a display transformation; the original survey, masks,
+error floors and calculated responses remain unchanged.
+
+**Auto (observed)** is the default angle source. It uses usable observed phase
+tensors from the corridor, within the selected period range and rose band. The
+skew and ellipticity thresholds always apply to this estimate, even if **Filter
+PT** is unchecked for the rose. Nearly circular, singular, masked and missing
+tensors are excluded. **Equal stations** gives each station total weight one;
+otherwise each eligible station-period sample has equal weight.
+
+The estimate averages principal-axis directions modulo 90° using the fourth
+circular moment. Its station count and concentration **R₄** indicate agreement,
+not statistical confidence; values below 0.25 are flagged as weak agreement.
+The two possible strike axes retain a 90° ambiguity: **+90°** chooses the other
+axis. Use **Manual** to enter a preferred angle. If no automatic estimate is
+available, rotated plots stay blank and PDF export is disabled; choose Manual
+or uncheck rotation to restore the original-frame view.
+
+With rotation enabled, primed XY/YX quantities use the selected strike axes:
+`Z′ = R Z Rᵀ`, with the new x axis along the chosen strike. Rotated components
+require every contributing input component to be usable; a quarter-turn only
+needs the corresponding original component. Current effective impedance errors
+propagate through the rotation without resetting error floors. Berdichevsky,
+SSQ and determinant averages are rotation-invariant and retain their original
+values and uncertainties.
+
+Tensor orientations and tipper-derived directions rotate into the same frame.
+Ellipse up and rose 0° mean the chosen x/strike axis; right is the y axis at
++90°. Rose cardinal labels change to x/y. Tipper validity is independent of
+impedance masks. The selected frame is recorded in plot/PDF headings and the
+station CSV header. **Open as survey** still extracts the original data.
+
 ## Phase-tensor section
 
-The **Phase tensors** tab places an ellipse at each usable station-period sample.
+The **Phase tensors / strike** tab shows the tensor section and strike roses together.
+Drag the divider to resize them. Its **Colormap** selector changes the tensor
+colors and the rose colors; the resistivity/phase tab uses the same palette.
+The tensor section places an ellipse at each usable station-period sample.
 Choose maximum phase, minimum phase or skew for its color; adjust the color limits
 and ellipse size. Ellipse geometry remains independent of the plot aspect ratio.
-Within each glyph, up is geographic north and right is east. The vertical axis
+Within each glyph, up is the data x axis (north unless rotated) and right is the y axis. The vertical axis
 represents period or frequency, not depth. Masked, missing and singular tensors
 are omitted using the same validity checks as the period maps.
 
 ## Strike roses
 
 Enable **PT azimuth**, **Real tipper normal** and/or **Imaginary tipper normal**.
-North is 0°, clockwise is positive. Each rose bins axial directions over 0–180°
+North is 0° before rotation; after rotation the chosen strike/x axis is 0°. Clockwise is positive. Each rose bins axial directions over 0–180°
 and mirrors them into the opposite half of the circle. The outer-ring scale is
 shared across visible roses; percentages refer to the original axial bins.
 
@@ -100,7 +149,7 @@ resistivity/phase panels, tensor section and enabled roses using the current
 selection, color limits and plot ranges. Map attributions are retained. Neither
 export includes local file paths.
 
-The line remains available while the window is open and updates after data/mask
+The line and rotation controls remain available while the window is open and updates after data/mask
 edits. Loading another survey or changing its projection clears the line. Profile
 geometry is not stored in project files; keep the CSV to record the selection.
 

@@ -206,7 +206,7 @@ FitStatisticsWindow::FitStatisticsWindow(QWidget *parent, std::function<void()> 
   mapA = makePlot("fitMapA", tr("Station nRMS"), "", "");
   mapB = makePlot("fitMapB", tr("Station nRMS"), "", "");
   backgroundA = new MapBackground(mapA); backgroundB = new MapBackground(mapB);
-  colorLayout->addWidget(MapBackground::button(this, 0, [this](int mask) {
+  colorLayout->addWidget(MapBackground::button(this, backgroundA->layers(), [this](int mask) {
     backgroundA->setLayers(mask); backgroundB->setLayers(mask); mapA->replot(); mapB->replot();
   }), 0, 6);
   heatA = makePlot("fitHeatmapA", tr("Station / period nRMS"), tr("Period (s)"), tr("Station"));

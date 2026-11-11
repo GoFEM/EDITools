@@ -46,6 +46,35 @@ void invariants() {
     near(a.resistivity(),b.resistivity()); near(a.phase(),b.phase());
   }
 }
+void rotations() {
+  const std::array<Complex,4> z{{{.2,.1},{2.,3.},{-4.,2.},{.7,-.2}}};
+  auto original = station(z);
+  original.calculate_apparent_resistivity(); original.calculate_phase(); original.set_error_floor(.05);
+  const auto before = sample(original, Quantity::XY, 0);
+  const double radians = 30. * pi / 180., c = std::cos(radians), s = std::sin(radians);
+  const Complex expected = -c*s*z[0] + c*c*z[1] - s*s*z[2] + c*s*z[3];
+  auto rotated = sample(original, Quantity::XY, 0, 30.);
+  near(rotated.impedance.real(), expected.real()); near(rotated.impedance.imag(), expected.imag());
+  double variance = 0.; const double weights[]{-c*s,c*c,-s*s,c*s};
+  const RealDataType types[]{RealZxx,RealZxy,RealZyx,RealZyy};
+  for(unsigned k=0;k<4;++k){double value,error;original.scalar_value(types[k],0,value,error);variance+=weights[k]*weights[k]*error*error;}
+  near(rotated.error,std::sqrt(variance));
+  near(rotated.rhoError,2.*rotated.resistivity()*rotated.error/std::abs(rotated.impedance));
+  near(rotated.phaseError,180./pi*rotated.error/std::abs(rotated.impedance));
+  near(sample(original,Quantity::XY,0,90.).impedance.real(),-z[2].real());
+  near(sample(original,Quantity::YX,0,90.).impedance.imag(),z[1].imag());
+  for(auto q:{Quantity::SSQ,Quantity::Berdichevsky,Quantity::Determinant}){
+    const auto a=sample(original,q,0), b=sample(original,q,0,37.);
+    near(a.resistivity(),b.resistivity());near(a.phase(),b.phase());near(a.error,b.error);
+  }
+  near(sample(original,Quantity::XY,0,180.).rhoError,before.rhoError);
+  near(sample(original,Quantity::XY,0).error,before.error);
+  original.set_data_mask(RealZxx,1.,false);
+  check(!sample(original,Quantity::XY,0,30.).usable(),"Rotation uses masked contributors");
+  check(sample(original,Quantity::XY,0,90.).usable(),"Quarter-turn requires an unrelated masked diagonal");
+  check(sample(original,Quantity::Berdichevsky,0,30.).usable(),"Invariant needs unnecessary rotation contributors");
+  check(!sample(original,Quantity::XY,0,NAN).usable(),"Unavailable rotation silently uses original axes");
+}
 void averaging() {
   auto a=halfspace(1.,10.), b=halfspace(1.,1000.);
   auto mean=regionalMean({{a},{b}}); near(mean[0].resistivity,100.); near(mean[0].phase,45.); check(mean[0].stations==2,"Wrong count");
@@ -122,6 +151,6 @@ void outliers() {
 }
 }
 int main() {
-  try { invariants(); averaging(); rho(); outliers(); std::cout<<"Impedance analysis checks passed.\n"; }
+  try { invariants(); rotations(); averaging(); rho(); outliers(); std::cout<<"Impedance analysis checks passed.\n"; }
   catch(const std::exception &e) { std::cerr<<e.what()<<'\n'; return 1; }
 }

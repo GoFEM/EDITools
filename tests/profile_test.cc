@@ -63,6 +63,21 @@ void calculations() {
   check(near(rose({{"A", 0}, {"A", 0}, {"A", 0}, {"B", 90}}, 10, false).percent[0], 75),
         "Sample weighting wrong");
 }
+void strikeEstimation() {
+  using namespace ProfileAnalysis;
+  const auto crossing = estimateStrike({{"A", 89.}, {"B", 1.}, {"C", NAN}}, true);
+  check(crossing.samples == 2 && crossing.stations == 2 &&
+            (crossing.degrees < 1e-8 || crossing.degrees > 90. - 1e-8) && crossing.concentration > .99,
+        "Strike wrap or invalid samples mishandled");
+  const auto perpendicular = estimateStrike({{"A", 10.}, {"B", 100.}}, true);
+  check(near(perpendicular.degrees, 10.) && near(perpendicular.concentration, 1.),
+        "Perpendicular PT axes must infer the same strike family");
+  check(std::isnan(estimateStrike({{"A", 0.}, {"B", 45.}}, true).degrees),
+        "Undefined strike reported as a direction");
+  const std::vector<Direction> uneven{{"A", 10.}, {"A", 10.}, {"A", 10.}, {"B", 40.}};
+  check(near(estimateStrike(uneven, true).degrees, 25.) && estimateStrike(uneven, false).degrees < 25.,
+        "Strike station weighting ignored");
+}
 void click(QCustomPlot *map, double x, double y) {
   QPointF point(map->xAxis->coordToPixel(x), map->yAxis->coordToPixel(y));
   QMouseEvent down(QEvent::MouseButtonPress, point, point, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
@@ -133,10 +148,98 @@ void dialog(const QString &directory) {
        *pt = control<QCustomPlot>(window, "profileTensorPlot");
   check(xy->property("profileSampleCount").toUInt() == 9 && yx->property("profileSampleCount").toUInt() == 9,
         "Sections lost samples");
+  auto *rotate = control<QCheckBox>(window, "profileRotateStrike");
+  auto *strikeMode = control<QComboBox>(window, "profileStrikeMode");
+  auto *strikeAngle = control<QDoubleSpinBox>(window, "profileStrikeAngle");
+  check(!rotate->isChecked() && strikeMode->currentIndex() == 0 && strikeAngle->isReadOnly() &&
+            (std::abs(strikeAngle->value()) < .01 || std::abs(strikeAngle->value() - 90.) < .01),
+        "Automatic observed strike default wrong");
+  const auto mapPosition = map->graph(1)->data()->at(1)->value;
+  rotate->setChecked(true);
+  control<QPushButton>(window, "profileSwapStrike")->click();
+  check(xy->property("profileSampleCount").toUInt() == 9, "Automatic axis swap loses data");
+  strikeMode->setCurrentIndex(1);
+  strikeAngle->setValue(45.);
+  survey->get_station_data("B").set_data_mask(RealZxx, .1, false);
+  window.setData(survey, responses);
+  check(xy->property("profileSampleCount").toUInt() == 8 &&
+            yx->property("profileSampleCount").toUInt() == 8 &&
+            near(map->graph(1)->data()->at(1)->value, mapPosition) && table->rowCount() == 3,
+        "Rotation ignores required masks or moves the corridor");
+  auto *ptDirections = control<QCheckBox>(window, "profileDirection0");
+  ptDirections->setChecked(false);
+  check(control<QCustomPlot>(window, "profileRosePlot")->property("profileDirectionCount").toUInt() == 9,
+        "Impedance rotation masks leaked into tipper directions");
+  ptDirections->setChecked(true);
+  strikeAngle->setValue(90.);
+  check(xy->property("profileSampleCount").toUInt() == 9 && yx->property("profileSampleCount").toUInt() == 9,
+        "Quarter-turn masks unrelated components");
+  rotate->setChecked(false);
+  check(!survey->get_station_data("B").impedance_mask()[0][1], "Display rotation changed source masks");
+  survey->get_station_data("B").set_data_mask(RealZxx, .1, true);
+  strikeMode->setCurrentIndex(0);
+  control<QPushButton>(window, "profileSwapStrike")->click();
+  window.setData(survey, responses);
+  rotate->setChecked(true);
+  auto *minShape = control<QDoubleSpinBox>(window, "profileMinEllipticity");
+  const double oldShape = minShape->value();
+  minShape->setValue(1.);
+  check(xy->property("profileSampleCount").toUInt() == 0 &&
+            !control<QPushButton>(window, "profileSavePdf")->isEnabled(),
+        "Unavailable automatic strike silently uses unrotated data");
+  minShape->setValue(oldShape);
+  rotate->setChecked(false);
+  check(xy->property("profileSampleCount").toUInt() == 9, "Rotation recovery loses original data");
+  auto labels = qSharedPointerDynamicCast<QCPAxisTickerText>(xy->xAxis2->ticker());
+  check(labels && labels->ticks().size() == 3 && labels->ticks().values().contains("B") &&
+            xy->xAxis2->tickLabelFont().pointSize() == 7,
+        "Station annotations missing");
+  const double bOffset = table->item(1, 1)->text().toDouble();
+  click(xy, bOffset, 10.);
+  check(table->currentRow() == 1 && table->selectionModel()->selectedRows().size() == 1 &&
+            map->graph(3)->dataCount() == 1,
+        "Clicking a column does not select its map/table station");
+  const auto bPosition = projection.transform({survey->get_station_data("B").position()})[0];
+  check(near(map->graph(3)->data()->at(0)->key, bPosition[1] / 1000.) &&
+            near(map->graph(3)->data()->at(0)->value, bPosition[0] / 1000.),
+        "Highlighted map station is wrong");
+  const auto dragRange = xy->xAxis->range();
+  const QPointF dragStart(xy->xAxis->coordToPixel(bOffset), xy->yAxis->coordToPixel(10.));
+  const QPointF dragEnd = dragStart + QPointF(25, 0);
+  QMouseEvent down(QEvent::MouseButtonPress, dragStart, dragStart, Qt::LeftButton, Qt::LeftButton,
+                   Qt::NoModifier);
+  QMouseEvent move(QEvent::MouseMove, dragEnd, dragEnd, Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+  QMouseEvent up(QEvent::MouseButtonRelease, dragEnd, dragEnd, Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+  QApplication::sendEvent(xy, &down);
+  QApplication::sendEvent(xy, &move);
+  QApplication::sendEvent(xy, &up);
+  check(table->currentRow() == 1, "Panning changes station selection");
+  xy->xAxis->setRange(dragRange);
+  auto *tabs = control<QTabWidget>(window, "profileTabs");
+  check(tabs->count() == 2, "Tensor and strike views are not combined");
+  tabs->setCurrentIndex(1);
+  QApplication::processEvents();
+  check(pt->isVisible() && control<QCustomPlot>(window, "profileRosePlot")->isVisible(),
+        "Combined tab hides a plot");
+  auto *tensorPalette = control<QComboBox>(window, "profileTensorPalette");
+  const auto beforeColor = pt->findChild<QCPColorScale *>()->gradient().color(.5, QCPRange(0, 1));
+  tensorPalette->setCurrentIndex((tensorPalette->currentIndex() + 1) % tensorPalette->count());
+  check(control<QComboBox>(window, "profilePalette")->currentIndex() == tensorPalette->currentIndex() &&
+            beforeColor != pt->findChild<QCPColorScale *>()->gradient().color(.5, QCPRange(0, 1)),
+        "Combined-tab colormap does not update plots");
+  click(pt, table->item(2, 1)->text().toDouble(), 10.);
+  check(table->currentRow() == 2 && table->item(2, 0)->text() == "C", "Tensor column selection failed");
+  table->setCurrentCell(0, 0);
+  const auto aPosition = projection.transform({survey->get_station_data("A").position()})[0];
+  check(near(map->graph(3)->data()->at(0)->value, aPosition[0] / 1000.),
+        "Table selection does not update map");
+  tabs->setCurrentIndex(0);
+  QApplication::processEvents();
   const auto yRange = xy->yAxis->range();
   check(xy->yAxis->rangeReversed(), "Period direction wrong");
   xy->xAxis->setRange(.2, 1.5);
-  check(near(yx->xAxis->range().lower, .2) && near(pt->xAxis->range().upper, 1.5),
+  check(near(xy->xAxis2->range().lower, .2) && near(yx->xAxis->range().lower, .2) &&
+            near(pt->xAxis->range().upper, 1.5),
         "Section axes are not linked");
   survey->get_station_data("B").set_data_mask(RealZxy, .1, false);
   window.setData(survey, responses);
@@ -156,6 +259,7 @@ void dialog(const QString &directory) {
         "Tipper rose missing");
   control<QPushButton>(window, "profileReverse")->click();
   check(table->item(0, 0)->text() == "C", "Reverse order wrong");
+  check(table->currentRow() == 2 && table->item(2, 0)->text() == "A", "Reverse changes highlighted station");
   control<QPushButton>(window, "profileExtract")->click();
   check(extracted && extracted->get_stations_names().size() == 3 && survey->get_stations_names().size() == 4,
         "Extraction modifies original survey");
@@ -173,13 +277,12 @@ void dialog(const QString &directory) {
     control<QTabWidget>(window, "profileTabs")->setCurrentIndex(1);
     QApplication::processEvents();
     window.grab().save(artifacts + "/profile-tensors.png");
-    control<QTabWidget>(window, "profileTabs")->setCurrentIndex(2);
-    QApplication::processEvents();
-    window.grab().save(artifacts + "/profile-roses.png");
+
     QFile::copy(directory + "/profile.pdf", artifacts + "/profile.pdf");
   }
   control<QPushButton>(window, "profileClear")->click();
-  check(table->rowCount() == 0 && !control<QPushButton>(window, "profileExtract")->isEnabled(),
+  check(table->rowCount() == 0 && map->graph(3)->dataCount() == 0 &&
+            !control<QPushButton>(window, "profileExtract")->isEnabled(),
         "Clear leaves selection");
 }
 } // namespace
@@ -188,6 +291,7 @@ int main(int argc, char **argv) {
   QApplication app(argc, argv);
   try {
     calculations();
+    strikeEstimation();
     QTemporaryDir directory;
     check(directory.isValid(), "Temporary directory failed");
     QSettings::setDefaultFormat(QSettings::IniFormat);

@@ -137,7 +137,7 @@ PeriodMapWindow::PeriodMapWindow(QWidget *parent, std::function<void()> changed)
 
   plot = new QCustomPlot(this); plot->setObjectName("periodMapPlot");
   background = new MapBackground(plot);
-  layers->insertWidget(4, MapBackground::button(this, 0, [this](int mask) { background->setLayers(mask); plot->replot(); }));
+  layers->insertWidget(4, MapBackground::button(this, background->layers(), [this](int mask) { background->setLayers(mask); plot->replot(); }));
   plot->setMinimumSize(650, 450);
   plot->setInteractions(QCP::iRangeDrag | QCP::iRangeZoom);
   plot->plotLayout()->insertRow(0);

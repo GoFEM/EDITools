@@ -342,6 +342,11 @@ void map_backgrounds(const QString &directory)
   auto *background = new MapBackground(&plot);
   plot.xAxis->setRange(-125., -65.); plot.yAxis->setRange(25., 55.);
   auto render = [&] { return plot.toPixmap(800, 600).toImage(); };
+  check(background->layers() == 15, "Available offline layers are not enabled by default");
+  auto *defaults = MapBackground::button(&parent, background->layers(), [](int) {})->menu();
+  for(auto *action: defaults->actions()) if(action->isCheckable())
+    check(action->isChecked() == (action->data().toInt() <= 8), "Default layer controls differ from the map or enable online tiles");
+  background->setLayers(0);
   const auto empty = render(); const auto x = plot.xAxis->range(), y = plot.yAxis->range();
   for(int layer: {1, 2, 4, 8}) {
     background->setLayers(layer);

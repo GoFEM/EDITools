@@ -38,6 +38,7 @@
 
 - [Draw and select](profiles.md#draw-and-select)
 - [Resistivity and phase sections](profiles.md#resistivity-and-phase-sections)
+- [Rotate to strike](profiles.md#rotate-to-strike)
 - [Phase-tensor section](profiles.md#phase-tensor-section)
 - [Strike roses](profiles.md#strike-roses)
 - [Extract and export](profiles.md#extract-and-export)
