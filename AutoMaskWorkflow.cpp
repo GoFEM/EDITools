@@ -1,6 +1,7 @@
 #include "AutoMaskWorkflow.h"
 #include "AutoMaskDialog.h"
 #include "AutoMaskSettings.h"
+#include "include/WorkspaceView.h"
 #include "include/MTDataPlot.h"
 #include "include/MTSurveyData.h"
 #include "include/SurveyHistory.h"
@@ -45,13 +46,19 @@ AutoMaskWorkflow::AutoMaskWorkflow(QMainWindow &window, SurveyHistory &history,
   connect(timer, &QTimer::timeout, this, &AutoMaskWorkflow::analyseCurrent);
   connect(preview, &QAction::toggled, this, [this] { refresh(); });
   for(auto *a : {pair, link}) connect(a, &QAction::toggled, this, [this] { refresh(); });
-  connect(settings, &QAction::triggered, this, [this] { if(editAutoMaskSettings(&this->window, options)) { syncOptions(); refresh(); } });
+  connect(settings, &QAction::triggered, this, &AutoMaskWorkflow::settingsRequested);
   connect(details, &QAction::triggered, this, &AutoMaskWorkflow::review);
   connect(previous, &QAction::triggered, this, [this] { emit navigateRequested(-1); });
   connect(next, &QAction::triggered, this, [this] { emit navigateRequested(1); });
   connect(apply, &QAction::triggered, this, [this] { applyCurrent(false); });
   connect(applyNext, &QAction::triggered, this, [this] { applyCurrent(true); });
   connect(batch, &QAction::triggered, this, &AutoMaskWorkflow::applySelected);
+  settingsWorkspace = new WorkspaceView(&window); settingsWorkspace->hide(); settingsWorkspace->setEmbedded();
+  settingsEditor = new AutoMaskSettings(options, settingsWorkspace);
+  settingsEditor->moveToRibbon(*settingsWorkspace, tr("Mask settings"));
+  connect(settingsEditor, &AutoMaskSettings::changed, this, [this] { options = settingsEditor->options(); syncOptions(); refresh(); });
+  settingsWorkspace->setStateRefresh([this] { emit settingsEditor->changed(); });
+
   refresh();
 }
 void AutoMaskWorkflow::setData(std::shared_ptr<MTSurveyData> data, const QString &station) {
@@ -68,6 +75,7 @@ void AutoMaskWorkflow::paint(const AutoMask::Edits &edits) {
   for(const auto &plot : plots) plot->set_mask_preview(found == edits.end() ? empty : found->second);
 }
 void AutoMaskWorkflow::refresh() {
+  if(settingsEditor) settingsEditor->setOptions(options);
   ++revision; timer->stop(); pending.clear(); paint({}); updateActions();
   status->setText(current.empty() ? QString() : preview->isChecked() ?
     tr("Auto mask · %1: pending").arg(QString::fromStdString(current)) : tr("Station: %1").arg(QString::fromStdString(current)));
@@ -135,13 +143,5 @@ void AutoMaskWorkflow::applySelected() {
   } catch(const std::exception &e) { window.statusBar()->showMessage(QString::fromUtf8(e.what()), 10000); }
   busy = false; refresh();
 }
-void AutoMaskWorkflow::review() {
-  if(!survey) return;
-  auto targets = selected; if(targets.empty() && survey->is_station_present(current)) targets.insert(current);
-  timer->stop();
-  bool paired = pair->isChecked();
-  if(reviewAutoMasks(&window, *survey, targets, link->isChecked(), options.rhoPlus, &options, &paired)) {
-    history.record(tr("Auto masking")); emit masksApplied();
-  }
-  pair->setChecked(paired); syncOptions(); refresh();
-}
+void AutoMaskWorkflow::review() { if(survey) emit reviewRequested(); }
+bool AutoMaskWorkflow::pairDiagonals() const { return pair->isChecked(); }

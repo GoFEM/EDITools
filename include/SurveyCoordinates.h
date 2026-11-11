@@ -19,6 +19,7 @@ struct SurveyCoordinates
   static SurveyCoordinates calculate(const std::vector<std::array<double, 3>> &geographic,
                                      int zone, bool north, bool centered);
   std::vector<std::array<double, 3>> transform(const std::vector<std::array<double, 3>> &geographic) const;
+  std::vector<std::array<double, 3>> inverse(const std::vector<std::array<double, 3>> &projected) const;
   std::string description() const;
 
   template<class Archive> void serialize(Archive &ar, const unsigned int)

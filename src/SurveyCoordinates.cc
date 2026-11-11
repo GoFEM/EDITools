@@ -55,6 +55,26 @@ std::vector<std::array<double, 3>> SurveyCoordinates::transform(
   return result;
 }
 
+std::vector<std::array<double, 3>> SurveyCoordinates::inverse(const std::vector<std::array<double, 3>> &points) const
+{
+  if(!utm) return points;
+  if(zone < 1 || zone > 60 || !std::isfinite(origin_easting) || !std::isfinite(origin_northing))
+    throw std::runtime_error("Invalid UTM zone or origin.");
+  const std::string definition = "+proj=utm +zone=" + std::to_string(zone) + " +ellps=WGS84" + (north ? "" : " +south");
+  std::unique_ptr<PJ_CONTEXT, decltype(&proj_context_destroy)> context(proj_context_create(), proj_context_destroy);
+  std::unique_ptr<PJ, decltype(&proj_destroy)> projection(proj_create(context.get(), definition.c_str()), proj_destroy);
+  if(!projection) throw std::runtime_error("Could not initialize WGS84 / UTM projection.");
+  std::vector<std::array<double, 3>> result;
+  for(const auto &p: points) {
+    proj_errno_reset(projection.get());
+    const auto converted = proj_trans(projection.get(), PJ_INV, proj_coord(p[1] + origin_easting, p[0] + origin_northing, p[2], 0));
+    if(proj_errno(projection.get())) throw std::runtime_error("Could not restore profile coordinates.");
+    const std::array<double, 3> geographic{{converted.lp.phi * 180. / std::acos(-1.), converted.lp.lam * 180. / std::acos(-1.), p[2]}};
+    validate(geographic); result.push_back(geographic);
+  }
+  return result;
+}
+
 SurveyCoordinates SurveyCoordinates::calculate(const std::vector<std::array<double, 3>> &points,
                                                int selected_zone, bool selected_north, bool center)
 {

@@ -1,6 +1,6 @@
 #pragma once
 #include "include/PolarityAnalysis.h"
-#include <QDialog>
+#include "include/WorkspaceView.h"
 #include <functional>
 #include <memory>
 
@@ -14,7 +14,7 @@ class QPushButton;
 class QLabel;
 class QCustomPlot;
 
-class PolarityWindow : public QDialog {
+class PolarityWindow : public WorkspaceView {
 public:
   PolarityWindow(QWidget *parent, SurveyHistory &history, std::function<void()> changed);
   void setData(std::shared_ptr<MTSurveyData> data, const QString &selected = {});

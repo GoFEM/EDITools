@@ -1,9 +1,13 @@
 #include "include/MapBackground.h"
 #include <QDataStream>
 #include "mainwindow.h"
+#include "include/WorkspaceView.h"
+#include "include/WorkspaceTabs.h"
 #include "include/NativeMT.h"
 #include "include/FitStatistics.h"
 #include "PeriodMapWindow.h"
+#include "ProfileWindow.h"
+#include <QJsonArray>
 #include "PeriodLayoutWindow.h"
 #include "include/SurveyReport.h"
 #include "include/EDIPeriodMerge.h"
@@ -61,6 +65,7 @@ void check(bool ok, const std::string &message)
 template<class T> T *widget(QWidget &parent, const char *name)
 {
   auto *result = parent.findChild<T *>(name);
+  if(!result) if(auto *view = dynamic_cast<WorkspaceView *>(&parent)) result = view->control<T>(name);
   check(result != nullptr, std::string("Missing control: ") + name);
   return result;
 }
@@ -602,27 +607,16 @@ void check_visibility(QCustomPlot &plot, int mask, bool errorBars = true)
   }
 }
 
-void range_dialog(QDialog &analysis, const std::function<void(QDialog &)> &edit)
-{
-  bool handled = false;
-  std::exception_ptr failure;
-  QTimer timer;
-  QObject::connect(&timer, &QTimer::timeout, [&] {
-    auto *dialog = analysis.findChild<QDialog *>("fitAxisRangesDialog");
-    if(!dialog || !dialog->isVisible()) return;
-    timer.stop();
-    handled = true;
-    try { edit(*dialog); }
-    catch(...) { failure = std::current_exception(); dialog->reject(); }
-  });
-  timer.start(10);
-  widget<QPushButton>(analysis, "fitPlotRanges")->click();
-  timer.stop();
-  if(failure) std::rethrow_exception(failure);
-  check(handled, "Plot range dialog did not open");
+void set_statistic_axis(QWidget &view, int plot, int axis, double lo, double hi) {
+  widget<QComboBox>(view, "fitRangePlot")->setCurrentIndex(plot);
+  widget<QComboBox>(view, "fitRangeAxis")->setCurrentIndex(axis);
+  widget<QCheckBox>(view, "fitRangeAuto")->setChecked(false);
+  widget<QDoubleSpinBox>(view, "fitRangeMin")->setValue(lo);
+  widget<QDoubleSpinBox>(view, "fitRangeMax")->setValue(hi);
+  QMetaObject::invokeMethod(widget<QDoubleSpinBox>(view, "fitRangeMax"), "editingFinished");
 }
 
-void statistics_controls(QDialog &analysis)
+void statistics_controls(WorkspaceView &analysis)
 {
   auto *periods = widget<QCustomPlot>(analysis, "fitPeriods");
   auto *checks = widget<QTreeWidget>(analysis, "fitResponses");
@@ -635,29 +629,16 @@ void statistics_controls(QDialog &analysis)
   check(map->itemCount() == 0 && map->graphCount() == points, "Hiding RMS labels changed its station points");
   widget<QCheckBox>(analysis, "fitStationNames")->setChecked(true);
   check(map->itemCount() == labels, "RMS labels cannot be restored");
-  auto set_axis = [](QDialog &dialog, const QString &prefix, double lower, double upper) {
-    widget<QCheckBox>(dialog, (prefix + "Auto").toUtf8().constData())->setChecked(false);
-    widget<QLineEdit>(dialog, (prefix + "Min").toUtf8().constData())->setText(QString::number(lower));
-    widget<QLineEdit>(dialog, (prefix + "Max").toUtf8().constData())->setText(QString::number(upper));
-  };
-  range_dialog(analysis, [&](QDialog &dialog) {
-    set_axis(dialog, "fitOverallY", 0., 4.);
-    set_axis(dialog, "fitPeriodsX", 0., 10.);
-    set_axis(dialog, "fitPeriodsY", .5, 3.);
-    set_axis(dialog, "fitHistogramX", -2., 2.);
-    set_axis(dialog, "fitComponentsY", 0., 4.);
-    set_axis(dialog, "fitStationsY", 0., 5.);
-    auto *buttons = dialog.findChild<QDialogButtonBox *>();
-    buttons->button(QDialogButtonBox::Ok)->click();
-    check(dialog.isVisible() && !widget<QLabel>(dialog, "fitAxisRangeError")->text().isEmpty(),
-          "Invalid logarithmic limits were accepted");
-    set_axis(dialog, "fitPeriodsX", .1, 10.);
-    set_axis(dialog, "fitPeriodsY", 3., .5);
-    buttons->button(QDialogButtonBox::Ok)->click();
-    check(dialog.isVisible(), "Reversed axis limits were accepted");
-    set_axis(dialog, "fitPeriodsY", .5, 3.);
-    buttons->button(QDialogButtonBox::Ok)->click();
-  });
+  set_statistic_axis(analysis, 0, 1, 0., 4.);
+  set_statistic_axis(analysis, 1, 0, 0., 10.);
+  check(!widget<QLabel>(analysis, "fitAxisRangeError")->text().isEmpty(), "Invalid log limits accepted");
+  set_statistic_axis(analysis, 1, 0, .1, 10.);
+  set_statistic_axis(analysis, 1, 1, 3., .5);
+  check(!widget<QLabel>(analysis, "fitAxisRangeError")->text().isEmpty(), "Reversed limits accepted");
+  set_statistic_axis(analysis, 1, 1, .5, 3.);
+  set_statistic_axis(analysis, 2, 0, -2., 2.);
+  set_statistic_axis(analysis, 3, 1, 0., 4.);
+  set_statistic_axis(analysis, 4, 1, 0., 5.);
   auto check_ranges = [&] {
     checkNear(periods->xAxis->range().lower, .1); checkNear(periods->xAxis->range().upper, 10.);
     checkNear(periods->yAxis->range().lower, .5); checkNear(periods->yAxis->range().upper, 3.);
@@ -715,10 +696,7 @@ void statistics_controls(QDialog &analysis)
   double retained = 0.;
   for(const auto &point: *histogram->graph(1)->data()) retained += point.value;
   checkNear(retained, originalCount.section(" / ", 0, 0).toDouble());
-  range_dialog(analysis, [](QDialog &dialog) {
-    widget<QPushButton>(dialog, "fitAxesAutoscale")->click();
-    dialog.findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
-  });
+  widget<QPushButton>(analysis, "fitAxesAutoscale")->click();
   checkNear(periods->yAxis->range().lower, 0.);
   check(periods->yAxis->range().upper != 3., "Autoscale failed to clear fixed limits");
   widget<QCheckBox>(analysis, "fitMapRangeAuto")->setChecked(true);
@@ -1535,7 +1513,7 @@ void resampling_project_workflow(const QString &directory)
   MainWindow window;
   file_action(window, "actionLoad_project", {original}); select_station(window, "A");
   widget<QAction>(window, "actionPeriod_layout")->trigger();
-  auto *layout = widget<QDialog>(window, "periodLayoutWindow");
+  auto *layout = widget<WorkspaceView>(window, "periodLayoutWindow");
   widget<QComboBox>(*layout, "layoutGridMode")->setCurrentIndex(2);
   widget<QLineEdit>(*layout, "layoutCustomPeriods")->setText("1 2 4");
   widget<QDoubleSpinBox>(*layout, "layoutMaximumRatio")->setValue(4.);
@@ -1558,7 +1536,7 @@ void resampling_project_workflow(const QString &directory)
   file_action(restored, "actionLoad_project", {saved}); select_station(restored, "A");
   checkNear(value(*widget<QCustomPlot>(restored, "plot12"), 1, 2.), std::atan2(3., 2.) * 180. / std::acos(-1.));
   widget<QAction>(restored, "actionPeriod_layout")->trigger();
-  auto *restoredLayout = widget<QDialog>(restored, "periodLayoutWindow");
+  auto *restoredLayout = widget<WorkspaceView>(restored, "periodLayoutWindow");
   check(!widget<QPushButton>(*restoredLayout, "layoutOpenSource")->isHidden(), "Saved project lost source access");
   widget<QPushButton>(*restoredLayout, "layoutOpenSource")->click(); QApplication::processEvents();
   copy = nullptr;
@@ -1646,7 +1624,7 @@ void tf_view_controls(MainWindow &window, const QString &directory, const QStrin
   auto *stations = widget<QListWidget>(window, "stationList");
   check(stations->currentItem()->data(StationListDelegate::PeriodCount).toUInt() == 12, "Missing station period count");
   widget<QAction>(window, "actionPlot_axis_ranges")->trigger();
-  check(!QApplication::activeModalWidget() && widget<QTabBar>(window, "ribbonTabs")->currentIndex() == 6,
+  check(!QApplication::activeModalWidget() && widget<QTabBar>(window, "ribbonTabs")->tabText(widget<QTabBar>(window, "ribbonTabs")->currentIndex()) == "TF appearance",
         "View controls must be in the ribbon");
   auto *rho = widget<QCustomPlot>(window, "plot11"), *phase = widget<QCustomPlot>(window, "plot12");
   auto *tipper = widget<QCustomPlot>(window, "plot21"), *tensor = widget<QCustomPlot>(window, "plot22");
@@ -1864,15 +1842,15 @@ void rho_plus_overlay(const QString &directory)
   widget<QAction>(window,"actionPhase_wrap")->setChecked(false);
   check(std::abs(yxPhase->data()->constBegin()->value+135.)<.01,"Guide ignored phase wrapping");
   widget<QAction>(window,"actionImpedance_validity")->trigger();
-  auto *validity=widget<QDialog>(window,"impedanceValidityWindow");
+  auto *validity=widget<WorkspaceView>(window, "impedanceValidityWindow");
   check(!validity->findChild<QDoubleSpinBox *>("validityErrorFloor"),"Rho+ still has an independent error floor");
   widget<QSpinBox>(*validity,"validityGridDensity")->setValue(16); settle();
-  validity->hide();
+  widget<WorkspaceTabs>(window, "workspaceTabs")->setCurrentIndex(0);
   widget<QAction>(window,"actionSave_project")->trigger();
   MainWindow restored; file_action(restored,"actionLoad_project",{project}); select_station(restored,"GUIDE"); settle();
   check(widget<QAction>(restored,"actionShow_rho_plus")->isChecked(),"Project lost rho+ visibility");
   widget<QAction>(restored,"actionImpedance_validity")->trigger();
-  auto *restoredValidity=widget<QDialog>(restored,"impedanceValidityWindow");
+  auto *restoredValidity=widget<WorkspaceView>(restored, "impedanceValidityWindow");
   check(!restoredValidity->findChild<QDoubleSpinBox *>("validityErrorFloor"),"Project restored an obsolete floor control");
   check(widget<QSpinBox>(*restoredValidity,"validityGridDensity")->value()==16,"Project lost rho+ grid density");
   auto *list=widget<QListWidget>(window,"stationList"); list->currentItem()->setCheckState(Qt::Unchecked); settle();
@@ -1884,6 +1862,7 @@ void rho_plus_overlay(const QString &directory)
   auto *preview=widget<QCheckBox>(*validity,"validityPreviewMasks");
   auto *apply=widget<QPushButton>(*validity,"validityApplyMasks");
   auto *undo=widget<QPushButton>(*validity,"validityUndoMasks");
+  widget<QComboBox>(*validity, "validityStation")->setCurrentText("OUTLIER");
   preview->setChecked(true); settle(); check(apply->isEnabled(),"Main-window masking preview missing");
   widget<QAction>(window,"actionLink_tensor_masks")->setChecked(false);
   check(!apply->isEnabled(),"Link setting left a stale masking preview");
@@ -1986,15 +1965,15 @@ void workflow(const QString &directory)
   auto *list = widget<QListWidget>(window, "responsesList");
   check(list->count() == 2 && list->currentRow() == 1, "Iteration files were not loaded/selected");
   widget<QPushButton>(window, "openPeriodMaps")->click();
-  auto *maps = widget<QDialog>(window, "periodMapWindow");
+  auto *maps = widget<WorkspaceView>(window, "periodMapWindow");
   check(maps->isVisible() && widget<QComboBox>(*maps, "mapDataset")->count() == 3, "Maps button did not open loaded datasets");
   check(widget<QCheckBox>(*maps, "mapStationNames")->isChecked(), "Period map did not inherit main map station names");
   widget<QCheckBox>(*maps, "mapStationNames")->setChecked(false);
-  maps->hide();
+  widget<WorkspaceTabs>(window, "workspaceTabs")->setCurrentIndex(0);
   widget<QAction>(window, "actionPeriod_maps")->trigger();
   check(maps->isVisible(), "Data menu did not reopen period maps");
   check(!widget<QCheckBox>(*maps, "mapStationNames")->isChecked(), "Reopening period map reset its display choices");
-  maps->hide();
+  widget<WorkspaceTabs>(window, "workspaceTabs")->setCurrentIndex(0);
   auto &rho = *widget<QCustomPlot>(window, "plot11");
   auto &phase = *widget<QCustomPlot>(window, "plot12");
   auto &tipper = *widget<QCustomPlot>(window, "plot21");
@@ -2024,7 +2003,7 @@ void workflow(const QString &directory)
   check(tipper.graph(9)->data()->isEmpty() && tensor.graph(9)->data()->isEmpty(),
         "Absent response component produced a curve");
   widget<QAction>(window, "actionFit_statistics")->trigger();
-  auto *analysis = widget<QDialog>(window, "fitStatisticsWindow");
+  auto *analysis = widget<WorkspaceView>(window, "fitStatisticsWindow");
   auto *checks = widget<QTreeWidget>(*analysis, "fitResponses");
   auto *fitPeriods = widget<QCustomPlot>(*analysis, "fitPeriods");
   check(checks->topLevelItemCount() == 2 && fitPeriods->graphCount() == 2, "Missing response comparisons");
@@ -2047,7 +2026,7 @@ void workflow(const QString &directory)
   check(checks->topLevelItem(0)->text(2) == "4 / 4", "Normalization lost paired scalars");
   normalization->setCurrentIndex(0);
   // A map edit immediately refreshes both the main curves and the open fit window.
-  maps->show(); QApplication::processEvents();
+  widget<WorkspaceTabs>(window, "workspaceTabs")->setCurrentWidget(maps); QApplication::processEvents();
   auto *mapPlot = widget<QCustomPlot>(*maps, "periodMapPlot");
   widget<QComboBox>(*maps, "mapPeriod")->setCurrentIndex(3); // 1 s (four sorted periods)
   checkNear(widget<QComboBox>(*maps, "mapPeriod")->currentData().toDouble(), 1.);
@@ -2058,6 +2037,7 @@ void workflow(const QString &directory)
   widget<QComboBox>(*maps, "mapMaskGroup")->setCurrentIndex(2);
   const auto responsePointCount = rho.graph(9)->data()->size();
   widget<QPushButton>(*maps, "mapMask")->click();
+  widget<WorkspaceTabs>(window, "workspaceTabs")->setCurrentWidget(analysis);
   check(checks->topLevelItem(0)->text(2) == "2 / 4", "Map mask did not refresh statistics");
   check(rho.graph(5)->data()->size() == 1 && phase.graph(5)->data()->size() == 1,
         "Map mask did not refresh observed curves");
@@ -2065,7 +2045,7 @@ void workflow(const QString &directory)
   widget<QPushButton>(*maps, "mapUnmask")->click();
   check(checks->topLevelItem(0)->text(2) == "4 / 4" && rho.graph(5)->data()->isEmpty(),
         "Map unmask did not restore plots/statistics");
-  maps->hide();
+  widget<WorkspaceTabs>(window, "workspaceTabs")->setCurrentWidget(analysis);
   statistics_controls(*analysis);
   const auto pairedCount = checks->topLevelItem(1)->text(2);
   for(int mask: {6, 9, 1, 2, 4, 8, 0, 15}) {
@@ -2164,7 +2144,7 @@ void workflow(const QString &directory)
   check_visibility(*widget<QCustomPlot>(restored, "plot22"), 9);
   checkNear(value(*widget<QCustomPlot>(restored, "plot11"), 9, 1.), 99.);
   widget<QAction>(restored, "actionFit_statistics")->trigger();
-  auto *restoredAnalysis = widget<QDialog>(restored, "fitStatisticsWindow");
+  auto *restoredAnalysis = widget<WorkspaceView>(restored, "fitStatisticsWindow");
   auto *restoredChecks = widget<QTreeWidget>(*restoredAnalysis, "fitResponses");
   check(restoredChecks->topLevelItem(0)->text(2) == "2 / 2", "Project lost native scalar response metadata");
   // Existing GoFEM import remains available and selects the loaded response.
@@ -2172,6 +2152,8 @@ void workflow(const QString &directory)
   check(restoredList->count() == 3, "GoFEM response import regressed");
   checkNear(value(*widget<QCustomPlot>(restored, "plot11"), 9, 1.), 1.0132118364233778);
   auto checkGoFEM = [&] {
+    widget<QAction>(restored, "actionFit_statistics")->trigger();
+    restoredAnalysis = widget<WorkspaceView>(restored, "fitStatisticsWindow");
     auto *tree = widget<QTreeWidget>(*restoredAnalysis, "fitResponses");
     QTreeWidgetItem *gofem = nullptr;
     for(int i = 0; i < tree->topLevelItemCount(); ++i)
@@ -2181,8 +2163,9 @@ void workflow(const QString &directory)
     for(int i = 8; i < 12; ++i)
       check(widget<QCustomPlot>(restored, "plot21")->graph(i)->data()->isEmpty(),
             "GoFEM file without tippers displayed zero response lines");
+    const int before = widget<QCustomPlot>(*restoredAnalysis, "fitPeriods")->graphCount();
     gofem->setCheckState(0, Qt::Unchecked);
-    check(widget<QCustomPlot>(*restoredAnalysis, "fitPeriods")->graphCount() == 2,
+    check(widget<QCustomPlot>(*restoredAnalysis, "fitPeriods")->graphCount() == before - 1,
           "GoFEM statistics visibility control failed");
     gofem->setCheckState(0, Qt::Checked);
   };
@@ -2247,6 +2230,87 @@ void workflow(const QString &directory)
   check(widget<QAction>(restored, "actionShow_rho_plus")->isChecked() &&
         widget<QDoubleSpinBox>(restored, "viewMarkerSize")->value() == 5. &&
         widget<QComboBox>(restored, "viewColorMap")->currentText() == "Viridis", "Version 8 plot options were not preserved");
+}
+
+void workspace_tabs(const QString &directory)
+{
+  const auto path = directory + "/workspace.mtd";
+  const auto a = directory + "/WS_A.edi", b = directory + "/WS_B.edi";
+  write_edi(a, {1., .1, .01}); write_edi(b, {1., .1, .01});
+  auto survey = std::make_shared<MTSurveyData>("Workspace"); std::vector<std::string> files{a.toStdString(), b.toStdString()};
+  survey->load_from_edi(files); survey->get_station_data("WS_B").set_position({55.02, 9., 100.});
+  { std::ofstream out(path.toStdString(), std::ios::binary); boost::archive::binary_oarchive ar(out); ar << survey << std::map<std::string, MTSurveyData>{}; }
+  MainWindow window; file_action(window, "actionLoad_project", {path}); window.showNormal(); window.resize(1500, 950);
+  auto *tabs = widget<WorkspaceTabs>(window, "workspaceTabs"); check(tabs->count() == 1 && tabs->type(tabs->currentWidget()) == "tf", "Legacy projects must open TF only");
+  widget<QAction>(window, "actionProfile_analysis")->trigger(); QApplication::processEvents();
+  auto *first = dynamic_cast<ProfileWindow *>(tabs->currentWidget()); check(first && !first->isWindow() && tabs->count() == 2, "Profile did not embed as a tab");
+  const auto id = tabs->id(first);
+  auto *map = widget<QCustomPlot>(*first, "profileMap");
+  const auto projection = SurveyCoordinates::suggested(survey->geographic_locations());
+  for(const auto &p: projection.transform({{54.999, 9., 0.}, {55.021, 9., 0.}})) {
+    const QPointF point(map->xAxis->coordToPixel(p[1] / 1000.), map->yAxis->coordToPixel(p[0] / 1000.));
+    map_gesture(map, point, point);
+  }
+  check(widget<QTableWidget>(*first, "profileStations")->rowCount() == 2, "Workspace corridor missing stations");
+  widget<QDoubleSpinBox>(*first, "profileDistance")->setValue(1.5);
+  widget<QCheckBox>(*first, "profileRotateStrike")->setChecked(true);
+  widget<QComboBox>(*first, "profileStrikeMode")->setCurrentIndex(1);
+  widget<QDoubleSpinBox>(*first, "profileStrikeAngle")->setValue(23.);
+  widget<QAction>(window, "actionRename_view")->trigger();
+  auto *rename = widget<QLineEdit>(*tabs, "workspaceRename"); rename->setText("North line"); QMetaObject::invokeMethod(rename, "editingFinished"); QApplication::processEvents();
+  check(tabs->tabText(tabs->indexOf(first)) == "North line" && tabs->id(first) == id, "Renaming changed tab identity");
+  widget<QAction>(window, "actionDuplicate_view")->trigger();
+  auto *second = dynamic_cast<ProfileWindow *>(tabs->currentWidget()); check(second && second != first && tabs->count() == 3, "Duplicate did not create independent view");
+  check(second->saveViewState()["vertices"].toArray().size() == 2, "Duplicate lost line geometry");
+  widget<QDoubleSpinBox>(*second, "profileDistance")->setValue(3.);
+  checkNear(widget<QDoubleSpinBox>(*first, "profileDistance")->value(), 1.5);
+  auto *bar = widget<QTabBar>(*tabs, "workspaceTabBar"); bar->moveTab(2, 1); bar->moveTab(0, 2);
+  check(tabs->type(tabs->widget(0)) == "tf", "TF tab moved from its pinned position");
+  tabs->setCurrentIndex(0); widget<QComboBox>(window, "mapCoordinateSwitch")->setCurrentIndex(1); widget<QCheckBox>(window, "mapCenterUtm")->setChecked(true);
+  tabs->setCurrentWidget(first);
+  check(widget<QTableWidget>(*first, "profileStations")->rowCount() == 2, "Changing UTM origin erased corridor");
+  widget<QTableWidget>(*first, "profileStations")->setCurrentCell(1, 0);
+  check(tabs->currentWidget() == first && widget<QListWidget>(window, "stationList")->currentItem()->text() == "WS_B", "Profile station selection did not update TF in place");
+  const int profileSamples = widget<QCustomPlot>(*first, "profileSection0")->property("profileSampleCount").toInt();
+  tabs->setCurrentIndex(0); widget<QAction>(window, "actionLink_tensor_masks")->setChecked(false);
+  auto *rho = widget<QCustomPlot>(window, "plot11"); rho->graph(1)->setSelection(QCPDataSelection(QCPDataRange(0, 1)));
+  widget<QMenu>(*rho, "")->actions().front()->trigger();
+  check(rho->graph(4)->dataCount() == 1 && rho->graph(5)->dataCount() == 1, "TF off-diagonal edit lost paired diagonal mask");
+  tabs->setCurrentWidget(first);
+  check(widget<QCustomPlot>(*first, "profileSection0")->property("profileSampleCount").toInt() < profileSamples, "Inactive profile did not refresh shared masks");
+  widget<QAction>(window, "actionUndo")->trigger();
+  check(widget<QCustomPlot>(*first, "profileSection0")->property("profileSampleCount").toInt() == profileSamples, "Shared Undo did not refresh active profile");
+  widget<QCheckBox>(*first, "profileRotateStrike")->setChecked(false);
+  widget<QCheckBox>(*first, "profileFilterTensor")->setChecked(false);
+  auto *ribbon = dynamic_cast<CommandRibbon *>(widget<QToolBar>(window, "commandRibbon")); ribbon->showPage("Strike tools"); QApplication::processEvents();
+  check(!widget<QComboBox>(*first, "profileStrikeMode")->isVisible() && !widget<QDoubleSpinBox>(*first, "profileMaxSkew")->isVisible(), "Irrelevant strike controls remained visible");
+  widget<QCheckBox>(*first, "profileRotateStrike")->setChecked(true);
+  check(widget<QDoubleSpinBox>(*first, "profileStrikeAngle")->isVisible(), "Manual strike editor did not reappear");
+  checkNear(widget<QDoubleSpinBox>(*first, "profileStrikeAngle")->value(), 23.);
+  const int ribbonHeight = widget<QWidget>(window, "ribbonPages")->height();
+  for(const auto *action: {"actionPeriod_maps", "actionFit_statistics", "actionCompare_stations", "actionSurvey_averages", "actionPolarity_review", "actionPeriod_layout", "actionImpedance_validity", "actionAuto_masking"}) {
+    widget<QAction>(window, action)->trigger(); QApplication::processEvents();
+    check(dynamic_cast<WorkspaceView *>(tabs->currentWidget()) && !tabs->currentWidget()->isWindow(), "Analysis opened a separate window");
+    check(widget<QWidget>(window, "ribbonPages")->height() == ribbonHeight, "Context changes resized ribbon");
+  }
+  tabs->setCurrentWidget(first); widget<QAction>(window, "actionSave_project")->trigger();
+  const auto artifacts = qEnvironmentVariable("EDITOOLS_TEST_ARTIFACT_DIR");
+  if(!artifacts.isEmpty()) { ribbon->showPage("Profile tools"); QApplication::processEvents(); window.grab().save(artifacts + "/workspace-profile.png"); }
+  MainWindow restored; file_action(restored, "actionLoad_project", {path});
+  auto *restoredTabs = widget<WorkspaceTabs>(restored, "workspaceTabs");
+  check(restoredTabs->count() == tabs->count() && restoredTabs->id(restoredTabs->currentWidget()) == id, "Project lost tabs or active identity");
+  for(int i = 0; i < tabs->count(); ++i) check(tabs->id(tabs->widget(i)) == restoredTabs->id(restoredTabs->widget(i)), "Project changed view order");
+  auto *restoredProfile = dynamic_cast<ProfileWindow *>(restoredTabs->currentWidget());
+  check(restoredProfile && restoredTabs->tabText(restoredTabs->currentIndex()) == "North line", "Project lost renamed profile");
+  checkNear(widget<QDoubleSpinBox>(*restoredProfile, "profileDistance")->value(), 1.5);
+  check(widget<QTableWidget>(*restoredProfile, "profileStations")->rowCount() == 2, "Project lost geographic corridor");
+  const int count = restoredTabs->count(); QPointer<QWidget> closing = restoredProfile;
+  widget<QAction>(restored, "actionClose_view")->trigger(); check(closing.isNull() && restoredTabs->count() == count - 1, "Close did not release the view");
+  widget<QAction>(restored, "actionReopen_view")->trigger(); check(restoredTabs->count() == count && restoredTabs->id(restoredTabs->currentWidget()) == id, "Reopen lost identity");
+  auto *reopened = dynamic_cast<ProfileWindow *>(restoredTabs->currentWidget());
+  check(reopened && widget<QTableWidget>(*reopened, "profileStations")->rowCount() == 2, "Reopen lost profile line");
+  restoredTabs->setCurrentIndex(0); restoredTabs->closeCurrent(); check(restoredTabs->count() == count, "TF tab was closable");
+  file_action(restored, "actionLoad_project", {path}); check(restoredTabs->count() == count, "Reload duplicated workspace views");
 }
 
 void real_run(const QString &project, const QString &directory, const QString &screenshot, bool mixed)
@@ -2314,7 +2378,7 @@ void real_run(const QString &project, const QString &directory, const QString &s
     check(rho.toPixmap(640, 420).save(screenshot + ".legend.png"), "Could not export raster checkbox legend");
   }
   widget<QAction>(window, "actionFit_statistics")->trigger();
-  auto *analysis = widget<QDialog>(window, "fitStatisticsWindow");
+  auto *analysis = widget<WorkspaceView>(window, "fitStatisticsWindow");
   auto *checks = widget<QTreeWidget>(*analysis, "fitResponses");
   check(checks->topLevelItemCount() >= paths.size(), "Real statistics are missing iterations");
   // Independently check every loaded nRMS against the solver's history table.
@@ -2343,10 +2407,8 @@ void real_run(const QString &project, const QString &directory, const QString &s
     analysis->resize(1600, 1000);
     QApplication::processEvents();
     check(analysis->grab().save(screenshot + ".statistics.png"), "Could not save statistics preview");
-    range_dialog(*analysis, [&](QDialog &dialog) {
-      check(dialog.grab().save(screenshot + ".ranges.png"), "Could not save range controls preview");
-      dialog.reject();
-    });
+    window.findChild<QTabBar *>("ribbonTabs")->setCurrentIndex(window.findChild<QTabBar *>("ribbonTabs")->count()-1);
+    QApplication::processEvents(); window.grab().save(screenshot + ".ranges.png");
     widget<QComboBox>(*analysis, "fitColorMap")->setCurrentText("Thermal");
     widget<QCheckBox>(*analysis, "fitMapRangeAuto")->setChecked(false);
     widget<QDoubleSpinBox>(*analysis, "fitMapRangeMin")->setValue(.5);
@@ -2362,7 +2424,7 @@ void real_run(const QString &project, const QString &directory, const QString &s
     file_action(*analysis, "fitSavePdf", {screenshot + ".statistics.pdf"});
   }
   widget<QPushButton>(window, "openPeriodMaps")->click();
-  auto *maps = widget<QDialog>(window, "periodMapWindow");
+  auto *maps = widget<WorkspaceView>(window, "periodMapWindow");
   auto *mapPlot = widget<QCustomPlot>(*maps, "periodMapPlot");
   check(mapPlot->property("phaseTensorCount").toUInt() > 0 && mapPlot->property("realVectorCount").toUInt() > 0,
         "Real survey has no mapped tensors or vectors");
@@ -2403,7 +2465,7 @@ void real_run(const QString &project, const QString &directory, const QString &s
     }, 5);
   }
   widget<QAction>(window, "actionPeriod_layout")->trigger();
-  auto *layout = widget<QDialog>(window, "periodLayoutWindow");
+  auto *layout = widget<WorkspaceView>(window, "periodLayoutWindow");
   widget<QPushButton>(*layout, "layoutPreview")->click();
   check(widget<QPushButton>(*layout, "layoutApply")->isEnabled(), "Real survey resampling preview has no usable samples");
   std::cout << "Period layout: " << widget<QLabel>(*layout, "layoutSummary")->text().toStdString() << '\n';
@@ -2430,7 +2492,7 @@ int main(int argc, char **argv)
   try {
     check(directory.isValid(), "No temporary directory");
     if(argc >= 3) real_run(argv[1], argv[2], argc >= 4 ? argv[3] : QString(), argc >= 5 && QString(argv[4]) == "mixed");
-    else { tensor_strip(); station_selection_edits(directory.path()); rho_plus_overlay(directory.path()); map_backgrounds(directory.path()); linked_mask_tests(directory.path()); edi_import_tests(directory.path()); statistics(directory.path()); gofem_responses(directory.path()); period_maps(directory.path()); period_resampling_tests(directory.path()); resampling_project_workflow(directory.path()); survey_reports(directory.path()); workflow(directory.path()); }
+    else { workspace_tabs(directory.path()); tensor_strip(); station_selection_edits(directory.path()); rho_plus_overlay(directory.path()); map_backgrounds(directory.path()); linked_mask_tests(directory.path()); edi_import_tests(directory.path()); statistics(directory.path()); gofem_responses(directory.path()); period_maps(directory.path()); period_resampling_tests(directory.path()); resampling_project_workflow(directory.path()); survey_reports(directory.path()); workflow(directory.path()); }
     std::cout << "Response import, curves and project workflow checks passed.\n";
   } catch(const std::exception &e) {
     std::cerr << e.what() << '\n';

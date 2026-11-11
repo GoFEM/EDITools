@@ -82,6 +82,10 @@ add_library(editools_ui STATIC
   Icons/icons.qrc
   src/CommandIcons.cc
   src/CommandRibbon.cc
+  src/WorkspaceView.cc
+  src/WorkspaceTabs.cc
+  include/WorkspaceView.h
+  include/WorkspaceTabs.h
   src/TFViewControls.cc
   src/StationListDelegate.cc
   src/SurveyHistory.cc
@@ -119,6 +123,7 @@ add_library(editools_ui STATIC
   SurveyReport.cpp
   mainwindow.cpp
   MainWindowView.cpp
+  MainWindowWorkspace.cpp
   mainwindow.h
   ExportGOFEMDialog.h
   include/MTDataPlot.h

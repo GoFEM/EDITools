@@ -3,7 +3,7 @@
 
 #include "include/PeriodResampling.h"
 #include "qcustomplot.h"
-#include <QDialog>
+#include "include/WorkspaceView.h"
 #include <functional>
 
 class QComboBox;
@@ -15,7 +15,7 @@ class QPushButton;
 class QLabel;
 class QTableWidget;
 
-class PeriodLayoutWindow : public QDialog {
+class PeriodLayoutWindow : public WorkspaceView {
 public:
   explicit PeriodLayoutWindow(QWidget *parent, std::function<void(std::shared_ptr<MTSurveyData>)> createSurvey);
   void setData(const std::shared_ptr<MTSurveyData> &survey);

@@ -1,4 +1,5 @@
 #include "ProfileWindow.h"
+#include <QJsonArray>
 #include "ProfilePlots.h"
 #include "include/FileLabels.h"
 #include "include/ImpedanceAnalysis.h"
@@ -186,7 +187,7 @@ struct ProfileWindow::Impl {
       QObject::connect(b, &QPushButton::clicked, w, std::move(action));
       return b;
     };
-    button(ProfileWindow::tr("Undo"), "profileUndo", [this] {
+    button(ProfileWindow::tr("Undo vertex"), "profileUndo", [this] {
       if (!vertices.empty())
         vertices.pop_back();
       select();
@@ -551,6 +552,26 @@ struct ProfileWindow::Impl {
     });
     QObject::connect(csvButton, &QPushButton::clicked, w, [this] { saveCsv(); });
     QObject::connect(pdfButton, &QPushButton::clicked, w, [this] { savePdf(); });
+    split->setObjectName("profileMainSplit");
+    w->addToolGroup(ProfileWindow::tr("Profile tools"), ProfileWindow::tr("Data and periods"), top);
+    w->addToolGroup(ProfileWindow::tr("Profile tools"), ProfileWindow::tr("Line"), tools);
+    w->addToolGroup(ProfileWindow::tr("Profile tools"), ProfileWindow::tr("Corridor"), widthRow);
+    w->addToolGroup(ProfileWindow::tr("Profile tools"), ProfileWindow::tr("Map"), mapTools);
+    w->addToolGroup(ProfileWindow::tr("Profile tools"), ProfileWindow::tr("Output"), outputs);
+    w->addToolGroup(ProfileWindow::tr("Profile appearance"), ProfileWindow::tr("Scalar sections"), scalarTools);
+    w->addToolGroup(ProfileWindow::tr("Profile appearance"), ProfileWindow::tr("Color ranges"), ranges);
+    w->addToolGroup(ProfileWindow::tr("Profile appearance"), ProfileWindow::tr("Phase tensors"), ptTools);
+    w->addToolGroup(ProfileWindow::tr("Strike tools"), ProfileWindow::tr("Rotation"), rotationRow);
+    w->addToolGroup(ProfileWindow::tr("Strike tools"), ProfileWindow::tr("Rose directions"), roseTools);
+    w->addToolGroup(ProfileWindow::tr("Strike tools"), ProfileWindow::tr("Quality and weighting"), filterTools);
+    w->setExportButton("pdf", pdfButton); w->setExportButton("csv", csvButton);
+    w->setStateRefresh([this] {
+      manualStrike = strikeAngle->value();
+      map->setInteraction(QCP::iRangeDrag, !drawing->isChecked());
+      map->setCursor(drawing->isChecked() ? Qt::CrossCursor : Qt::ArrowCursor);
+      periods(); select();
+    });
+
   }
 
   const MTSurveyData *source() const {
@@ -600,6 +621,7 @@ struct ProfileWindow::Impl {
         break;
       }
     selectedStation = row < 0 ? QString() : name;
+    if(!selectedStation.isEmpty()) emit owner->stationActivated(selectedStation);
     const QSignalBlocker block(table);
     table->clearSelection();
     table->setCurrentCell(row, row < 0 ? -1 : 0);
@@ -708,6 +730,13 @@ struct ProfileWindow::Impl {
                : ProfileWindow::tr("strike unavailable");
   }
   void updateStrike(double low, double high) {
+    const bool rotating = rotate->isChecked(), automaticMode = strikeMode->currentIndex() == 0;
+    for(auto *control : std::vector<QWidget *>{strikeMode, swapStrike, strikeInfo}) owner->setToolVisible(control, rotating);
+    owner->setToolVisible(strikeAngle, rotating && !automaticMode);
+    const bool quality = filterTensor->isChecked() || (rotating && automaticMode);
+    owner->setToolVisible(skew, quality); owner->setToolVisible(ellipticity, quality);
+    owner->setToolVisible(gap, cells->isChecked());
+
     std::vector<ProfileAnalysis::Direction> directions;
     if (survey)
       for (const auto &site : offsets) {
@@ -927,7 +956,7 @@ struct ProfileWindow::Impl {
   }
   void savePdf() {
     const auto path = QFileDialog::getSaveFileName(owner, ProfileWindow::tr("Export profile analysis"),
-                                                   "profile.pdf", ProfileWindow::tr("PDF (*.pdf)"));
+                                                   owner->exportName("pdf"), ProfileWindow::tr("PDF (*.pdf)"));
     if (path.isEmpty())
       return;
     QSaveFile file(path);
@@ -940,7 +969,7 @@ struct ProfileWindow::Impl {
     {
       QPdfWriter pdf(&file);
       pdf.setCreator("EDITools");
-      pdf.setTitle(ProfileWindow::tr("Profile analysis"));
+      pdf.setTitle(owner->displayTitle());
       pdf.setResolution(120);
       pdf.setPageSize(QPageSize(QPageSize::A4));
       pdf.setPageOrientation(QPageLayout::Landscape);
@@ -987,7 +1016,7 @@ struct ProfileWindow::Impl {
 };
 
 ProfileWindow::ProfileWindow(QWidget *parent, std::function<void(std::shared_ptr<MTSurveyData>)> extracted)
-    : QDialog(parent, Qt::Window), impl(new Impl(this, std::move(extracted))) {
+    : WorkspaceView(parent), impl(new Impl(this, std::move(extracted))) {
   setObjectName("profileWindow");
   setWindowTitle(tr("Profile analysis"));
   resize(1500, 950);
@@ -995,7 +1024,7 @@ ProfileWindow::ProfileWindow(QWidget *parent, std::function<void(std::shared_ptr
 ProfileWindow::~ProfileWindow() = default;
 void ProfileWindow::setMapLayers(int layers) {
   impl->background->setLayers(layers);
-  for (auto *action : findChild<QToolButton *>("mapLayers")->menu()->actions())
+  for (auto *action : control<QToolButton>("mapLayers")->menu()->actions())
     if (action->isCheckable()) {
       QSignalBlocker block(action);
       action->setChecked(layers & action->data().toInt());
@@ -1007,6 +1036,11 @@ void ProfileWindow::setData(const std::shared_ptr<MTSurveyData> &survey,
   auto &s = *impl;
   const bool changed = s.survey != survey;
   const auto previous = s.coordinates.description();
+  std::vector<std::array<double, 3>> oldLine;
+  if(!changed && !s.vertices.empty()) {
+    for(const auto &p: s.vertices) oldLine.push_back({{p[1] * 1000., p[0] * 1000., 0.}});
+    oldLine = s.coordinates.inverse(oldLine);
+  }
   if (changed) {
     s.vertices.clear();
     s.selectedStation.clear();
@@ -1056,8 +1090,10 @@ void ProfileWindow::setData(const std::shared_ptr<MTSurveyData> &survey,
     error = QString::fromUtf8(e.what());
     s.stations.clear();
   }
-  if (previous != s.coordinates.description())
+  if(previous != s.coordinates.description() && !oldLine.empty()) {
     s.vertices.clear();
+    for(const auto &p: s.coordinates.transform(oldLine)) s.vertices.push_back({{p[1] / 1000., p[0] / 1000.}});
+  }
   s.coordinateLabel->setText(tr("WGS84 / UTM %1%2 · origin E %3, N %4 m")
                                  .arg(s.coordinates.zone)
                                  .arg(s.coordinates.north ? 'N' : 'S')
@@ -1074,4 +1110,35 @@ void ProfileWindow::setData(const std::shared_ptr<MTSurveyData> &survey,
     s.fitMap();
   if (!error.isEmpty())
     s.status->setText(tr("Cannot project profile stations: %1").arg(error));
+}
+
+QJsonObject ProfileWindow::saveViewState() const {
+  auto state = WorkspaceView::saveViewState();
+  std::vector<std::array<double, 3>> projected;
+  for(const auto &point: impl->vertices) projected.push_back({{point[1] * 1000., point[0] * 1000., 0.}});
+  QJsonArray vertices;
+  for(const auto &p: impl->coordinates.inverse(projected)) vertices.append(QJsonArray{p[0], p[1]});
+  state["vertices"] = vertices; state["autoDistance"] = impl->automaticDistance;
+  state["manualStrike"] = impl->manualStrike; state["manualStrikeSet"] = impl->manualStrikeSet;
+  state["swappedStrike"] = impl->swappedStrike; state["station"] = impl->selectedStation;
+  state["mapLayers"] = impl->background->layers();
+  return state;
+}
+void ProfileWindow::restoreViewState(const QJsonObject &state) {
+  WorkspaceView::restoreViewState(state);
+  auto &s = *impl;
+  s.automaticDistance = state["autoDistance"].toBool(true);
+  s.manualStrike = state["manualStrike"].toDouble(); s.manualStrikeSet = state["manualStrikeSet"].toBool();
+  s.swappedStrike = state["swappedStrike"].toBool();
+  std::vector<std::array<double, 3>> geographic;
+  for(const auto &value: state["vertices"].toArray()) {
+    const auto point = value.toArray(); if(point.size() != 2) continue;
+    geographic.push_back({{point[0].toDouble(), point[1].toDouble(), 0.}});
+  }
+  s.vertices.clear();
+  try { for(const auto &p: s.coordinates.transform(geographic)) s.vertices.push_back({{p[1] / 1000., p[0] / 1000.}}); }
+  catch(const std::exception &e) { s.status->setText(tr("Could not restore profile: %1").arg(e.what())); }
+  s.select(); s.highlight(state["station"].toString());
+  if(state.contains("mapLayers")) setMapLayers(state["mapLayers"].toInt());
+  restorePlotRanges(this, state["plots"].toObject());
 }

@@ -21,6 +21,9 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include <QPointer>
+#include <QJsonObject>
+#include "include/CommandRibbon.h"
 #include <QListWidgetItem>
 #include <QMenu>
 #include <QAction>
@@ -51,7 +54,8 @@ class StationComparisonWindow;
 class PolarityWindow;
 class AutoMaskWorkflow;
 class TFViewControls;
-class CommandRibbon;
+class WorkspaceTabs;
+class WorkspaceView;
 
 class MainWindow : public QMainWindow
 {
@@ -237,6 +241,20 @@ private:
 
   void setupListContextMenu();
   void setupRibbon();
+  void setupWorkspace();
+  QWidget *openWorkspace(const QString &type, bool create = false, const QJsonObject &saved = {});
+  void activateWorkspace();
+  void refreshWorkspace(QWidget *view);
+  QJsonObject workspaceSnapshot(QWidget *view) const;
+  QJsonObject saveWorkspace() const;
+  void restoreWorkspace(const QJsonObject &state);
+  void clearWorkspace();
+  void exportWorkspace(const QString &format);
+  WorkspaceTabs *workspaces = nullptr;
+  std::vector<CommandRibbon::Page> tfTools;
+  QList<QJsonObject> closedViews;
+  bool restoringWorkspace = false;
+
   void updateStationDetails();
   TFViewRange viewRange(int index) const;
   void setViewRange(int index, TFViewRange range);
@@ -263,8 +281,8 @@ private:
 
   std::shared_ptr<MTSurveyData> mtSurvey;
   std::unique_ptr<SurveyHistory> history;
-  StationComparisonWindow *stationComparison = nullptr;
-  PolarityWindow *polarity = nullptr;
+  QPointer<StationComparisonWindow> stationComparison;
+  QPointer<PolarityWindow> polarity;
   void restoreSurveyView();
   std::map<std::string, MTSurveyData> mtResponses;
   std::vector<std::shared_ptr<MTDataPlot>> plotHandlers;
@@ -288,12 +306,12 @@ private:
   QCheckBox *mapStationNames;
   QAction *linkTensorMasksAction;
   SurveyCoordinates mapCoordinates;
-  FitStatisticsWindow *fitStatistics = nullptr;
-  PeriodMapWindow *periodMaps = nullptr;
-  ProfileWindow *profile = nullptr;
-  PeriodLayoutWindow *periodLayout = nullptr;
-  ImpedanceValidityWindow *impedanceValidity = nullptr;
-  SurveyAverageWindow *surveyAverage = nullptr;
+  QPointer<FitStatisticsWindow> fitStatistics;
+  QPointer<PeriodMapWindow> periodMaps;
+  QPointer<ProfileWindow> profile;
+  QPointer<PeriodLayoutWindow> periodLayout;
+  QPointer<ImpedanceValidityWindow> impedanceValidity;
+  QPointer<SurveyAverageWindow> surveyAverage;
   AutoMaskWorkflow *autoMaskWorkflow = nullptr;
   QAction *rhoPlusAction;
   std::unique_ptr<RhoPlusOverlay> rhoPlusOverlay;

@@ -7,7 +7,7 @@
 
 ## Current plot image
 
-Use **Report → Plot image** to save a PNG of the selected station's TF view:
+Use **Export → Active view PNG** to save a PNG of the active view. With TF view selected, this includes:
 the station heading, two impedance columns, induction arrows and phase-tensor ellipses. The
 image includes the current zoom, ribbon colors and sizes, component visibility, masks, error bars and
 calculated response overlays. This exports the displayed layout without
@@ -15,7 +15,7 @@ changing the survey.
 
 ## Survey PDF report
 
-Use **Report → Survey PDF** to create a landscape PDF with a survey
+Use **Export → Survey PDF** to create a landscape PDF with a survey
 overview, station pages, phase-tensor ellipse maps, and/or induction-vector maps.
 Each section can be selected independently. The overview includes a station map
 with station names, period coverage, full/partial/masked/missing period counts and, when selected,
@@ -34,7 +34,7 @@ ellipses and induction vectors appear together on the same map. Choose
 observations, the selected response, or both; choose real and/or imaginary
 induction vectors. The dialog previews the total page count. Nearest-period
 matching, tolerance, vector convention, sizes, colors and station labels follow
-the period map window when open; maps never interpolate or extrapolate. Only
+the period map tab when open; maps never interpolate or extrapolate. Only
 valid, enabled data appear. Map extents fit each exported page. The UTM zone and
 **origin easting/northing in metres** accompany the overview, station and period
 maps so plotted offsets can be converted back to absolute coordinates.
@@ -59,7 +59,7 @@ Choose all stations or enabled stations, an optional loaded response overlay,
 error bars, and whether to include only the currently visible components.
 GoFEM and native inversion responses use the same report rendering. nRMS uses
 observed errors and all matched, enabled scalar data, independently of plot
-visibility. Fixed XY/YX resistivity and phase ranges from **View → Axis ranges**
+visibility. Fixed XY/YX resistivity and phase ranges from **TF appearance → Axis ranges**
 are retained on every station page, including response overlays and empty panels.
 The PDF uses one axis per quantity, so separate XX/YY ranges and the TF view's
 colors, glyph sizes and ellipse colormap apply only to the on-screen view and

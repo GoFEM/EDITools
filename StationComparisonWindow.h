@@ -1,6 +1,6 @@
 #ifndef EDITOOLS_STATION_COMPARISON_WINDOW_H
 #define EDITOOLS_STATION_COMPARISON_WINDOW_H
-#include <QDialog>
+#include "include/WorkspaceView.h"
 #include <memory>
 #include <vector>
 class MTSurveyData;
@@ -11,7 +11,7 @@ class QCheckBox;
 class QLabel;
 class QCustomPlot;
 class MapBackground;
-class StationComparisonWindow : public QDialog {
+class StationComparisonWindow : public WorkspaceView {
 public:
   explicit StationComparisonWindow(QWidget *parent = nullptr);
   void setData(std::shared_ptr<MTSurveyData> survey, const QStringList &selected = {});

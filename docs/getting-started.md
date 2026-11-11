@@ -2,27 +2,71 @@
 
 [Guide contents](README.md) · [Editing and masking →](editing.md)
 
+- [Workspace tabs](#workspace-tabs)
 - [Command ribbon](#command-ribbon)
 - [EDI import and nearby periods](#edi-import-and-nearby-periods)
 - [Computed responses](#computed-responses)
 - [Transfer-function view](#transfer-function-view)
 - [Plot hotkeys](#plot-hotkeys)
 
+## Workspace tabs
+
+**TF view** is the default, pinned first tab. Open a profile, period map,
+statistics, neighbouring-station comparison, Rho+ analysis, survey average,
+polarity review, period layout or detailed auto-mask review from **Views**
+or **Auto mask**. The analysis opens beside TF view in the same project window.
+Its plots and tables occupy the workspace; its controls appear in the ribbon.
+
+A view command returns to an existing tab. **Views → New view** opens another
+instance; **Duplicate view** copies the current analysis and its settings.
+Double-click a tab or use **Rename tab** to change its name; **F2** also works
+when the tab bar has keyboard focus. Drag tabs to reorder them. TF view stays
+first and cannot be closed. Close an analysis with its cross or **Ctrl+W**;
+**Ctrl+Shift+T** reopens the most recently closed tab, including its settings.
+
+Each analysis has its own data selection, display settings and view extent.
+Survey data, masks and Undo/Redo are shared by the project. A profile's corridor
+selection and an average's checked stations do not change the survey's enabled
+stations. Selecting a station in a profile updates the current TF station while
+keeping the profile tab active. **Undo vertex** edits the line; the main **Undo**
+command restores survey edits. Inactive analyses refresh when selected.
+
+Saving a project stores the open tabs, their names, order, settings and active
+tab. Profile vertices are stored geographically, so changing the UTM origin
+preserves the line. Version 10 projects include this workspace state; older
+projects open in TF view. Calculated previews are recomputed from the loaded
+data. Closed-tab recovery lasts for the current session.
+
+**TF tools → Station navigator** collapses the station/map sidebar. Analyses
+use their own full-width workspace. **Open as survey** and **Create survey**
+produce an independent project window with its own data and edit history.
+
 ## Command ribbon
 
-The compact ribbon groups commands into **Survey**, **Edit**, **Auto mask**,
-**Analysis**, **Maps**, **Report** and **View**. Open project, Save, Undo and Redo stay available in the
-upper left. Component visibility controls remain beside their plots.
+**Project**, **Edit**, **Views** and **Export** stay available. Additional pages
+follow the active workspace: **TF tools / TF appearance / Auto mask / Mask
+settings**, **Profile tools / Profile appearance / Strike tools**, **Map tools /
+Map appearance**, and the corresponding analysis tools. Open project, Save,
+Undo and Redo remain in the upper left. Component visibility controls remain
+beside their plots.
 
-Use the arrow or **Ctrl+F1** to collapse the commands; click a tab to expand them.
-**Interface → Classic menus** restores the menu bar. The layout, collapse state
-and selected tab are remembered between sessions. Existing keyboard shortcuts
-work in both layouts. Hover over a command for its description; tools that need
-survey data are disabled until a survey is loaded.
+Controls appear when their settings apply. For example, rotation reveals strike
+options; Manual reveals the angle; automatic strike or PT filtering reveals
+quality thresholds. Arrow settings appear when an arrow layer is enabled, fixed
+limits appear when Auto is off, and resampling shows the fields for its chosen
+grid. Hidden settings keep their values. Commands that apply but lack data or a
+valid preview are disabled. The ribbon height stays fixed; wide groups scroll
+horizontally on smaller screens.
 
-The instructions below use ribbon labels. The classic menus expose the same
-commands and share their checked and enabled states.
-**Plot → Configure TF view** in classic menus opens the **View** ribbon.
+Use the arrow or **Ctrl+F1** to collapse the commands; click a ribbon tab to
+expand them. **Interface → Classic menus** restores the menu bar. Existing
+keyboard shortcuts work in both layouts. **Plot → Configure TF view** opens
+**TF appearance**. Opening an analysis exposes its contextual ribbon controls.
+Hover over a command for its description.
+
+**Export → Active view PNG** captures the active view. **Active view PDF / CSV**
+uses that view's export where available. **Survey PDF**, **Native MT** and
+**GoFEM** operate on the survey and have their own selection controls.
 
 Each station-list entry shows its name, number of periods and coordinates.
 Coordinates follow the map's **Lat/Lon** or **UTM** selection, including
@@ -98,7 +142,7 @@ The last selected filename in sorted order is displayed immediately.
 
 Both formats support the same plots, visibility controls, fit statistics, RMS
 maps, period maps and project storage.
-Reloading a file replaces its data and updates every open analysis window.
+Reloading a file replaces its data and marks open analysis tabs for refresh.
 
 | Input format | Six columns |
 | --- | --- |
@@ -132,7 +176,7 @@ XX/YY on the right, then full-width induction arrows and phase-tensor ellipses.
 This also applies when opening older projects.
 The current station name appears above the plots and in exported plot images.
 
-Configure the display directly in **View**:
+Configure the display directly in **TF appearance**:
 
 - **Axis ranges**: choose the shared period axis or a resistivity/phase column.
   Enter minimum and maximum, then press **Apply** or Enter to fix the range.
@@ -175,7 +219,7 @@ outlines show the selected calculated response. Missing or undefined tensors
 are omitted. Select ellipse centers to mask/unmask all four PT entries at those
 periods. **Link Z / PT** controls the corresponding impedance masks; tipper masks
 remain independent. Use **Edit → Group masking** to inspect or mask individual
-PT entries. **Report → Plot image** exports the displayed layout; the survey PDF
+PT entries. **Export → Active view PNG** exports the displayed layout; the survey PDF
 retains its own plot settings.
 
 ## Plot hotkeys

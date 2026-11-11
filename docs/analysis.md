@@ -10,7 +10,7 @@
 
 ## Data fit analysis
 
-Open **Analysis → Statistics / RMS** for a separate comparison window. Check or
+Open **Views → Statistics / RMS** to open a comparison tab. Check or
 uncheck any loaded response to include it in the overall nRMS, period, component,
 station and normalized-residual plots. Each response keeps the same color across
 the comparison plots; the list shows its nRMS and matched/available scalar count.
@@ -22,9 +22,9 @@ missing comparisons. Select either response from the dropdowns. Pan and zoom
 the plots, or use **Save PDF…** to export the overview, station plot and selected
 spatial comparison.
 
-Use **Plot ranges…** to set minimum and maximum values for each statistics
-plot's X and Y axes. Leave **Auto** checked to fit the enabled responses, or
-choose **Autoscale all** to reset the ranges. **Colors** changes the
+Use **Fit appearance → Axis ranges** to choose a statistics plot and its X or Y
+axis. Leave **Auto range** checked to fit the enabled responses, or turn it off
+to set the minimum and maximum. **Fit all axes** resets the ranges. **Colors** changes the
 comparison palette. In **Maps and heatmaps**, choose the **Colormap** and
 optionally **Reverse** it; uncheck **Auto** beside either nRMS range to edit
 its limits. Map and heatmap ranges are independent and shared by their two
@@ -43,7 +43,7 @@ matched counts mean the responses cover different subsets of the observations.
 
 ## Neighbouring-station comparison
 
-**Analysis → Neighbours** overlays the stations selected in the
+**Views → Neighbours** overlays the stations selected in the
 main station list. With one station selected, it chooses that reference and its
 nearest enabled neighbours. Change **Reference** and click **Nearest** to choose
 a different group; the count specifies neighbours in addition to the reference.
@@ -58,7 +58,7 @@ can still be checked manually. This comparison does not change data or masks.
 
 ## Impedance validity and rho+
 
-Open **Analysis → Rho+ analysis** to compare a station's measured
+Open **Views → Rho+ analysis** to compare a station's measured
 apparent resistivity and phase with fitted rho+ responses. Select the station;
 **XY / YX** shows both off-diagonal components together, with independent fits
 drawn as thin dashed lines in their component colors. The **XY** and **YX**
@@ -69,12 +69,12 @@ component explicitly. **YX**
 is shown as `−Zyx` to use the same sign convention as XY. Phase is not folded
 into the first quadrant, so anomalous phases remain visible.
 
-Use **Analysis → Rho+ guides** to overlay thin, dashed XY/YX fits on the main
+Use **TF tools → Rho+ guides** to overlay thin, dashed XY/YX fits on the main
 resistivity and phase plots in their component colors. They follow the existing
 component visibility and phase-wrapping controls and refresh after masking or
 unmasking, preserving the current axes. The guides cannot be selected for masking
 and can be shown alongside loaded responses. They use the main data's propagated
-errors. Grid density comes from the validity window; this setting and guide visibility are saved in
+errors. Grid density comes from the validity tab; this setting and guide visibility are saved in
 the project. Every fit uses only the remaining unmasked, enabled samples with
 valid propagated errors. Finite provisional fits remain visible as dotted lines
 when convergence or grid refinement checks fail; hover over **Rho+ guides** for
@@ -87,7 +87,7 @@ log admittance from [Parker and Booker (1996)](https://doi.org/10.1016/S0031-920
 It minimizes weighted residuals in log resistivity and phase jointly, using
 exact spectral-interval integrals, a free real offset, and both spectral tails.
 It is a **finite-grid approximation**, with a second solve at twice the selected
-**Grid/decade**. The window reports solver convergence and the change in χ²;
+**Grid/decade**. The view reports solver convergence and the change in χ²;
 a grid-sensitive result should be rechecked at higher density. Curves are drawn
 only within the usable period range.
 
@@ -139,7 +139,7 @@ the shared history. Navigating stations preserves undo; other edits add their ow
 
 ## Survey impedance averages
 
-Open **Analysis → Survey averages** to display station responses and
+Open **Views → Survey averages** to display station responses and
 their **Regional geometric mean**. Check stations in the list to include them;
 the two checkboxes above the plots control curve visibility. Disabled survey
 stations and masked or incomplete required components cannot contribute.
@@ -178,7 +178,7 @@ its station enable flags remain unchanged.
 
 ## Polarity review
 
-Open **Analysis → Polarity review** (or **Data → Polarity review…** in classic
+Open **Views → Polarity review** (or **Data → Polarity review…** in classic
 menus) to flag likely station polarity reversals relative to nearby stations.
 The table shows reversed / matched period counts for XY and YX; hover for the
 usable-period count. **No flag** means the test did not identify a sustained

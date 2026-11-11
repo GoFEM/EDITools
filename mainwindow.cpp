@@ -71,6 +71,9 @@
 #include "FitStatisticsWindow.h"
 #include "PeriodMapWindow.h"
 #include "ProfileWindow.h"
+#include "include/WorkspaceTabs.h"
+#include <QJsonDocument>
+#include <QSaveFile>
 #include "PeriodLayoutWindow.h"
 #include "EDIImportDialog.h"
 #include "include/SurveyReport.h"
@@ -82,7 +85,7 @@ namespace
 // version so the loader can distinguish both layouts and keep old .mtd files
 // readable.
 const std::uint32_t projectFileMagic = 0x45444954; // "EDIT"
-const std::uint32_t projectFileVersion = 9;
+const std::uint32_t projectFileVersion = 10;
 }
 
 MainWindow::MainWindow(QWidget *parent) :
@@ -212,61 +215,33 @@ MainWindow::MainWindow(QWidget *parent) :
   mapActions->addWidget(profileButton);
   connect(profileButton, &QPushButton::clicked, profileAction, &QAction::trigger);
   connect(profileAction, &QAction::changed, profileButton, [profileButton, profileAction] { profileButton->setEnabled(profileAction->isEnabled()); });
-  connect(profileAction, &QAction::triggered, this, [this] {
-    const bool first = !profile;
-    if(first) profile = new ProfileWindow(this, [this](std::shared_ptr<MTSurveyData> data) { openSurveyCopy(std::move(data)); });
-    profile->setData(mtSurvey, mtResponses);
-    if(first) profile->setMapLayers(mapBackground->layers());
-    profile->show(); profile->raise(); profile->activateWindow();
-  });
+  connect(profileAction, &QAction::triggered, this, [this] { openWorkspace("profile"); });
   auto *periodLayoutAction = ui->menuData->addAction(tr("Period layout / Resampling…"));
   periodLayoutAction->setObjectName("actionPeriod_layout");
   connect(periodLayoutAction, &QAction::triggered, this, &MainWindow::openPeriodLayout);
   auto *compare = ui->menuData->addAction(tr("Compare neighbouring stations…"));
   compare->setObjectName("actionCompare_stations");
-  connect(compare, &QAction::triggered, this, [this] {
-    if(!stationComparison) stationComparison = new StationComparisonWindow(this);
-    QStringList selected;
-    if(auto *item=ui->stationList->currentItem()) selected << item->text();
-    for(auto *item:ui->stationList->selectedItems()) if(!selected.contains(item->text()))selected << item->text();
-    stationComparison->setData(mtSurvey,selected);
-    stationComparison->show();stationComparison->raise();stationComparison->activateWindow();
-  });
+  connect(compare, &QAction::triggered, this, [this] { openWorkspace("comparison"); });
   auto *validityAction = ui->menuData->addAction(tr("Impedance validity / Rho+…"));
   auto *polarityAction = ui->menuData->addAction(tr("Polarity review…"));
   polarityAction->setObjectName("actionPolarity_review");
   polarityAction->setToolTip(tr("Review likely polarity reversals against neighbouring stations, preview channel corrections and apply with Undo support."));
-  connect(polarityAction, &QAction::triggered, this, [this] {
-    if(!polarity) polarity = new PolarityWindow(this, *history, [this] { updatePlots(false); refreshAnalysisWindows(); });
-    polarity->setData(mtSurvey, ui->stationList->currentItem() ? ui->stationList->currentItem()->text() : QString());
-    polarity->show(); polarity->raise(); polarity->activateWindow();
-  });
+  connect(polarityAction, &QAction::triggered, this, [this] { openWorkspace("polarity"); });
   validityAction->setObjectName("actionImpedance_validity");
-  connect(validityAction, &QAction::triggered, this, [this] {
-    if(!impedanceValidity) impedanceValidity = new ImpedanceValidityWindow(this, [this](const ImpedanceAnalysis::RhoPlusOptions &options) {
-      rhoPlusOptions=options; updatePlots(false);
-    }, [this] { updatePlots(false); refreshAnalysisWindows(); });
-    impedanceValidity->setLinkTensorMasks(linkTensorMasksAction->isChecked());
-    impedanceValidity->setFitOptions(rhoPlusOptions);
-    impedanceValidity->setHistory(history.get());
-    impedanceValidity->setData(mtSurvey, ui->stationList->currentItem() ? ui->stationList->currentItem()->text() : QString());
-    impedanceValidity->show(); impedanceValidity->raise(); impedanceValidity->activateWindow();
-  });
+  connect(validityAction, &QAction::triggered, this, [this] { openWorkspace("validity"); });
   auto *averagesAction = ui->menuData->addAction(tr("Survey impedance averages…"));
   averagesAction->setObjectName("actionSurvey_averages");
-  connect(averagesAction, &QAction::triggered, this, [this] {
-    if(!surveyAverage) surveyAverage = new SurveyAverageWindow(this);
-    surveyAverage->setData(mtSurvey);
-    surveyAverage->show(); surveyAverage->raise(); surveyAverage->activateWindow();
-  });
+  connect(averagesAction, &QAction::triggered, this, [this] { openWorkspace("average"); });
   linkTensorMasksAction = ui->menuData->addAction(tr("Link Z / PT masks"));
   linkTensorMasksAction->setObjectName("actionLink_tensor_masks");
   linkTensorMasksAction->setCheckable(true); linkTensorMasksAction->setChecked(true);
   linkTensorMasksAction->setToolTip(tr("Link mask and unmask edits at the same period: a selected Z component affects all PT entries; a selected PT entry affects all Z components. Phi = Re(Z)^-1 Im(Z), so there is no one-to-one mapping in general 3D. Independently, Zxy edits also affect Zxx, and Zyx edits also affect Zyy. Tippers remain independent. Toggling this option does not alter existing masks."));
   connect(linkTensorMasksAction, &QAction::toggled, this, [this](bool on) {
     for(const auto &plot: plotHandlers) plot->set_link_tensor_masks(on);
-    if(periodMaps) periodMaps->setLinkTensorMasks(on);
-    if(impedanceValidity) impedanceValidity->setLinkTensorMasks(on);
+    if(workspaces) for(int i = 1; i < workspaces->count(); ++i) {
+      if(auto *view = dynamic_cast<PeriodMapWindow *>(workspaces->widget(i))) view->setLinkTensorMasks(on);
+      if(auto *view = dynamic_cast<ImpedanceValidityWindow *>(workspaces->widget(i))) view->setLinkTensorMasks(on);
+    }
   });
   auto *groupMasks = edit->addAction(tr("Group masking…"));
   groupMasks->setObjectName("actionGroup_masking");
@@ -281,6 +256,9 @@ MainWindow::MainWindow(QWidget *parent) :
   });
   autoMaskWorkflow = new AutoMaskWorkflow(*this, *history, plotHandlers, linkTensorMasksAction);
   connect(autoMaskWorkflow, &AutoMaskWorkflow::masksApplied, this, [this] { updatePlots(false); refreshAnalysisWindows(); });
+  connect(autoMaskWorkflow, &AutoMaskWorkflow::reviewRequested, this, [this] { openWorkspace("automask"); });
+  connect(autoMaskWorkflow, &AutoMaskWorkflow::settingsRequested, this, [this] { workspaces->setCurrentIndex(0); ribbon->showPage("Mask settings"); });
+
   connect(autoMaskWorkflow, &AutoMaskWorkflow::navigateRequested, this, [this](int direction) {
     const int row = ui->stationList->currentRow() + direction;
     if(row >= 0 && row < ui->stationList->count()) ui->stationList->setCurrentRow(row, QItemSelectionModel::NoUpdate);
@@ -358,7 +336,9 @@ MainWindow::MainWindow(QWidget *parent) :
       syncingPeriods = false;
       if(viewControls) viewControls->refreshRange();
     });
+  setupWorkspace();
   setupRibbon();
+  activateWorkspace();
   for(auto *plot: {plot11, plot12}) for(auto *rect: plot->axisRects())
     connect(rect->axis(QCPAxis::atLeft), qOverload<const QCPRange &>(&QCPAxis::rangeChanged), this,
             [this] { viewControls->refreshRange(); });
@@ -456,7 +436,24 @@ void MainWindow::setupRibbon()
     {tr("&View"), viewGroups}
   };
   ui->actionAbout_EDI_Tools->setIcon(commandIcon("info"));
-  ribbon = new CommandRibbon(*this, {open, save, undo, redo}, pages, ui->actionAbout_EDI_Tools);
+  const auto action = [this](const char *name) { return findChild<QAction *>(name); };
+  auto viewCommands = pages[3].groups;
+  viewCommands.push_back({tr("Maps and profiles"), {ui->actionPeriod_maps, action("actionProfile_analysis")}});
+  viewCommands.push_back({tr("Workspace"), {action("actionNew_view"), action("actionDuplicate_view"), action("actionRename_view"), action("actionClose_view"), action("actionReopen_view")}});
+  tfTools = {{tr("TF tools"), {
+    {tr("Navigator"), {action("actionStation_navigator"), ui->actionShow_station_names}},
+    pages[4].groups[0], pages[4].groups[2],
+    {tr("Guides"), {rhoPlusAction, ui->actionActivate_masking_mode}}
+  }, "TF tools"}, {tr("TF appearance"), viewGroups, "TF appearance"}, pages[2]};
+  for(const auto &page: autoMaskWorkflow->settingsView()->toolPages()) tfTools.push_back(page);
+  const std::vector<CommandRibbon::Page> workspacePages{
+    {tr("&Project"), pages[0].groups, "Project"},
+    {tr("&Edit"), pages[1].groups, "Edit"},
+    {tr("&Views"), viewCommands, "Views"},
+    {tr("&Export"), {{tr("Active view"), {action("actionView_png"), action("actionView_pdf"), action("actionView_csv")}},
+      {tr("Survey"), {action("actionExport_survey_report"), ui->actionExport_native_MT, ui->actionExport_in_GoFEM}}}, "Export"}
+  };
+  ribbon = new CommandRibbon(*this, {open, save, undo, redo}, workspacePages, ui->actionAbout_EDI_Tools);
   updateActionAvailability();
 }
 
@@ -596,6 +593,8 @@ void MainWindow::applyPlotOptions(const PlotOptions &options)
 
 MainWindow::~MainWindow()
 {
+  clearWorkspace();
+  workspaces->disconnect(this);
   delete ui;
 }
 
@@ -858,19 +857,19 @@ void MainWindow::on_actionSave_project_triggered()
     rememberDirectory(projectFile);
   }
 
-  std::ofstream ofs(projectFile.toStdString(), std::ios::binary);
+  try {
+    std::ostringstream buffer(std::ios::binary);
+    {
+      boost::archive::binary_oarchive oa(buffer);
+      oa << projectFileMagic << projectFileVersion << mtSurvey << mtResponses << currentPlotOptions();
+      const auto workspace = QJsonDocument(saveWorkspace()).toJson(QJsonDocument::Compact).toStdString();
+      oa << workspace;
+    }
+    const auto bytes = buffer.str(); QSaveFile file(projectFile);
+    if(!file.open(QIODevice::WriteOnly) || file.write(bytes.data(), qint64(bytes.size())) != qint64(bytes.size()) || !file.commit())
+      throw std::runtime_error("Could not save the complete project.");
+  } catch(const std::exception &error) { QMessageBox::critical(this, tr("Save project"), QString::fromUtf8(error.what())); }
 
-  if(ofs.is_open())
-  {
-    boost::archive::binary_oarchive oa(ofs);
-    oa << projectFileMagic;
-    oa << projectFileVersion;
-    oa << mtSurvey;
-    oa << mtResponses;
-    oa << currentPlotOptions();
-  }
-
-  ofs.close();
 }
 
 void MainWindow::on_actionLoad_project_triggered()
@@ -887,6 +886,8 @@ void MainWindow::on_actionLoad_project_triggered()
   rememberDirectory(path);
 
   bool loaded = false;
+  QJsonObject loadedWorkspace;
+  PlotOptions loadedOptions;
   std::shared_ptr<MTSurveyData> loadedSurvey;
   std::map<std::string,MTSurveyData> loadedResponses;
 
@@ -904,6 +905,7 @@ void MainWindow::on_actionLoad_project_triggered()
       if(magic != projectFileMagic)
         throw std::runtime_error("Legacy project format");
 
+      if(version > projectFileVersion) throw std::runtime_error("Unsupported project version");
       ia >> loadedSurvey;
       ia >> loadedResponses;
 
@@ -969,7 +971,15 @@ void MainWindow::on_actionLoad_project_triggered()
         const auto &axis = plotOptions.axes[i];
         plotOptions.diagonals[i] = {axis.autoscale, axis.lower, axis.upper};
       }
-      applyPlotOptions(plotOptions);
+      if(version >= 10) {
+        std::string workspace; ia >> workspace;
+        QJsonParseError error;
+        const auto document = QJsonDocument::fromJson(QByteArray::fromStdString(workspace), &error);
+        if(error.error != QJsonParseError::NoError || !document.isObject() || document.object()["schema"].toInt() != 1)
+          throw std::runtime_error("Invalid workspace");
+        loadedWorkspace = document.object();
+      }
+      loadedOptions = plotOptions;
       loaded = true;
     }
   }
@@ -996,7 +1006,7 @@ void MainWindow::on_actionLoad_project_triggered()
           axisOptions.upper = range.upper;
           defaultPlotOptions.axes.push_back(axisOptions);
         }
-        applyPlotOptions(defaultPlotOptions);
+        loadedOptions = defaultPlotOptions;
         loaded = true;
       }
     }
@@ -1013,12 +1023,15 @@ void MainWindow::on_actionLoad_project_triggered()
     return;
   }
 
+  clearWorkspace();
   mtSurvey=std::move(loadedSurvey);
   mtResponses=std::move(loadedResponses);
+  applyPlotOptions(loadedOptions);
   projectFile=path;
   history->reset(mtSurvey);
   createResponsesList();
   restoreSurveyView();
+  restoreWorkspace(loadedWorkspace);
 }
 
 void MainWindow::on_stationList_currentRowChanged(int /*currentRow*/)
@@ -1243,7 +1256,8 @@ void MainWindow::on_actionSave_as_PDF_triggered()
 
 void MainWindow::on_actionPlot_axis_ranges_triggered()
 {
-  if(ribbon) ribbon->showPage(6);
+  if(workspaces) workspaces->setCurrentIndex(0);
+  if(ribbon) ribbon->showPage("TF appearance");
   if(viewControls) viewControls->refreshRange();
 }
 
@@ -1293,35 +1307,17 @@ void MainWindow::loadResponseFiles(const QStringList &files)
   refreshAnalysisWindows();
 }
 
-void MainWindow::on_actionFit_statistics_triggered()
-{
-  if(!fitStatistics)
-    fitStatistics = new FitStatisticsWindow(this, [this] { refreshAnalysisWindows(); });
-  refreshAnalysisWindows();
-  fitStatistics->show();
-  fitStatistics->raise();
-  fitStatistics->activateWindow();
-}
+void MainWindow::on_actionFit_statistics_triggered() { openWorkspace("fit"); }
 
 void MainWindow::refreshAnalysisWindows()
 {
   updateActionAvailability();
-  if(fitStatistics) fitStatistics->setData(mtSurvey, mtResponses);
-  if(periodMaps) periodMaps->setData(mtSurvey, mtResponses);
-  if(profile) profile->setData(mtSurvey, mtResponses);
-  if(periodLayout) periodLayout->setData(mtSurvey);
-  if(impedanceValidity) impedanceValidity->setData(mtSurvey);
-  if(surveyAverage) surveyAverage->setData(mtSurvey);
-  if(stationComparison) stationComparison->setData(mtSurvey);
-  if(polarity) polarity->setData(mtSurvey);
+  if(!workspaces) return;
+  for(int i = 1; i < workspaces->count(); ++i) workspaces->widget(i)->setProperty("workspaceDirty", true);
+  refreshWorkspace(workspaces->currentWidget());
 }
 
-void MainWindow::openPeriodLayout()
-{
-  if(!periodLayout) periodLayout = new PeriodLayoutWindow(this, [this](std::shared_ptr<MTSurveyData> data) { openSurveyCopy(std::move(data)); });
-  periodLayout->setData(mtSurvey);
-  periodLayout->show(); periodLayout->raise(); periodLayout->activateWindow();
-}
+void MainWindow::openPeriodLayout() { openWorkspace("periods"); }
 
 void MainWindow::openSurveyCopy(std::shared_ptr<MTSurveyData> data)
 {
@@ -1341,22 +1337,7 @@ void MainWindow::openSurveyCopy(std::shared_ptr<MTSurveyData> data)
   window->show();
 }
 
-void MainWindow::on_actionPeriod_maps_triggered()
-{
-  const bool firstOpen = !periodMaps;
-  if(firstOpen) periodMaps = new PeriodMapWindow(this, [this] { history->record(tr("Map masks")); updatePlots(); refreshAnalysisWindows(); });
-  periodMaps->setLinkTensorMasks(linkTensorMasksAction->isChecked());
-  periodMaps->setData(mtSurvey, mtResponses);
-  if(firstOpen) {
-    auto settings = periodMaps->displaySettings();
-    settings.mapLayers = mapBackground->layers();
-    settings.names = mapStationNames->isChecked();
-    periodMaps->setDisplaySettings(settings);
-  }
-  periodMaps->show();
-  periodMaps->raise();
-  periodMaps->activateWindow();
-}
+void MainWindow::on_actionPeriod_maps_triggered() { openWorkspace("map"); }
 
 void MainWindow::createResponsesList()
 {

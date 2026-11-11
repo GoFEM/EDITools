@@ -19,7 +19,7 @@ QColor arrowColor(bool imaginary) { return imaginary ? QColor("#c2410c") : QColo
 }
 
 PeriodMapWindow::PeriodMapWindow(QWidget *parent, std::function<void()> changed)
-  : QDialog(parent, Qt::Window), observationsChanged(std::move(changed))
+  : WorkspaceView(parent), observationsChanged(std::move(changed))
 {
   setObjectName("periodMapWindow");
   setWindowTitle(tr("Period maps"));
@@ -158,6 +158,7 @@ PeriodMapWindow::PeriodMapWindow(QWidget *parent, std::function<void()> changed)
     plot->setSelectionRectMode(selecting ? QCP::srmCustom : QCP::srmNone);
     plot->setInteraction(QCP::iRangeDrag, !selecting);
     plot->setCursor(selecting ? Qt::CrossCursor : Qt::ArrowCursor);
+    for(auto *control: std::vector<QWidget *>{maskGroup, maskButton, unmaskButton, clearSelection, selectionSummary}) setToolVisible(control, selecting);
   });
   connect(plot, &QCustomPlot::mousePress, this, [this](QMouseEvent *event) {
     selectionStart = event->pos(); selectionDragged = false;
@@ -218,6 +219,13 @@ PeriodMapWindow::PeriodMapWindow(QWidget *parent, std::function<void()> changed)
   });
   connect(fit, &QPushButton::clicked, this, [this] { fitView(); });
   connect(pdf, &QPushButton::clicked, this, [this] { savePdf(); });
+  addToolGroup(tr("Map tools"), tr("Data and period"), top);
+  addToolGroup(tr("Map tools"), tr("Layers"), layers);
+  addToolGroup(tr("Map tools"), tr("Mask selection"), maskControls);
+  addToolGroup(tr("Map appearance"), tr("Symbols and colors"), controls);
+  setExportButton("pdf", pdf);
+  setStateRefresh([this] { updatePeriods(); updateMap(); });
+
 }
 
 const MTSurveyData *PeriodMapWindow::source() const
@@ -401,6 +409,11 @@ void PeriodMapWindow::drawArrow(const Site &site, const std::array<double, 2> &v
 
 void PeriodMapWindow::updateMap(bool fit)
 {
+  const bool arrows = realArrows->isChecked() || imagArrows->isChecked();
+  for(auto *control: std::vector<QWidget *>{convention, arrowSize, arrowWidth}) setToolVisible(control, arrows);
+  setToolVisible(ellipseSize, tensors->isChecked());
+  for(auto *control: std::vector<QWidget *>{maskGroup, maskButton, unmaskButton, clearSelection, selectionSummary}) setToolVisible(control, selectMode->isChecked());
+
   referenceArrow = nullptr;
   selectionGraph = nullptr;
   plot->clearPlottables(); plot->clearItems(); haveBounds = false;
@@ -616,7 +629,7 @@ void PeriodMapWindow::setDisplaySettings(const DisplaySettings &s)
   std::vector<std::unique_ptr<QSignalBlocker>> blockers;
   for(auto *control: controls) blockers.emplace_back(new QSignalBlocker(control));
   background->setLayers(s.mapLayers);
-  for(auto *action: findChild<QToolButton *>("mapLayers")->menu()->actions()) if(action->isCheckable()) {
+  for(auto *action: control<QToolButton>("mapLayers")->menu()->actions()) if(action->isCheckable()) {
     const QSignalBlocker block(action); action->setChecked(s.mapLayers & action->data().toInt());
   }
   tolerance->setValue(s.tolerancePercent); ellipseSize->setValue(s.ellipseKm); arrowSize->setValue(s.arrowKm);
@@ -656,7 +669,7 @@ QString PeriodMapWindow::renderReport(QCPPainter &painter, const QRect &rect, do
 
 void PeriodMapWindow::savePdf()
 {
-  auto path = QFileDialog::getSaveFileName(this, tr("Save period map"), "period_map.pdf", tr("PDF (*.pdf)"));
+  auto path = QFileDialog::getSaveFileName(this, tr("Save period map"), exportName("pdf"), tr("PDF (*.pdf)"));
   if(path.isEmpty()) return;
   if(!path.endsWith(".pdf", Qt::CaseInsensitive)) path += ".pdf";
   const auto x = plot->xAxis->range(), y = plot->yAxis->range();

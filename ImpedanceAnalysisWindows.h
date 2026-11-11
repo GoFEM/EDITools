@@ -1,7 +1,7 @@
 #ifndef EDITOOLS_IMPEDANCE_ANALYSIS_WINDOWS_H
 #define EDITOOLS_IMPEDANCE_ANALYSIS_WINDOWS_H
 
-#include <QDialog>
+#include "include/WorkspaceView.h"
 #include <memory>
 #include <functional>
 #include "include/ImpedanceAnalysis.h"
@@ -9,7 +9,7 @@ class MTSurveyData;
 class SurveyHistory;
 class QShowEvent;
 
-class ImpedanceValidityWindow : public QDialog {
+class ImpedanceValidityWindow : public WorkspaceView {
 public:
   explicit ImpedanceValidityWindow(QWidget *parent = nullptr,
     std::function<void(const ImpedanceAnalysis::RhoPlusOptions &)> optionsChanged = {},
@@ -25,7 +25,7 @@ private:
   struct Impl;
   std::unique_ptr<Impl> impl;
 };
-class SurveyAverageWindow : public QDialog {
+class SurveyAverageWindow : public WorkspaceView {
 public:
   explicit SurveyAverageWindow(QWidget *parent = nullptr);
   ~SurveyAverageWindow() override;

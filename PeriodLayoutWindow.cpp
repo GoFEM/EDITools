@@ -54,7 +54,7 @@ QString statusLabel(Status status) {
 }
 
 PeriodLayoutWindow::PeriodLayoutWindow(QWidget *parent, std::function<void(std::shared_ptr<MTSurveyData>)> create)
-  : QDialog(parent, Qt::Window), createSurvey(std::move(create))
+  : WorkspaceView(parent), createSurvey(std::move(create))
 {
   setObjectName("periodLayoutWindow"); setWindowTitle(tr("Period layout and resampling")); resize(1200, 900);
   auto *layout = new QVBoxLayout(this);
@@ -139,7 +139,7 @@ PeriodLayoutWindow::PeriodLayoutWindow(QWidget *parent, std::function<void(std::
   ToolTips::set(openSource, tr("Open the source snapshot retained in this resampled project, in a separate window."));
   ToolTips::set(report, tr("Export the current preview calculation to CSV."));
   ToolTips::set(sourceReport, tr("Export the saved resampling operation, before subsequent edits or masking."));
-  connect(close, &QPushButton::clicked, this, &QDialog::hide);
+  connect(close, &QPushButton::clicked, this, &QWidget::hide);
   connect(previewButton, &QPushButton::clicked, this, &PeriodLayoutWindow::preview);
   connect(apply, &QPushButton::clicked, this, [this] { if(result && createSurvey) createSurvey(std::make_shared<MTSurveyData>(*result)); });
   connect(report, &QPushButton::clicked, this, [this] { if(result) exportReport(result->resampling_info()); });
@@ -185,6 +185,20 @@ PeriodLayoutWindow::PeriodLayoutWindow(QWidget *parent, std::function<void(std::
     plot->setToolTip(text);
   });
   invalidate();
+  actions->removeWidget(history); layout->addWidget(history);
+  actions->removeWidget(close); delete close;
+  tabs->setObjectName("layoutTabs");
+  addToolGroup(tr("Period tools"), tr("Target grid"), controls);
+  addToolGroup(tr("Period tools"), tr("Interpolation and display"), filters);
+  addToolGroup(tr("Period tools"), tr("Preview and output"), actions);
+  setExportButton("csv", report); setStateRefresh([this] {
+    const auto selected = component->currentData(); const QSignalBlocker block(component);
+    component->clear(); const unsigned first = group->currentIndex() == 0 ? 0 : (group->currentIndex() == 1 ? 4 : 6);
+    const unsigned last = first == 0 ? 4 : (first == 4 ? 6 : 10);
+    for(unsigned c = first; c < last; ++c) component->addItem(component_name(c), c);
+    component->setCurrentIndex(std::max(0, component->findData(selected))); invalidate();
+  });
+
 }
 
 void PeriodLayoutWindow::setData(const std::shared_ptr<MTSurveyData> &data)
@@ -238,6 +252,8 @@ void PeriodLayoutWindow::invalidate()
   const int mode = gridMode->currentIndex();
   minimum->setEnabled(mode == 0); maximum->setEnabled(mode == 0); density->setEnabled(mode == 0);
   reference->setEnabled(mode == 1); custom->setEnabled(mode == 2);
+  for(auto *control: std::vector<QWidget *>{minimum, maximum, density}) setToolVisible(control, mode == 0);
+  setToolVisible(reference, mode == 1); setToolVisible(custom, mode == 2);
   result.reset(); apply->setEnabled(false); report->setEnabled(false);
   summary->setText(tr("Click Preview to check the grid."));
   updatePlots();

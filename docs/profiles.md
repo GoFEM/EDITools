@@ -9,7 +9,7 @@
 - [Strike roses](#strike-roses)
 - [Extract and export](#extract-and-export)
 
-Open **Maps → 2D profile**, or click **2D profile…** beside the station map,
+Open **Views → 2D profile**, or click **2D profile…** beside the station map,
 to draw a corridor and inspect the stations along it.
 The source survey, coordinates, errors and masks are unchanged.
 
@@ -20,7 +20,7 @@ The source survey, coordinates, errors and masks are unchanged.
 3. Set **Distance ± (km)** to the corridor distance on each side of the line.
    **Auto** restores the median nonzero nearest-neighbour spacing of enabled
    survey stations (1 km when spacing cannot be determined).
-4. Use **Undo**, **Reverse** or **Clear** to edit the line. **Fit** restores the
+4. Use **Undo vertex**, **Reverse** or **Clear** to edit the line. **Fit** restores the
    survey map extent. Reverse changes the distance origin and station order.
 
 Orange points and the table show the selected stations. Distance is measured
@@ -34,7 +34,9 @@ UTM zone and origin, or suggests a zone from its enabled stations. The map shows
 the zone and origin. For wide surveys, review projection distortion under
 [UTM / origin](coordinates-export.md#utm-and-survey-origin) before choosing a corridor.
 Station names, offline map layers, online basemap and loaded topography use the
-same map controls as the other analysis windows.
+same map controls as the other analysis tabs. Line and corridor controls are in
+**Profile tools**, section colors are in **Profile appearance**, and rotation
+and rose settings are in **Strike tools**.
 
 ## Resistivity and phase sections
 
@@ -50,7 +52,8 @@ filter all sections and roses. Section axes pan and zoom together, including
 the tensor section. Small vertical station labels above each section follow the distance axis; zoom
 in to separate crowded labels.
 Click a column to highlight its station on the map and select and scroll to its
-row in the table. Selecting a table row also updates the map and column highlight.
+row in the table. Selecting a table row also updates the map, column highlight
+and current TF station without switching workspace tabs.
 Dragging pans without changing the selected station. Hover over a sample to
 identify its station, period and value.
 
@@ -149,9 +152,10 @@ resistivity/phase panels, tensor section and enabled roses using the current
 selection, color limits and plot ranges. Map attributions are retained. Neither
 export includes local file paths.
 
-The line and rotation controls remain available while the window is open and updates after data/mask
-edits. Loading another survey or changing its projection clears the line. Profile
-geometry is not stored in project files; keep the CSV to record the selection.
+The project saves the line, corridor, rotation and display settings for each named
+profile tab. The line is stored in geographic coordinates and follows changes
+to the survey's UTM zone or origin. Survey mask edits and Undo/Redo refresh the
+profile; masked or missing samples remain blank.
 
 ---
 

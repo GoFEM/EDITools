@@ -6,9 +6,14 @@
 
 ## Period layout and resampling
 
-The period-layout, period-map and fit-statistics windows use compact labels.
+Open the view from **Edit → Layout / resample**. Grid, interpolation, preview
+and output controls are in **Period tools**; source, target, coverage and
+station summaries remain in the workspace. Grid fields appear for the selected
+grid type and retain their values when hidden.
+
+The period-layout, period-map and fit-statistics tabs use compact labels.
 Hover over controls, their labels, or table headers for explanations. In the
-period-layout window, the **Coverage** tab and plot explain that **Usable on
+period-layout tab, the **Coverage** tab and plot explain that **Usable on
 grid** includes estimates, while
 **Original on grid** counts retained source samples at the exact target periods;
 increased grid coverage does not mean additional measurements.

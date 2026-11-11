@@ -8,6 +8,8 @@ class QMainWindow;
 class QTimer;
 class MTDataPlot;
 class SurveyHistory;
+class AutoMaskSettings;
+class WorkspaceView;
 
 // Owns auto-mask review state; numerical checks and edit plans live in AutoMask.
 class AutoMaskWorkflow : public QObject {
@@ -15,10 +17,15 @@ class AutoMaskWorkflow : public QObject {
 public:
   AutoMaskWorkflow(QMainWindow &window, SurveyHistory &history,
                    const std::vector<std::shared_ptr<MTDataPlot>> &plots, QAction *linkTensorMasks);
+  WorkspaceView *settingsView() const { return settingsWorkspace; }
+  AutoMask::Options currentOptions() const { return options; }
+  bool pairDiagonals() const;
   void setData(std::shared_ptr<MTSurveyData> survey, const QString &station);
   void setSelection(const std::set<std::string> &stations);
 signals:
   void masksApplied();
+  void settingsRequested();
+  void reviewRequested();
   void navigateRequested(int direction);
 private:
   void refresh();
@@ -36,6 +43,8 @@ private:
   std::string current;
   std::set<std::string> selected;
   AutoMask::Options options;
+  AutoMaskSettings *settingsEditor = nullptr;
+  WorkspaceView *settingsWorkspace = nullptr;
   AutoMask::Edits pending;
   QAction *preview, *settings, *details, *previous, *next, *apply, *applyNext, *batch, *pair, *link;
   std::array<QAction *, AutoMask::criterionCount> criteria;

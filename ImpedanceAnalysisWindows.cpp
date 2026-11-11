@@ -126,6 +126,7 @@ struct ImpedanceValidityWindow::Impl {
   QLabel *status;
   QTableWidget *values;
   QTimer timer;
+  bool pendingCompute = true;
   Plots plots;
   struct Series {
     Quantity quantity;
@@ -172,10 +173,14 @@ struct ImpedanceValidityWindow::Impl {
     maskStatus->setText(QObject::tr("Preview checked components."));
   }
   void invalidate() {
+    pendingCompute = true;
     ++generation;
     clearPreview(); preview->setEnabled(maskable() && (showXY->isChecked() || showYX->isChecked()));
     applyAll->setEnabled(survey && survey->n_stations()>0 && preview->isEnabled());
-    showXY->setVisible(maskable()); showYX->setVisible(maskable());
+    owner->setToolVisible(showXY, maskable()); owner->setToolVisible(showYX, maskable());
+    owner->setToolVisible(threshold, maskable());
+    owner->setToolVisible(apply, maskable() && preview->isChecked());
+    owner->setToolVisible(applyAll, maskable() && preview->isChecked());
     series.clear(); values->setRowCount(0); draw();
   }
   explicit Impl(ImpedanceValidityWindow *w) : owner(w), plots(w) {
@@ -219,7 +224,7 @@ struct ImpedanceValidityWindow::Impl {
     status=new QLabel(w); status->setObjectName("validityStatus"); status->setWordWrap(true); layout->addWidget(status);
     ToolTips::set(status,QObject::tr("χ² is the sum of squared normalized ln(rho) and phase residuals; nRMS = sqrt(χ² / (2N)). This is not reduced chi-square or a formal p-value. A finite numerical grid may overestimate the best possible fit. Convergence and grid stability are reported separately. Rho+ curves are drawn only within the usable period range."));
     timer.setSingleShot(true); timer.setInterval(150);
-    QObject::connect(&timer,&QTimer::timeout,w,[this]{ calculate(); });
+    QObject::connect(&timer,&QTimer::timeout,w,[this]{ if(owner->isVisible()) calculate(); else pendingCompute = true; });
     auto schedule=[this]{ invalidate(); if(owner->isVisible()) timer.start(); };
     for(auto *box:{showXY,showYX}) QObject::connect(box,&QCheckBox::toggled,w,[schedule](bool){ schedule(); });
     for(auto *box:{station,quantity}) QObject::connect(box,QOverload<int>::of(&QComboBox::currentIndexChanged),w,[schedule](int){ schedule(); });
@@ -238,8 +243,16 @@ struct ImpedanceValidityWindow::Impl {
     QObject::connect(apply,&QPushButton::clicked,w,[this]{ applyMasks(); });
     QObject::connect(undo,&QPushButton::clicked,w,[this]{ undoMasks(); });
     QObject::connect(&history->stack(), &QUndoStack::canUndoChanged, w, [this](bool on) { undo->setEnabled(on); });
+    w->addToolGroup(QObject::tr("Rho+ tools"), QObject::tr("Fit"), controls);
+    w->addToolGroup(QObject::tr("Rho+ tools"), QObject::tr("Curves"), legend);
+    w->addToolGroup(QObject::tr("Rho+ tools"), QObject::tr("Mask review"), maskControls);
+    w->setExportButton("csv", csv);
+    w->setStateRefresh([this] { invalidate(); timer.stop(); calculate(); });
+    QObject::connect(station, qOverload<int>(&QComboBox::currentIndexChanged), w, [this] { emit owner->stationActivated(station->currentText()); });
+
   }
   void calculate() {
+    pendingCompute = false;
     clearPreview(); series.clear(); values->setRowCount(0);
     if(!survey || station->currentText().isEmpty() || !survey->is_station_present(station->currentText().toStdString())) { status->setText(QObject::tr("Load a survey to check impedance responses.")); draw(); return; }
     std::vector<Quantity> selected;
@@ -273,6 +286,8 @@ struct ImpedanceValidityWindow::Impl {
     }
     status->setText(summary.isEmpty() ? QObject::tr("Check XY or YX to show a response.") : summary.join('\n'));
     refreshPreview(); draw();
+    const auto ranges = owner->property("pendingPlotRanges").toJsonObject();
+    if(!ranges.isEmpty()) { WorkspaceView::restorePlotRanges(owner, ranges); owner->setProperty("pendingPlotRanges", QVariant()); }
   }
   std::vector<MaskEdit> collectEdits(const MTStationData &s, std::vector<Series> &entries, unsigned &linkedCount, unsigned &diagonalCount) {
     const MaskState state(s);
@@ -448,7 +463,7 @@ struct ImpedanceValidityWindow::Impl {
 };
 ImpedanceValidityWindow::ImpedanceValidityWindow(QWidget *parent, std::function<void(const RhoPlusOptions &)> optionsChanged,
   std::function<void()> masksChanged)
-  :QDialog(parent,Qt::Window),impl(new Impl(this)) {
+  :WorkspaceView(parent),impl(new Impl(this)) {
   impl->optionsChanged=std::move(optionsChanged);
   impl->masksChanged=std::move(masksChanged);
   setObjectName("impedanceValidityWindow"); setWindowTitle(tr("Impedance validity — rho+")); resize(1150,780);
@@ -481,7 +496,7 @@ void ImpedanceValidityWindow::setData(const std::shared_ptr<MTSurveyData> &surve
   impl->invalidate();
   if(isVisible()) impl->timer.start();
 }
-void ImpedanceValidityWindow::showEvent(QShowEvent *event) { QDialog::showEvent(event); impl->timer.start(); }
+void ImpedanceValidityWindow::showEvent(QShowEvent *event) { WorkspaceView::showEvent(event); if(impl->pendingCompute) impl->timer.start(); }
 
 struct SurveyAverageWindow::Impl {
   SurveyAverageWindow *owner;
@@ -494,6 +509,7 @@ struct SurveyAverageWindow::Impl {
   QLabel *status;
   QTableWidget *values;
   QTimer timer;
+  bool pendingCompute = true;
   Plots plots;
   explicit Impl(SurveyAverageWindow *w):owner(w),plots(w) {
     auto *layout=new QVBoxLayout(w); auto *controls=new QHBoxLayout;
@@ -523,15 +539,20 @@ struct SurveyAverageWindow::Impl {
     right->addWidget(panels); right->addWidget(values); right->setStretchFactor(0,3); right->setStretchFactor(1,1);
     split->addWidget(selection); split->addWidget(right); split->setStretchFactor(1,1); layout->addWidget(split,1);
     status=new QLabel(w); status->setObjectName("averageStatus"); status->setWordWrap(true); layout->addWidget(status);
-    timer.setSingleShot(true); timer.setInterval(100); QObject::connect(&timer,&QTimer::timeout,w,[this]{ draw(); });
+    timer.setSingleShot(true); timer.setInterval(100); QObject::connect(&timer,&QTimer::timeout,w,[this]{ if(owner->isVisible()) draw(); else pendingCompute = true; });
     QObject::connect(stations,&QListWidget::itemChanged,w,[this](QListWidgetItem *){timer.start();});
     QObject::connect(quantity,QOverload<int>::of(&QComboBox::currentIndexChanged),w,[this](int){timer.start();});
     QObject::connect(tolerance,QOverload<double>::of(&QDoubleSpinBox::valueChanged),w,[this](double){timer.start();});
     QObject::connect(minimum,QOverload<int>::of(&QSpinBox::valueChanged),w,[this](int){timer.start();});
     for(auto *box:{showStations,showMean}) QObject::connect(box,&QCheckBox::toggled,w,[this]{timer.start();});
     QObject::connect(csv,&QPushButton::clicked,w,[this]{exportTable(owner,values,"regional-average.csv");});
+    w->addToolGroup(QObject::tr("Average tools"), QObject::tr("Calculation"), controls);
+    w->addToolGroup(QObject::tr("Average tools"), QObject::tr("Display and output"), legend);
+    w->setExportButton("csv", csv); w->setStateRefresh([this] { timer.stop(); draw(); });
+
   }
   void draw() {
+    pendingCompute = false;
     plots.clear(); values->setRowCount(0);
     std::vector<std::vector<Sample>> curves;
     if(survey) for(int i=0;i<stations->count();++i) if(stations->item(i)->checkState()==Qt::Checked) {
@@ -549,13 +570,17 @@ struct SurveyAverageWindow::Impl {
     status->setText(QObject::tr("%1 checked stations · %2 usable mean periods / %3 groups · equal station weights · no interpolation")
       .arg(curves.size()).arg(available).arg(mean.size()));
     plots.finish();
+    const auto ranges = owner->property("pendingPlotRanges").toJsonObject();
+    if(!ranges.isEmpty()) { WorkspaceView::restorePlotRanges(owner, ranges); owner->setProperty("pendingPlotRanges", QVariant()); }
+
   }
 };
-SurveyAverageWindow::SurveyAverageWindow(QWidget *parent):QDialog(parent,Qt::Window),impl(new Impl(this)) {
+SurveyAverageWindow::SurveyAverageWindow(QWidget *parent):WorkspaceView(parent),impl(new Impl(this)) {
   setObjectName("surveyAverageWindow"); setWindowTitle(tr("Survey impedance averages")); resize(1250,780);
 }
 SurveyAverageWindow::~SurveyAverageWindow() = default;
 void SurveyAverageWindow::setData(const std::shared_ptr<MTSurveyData> &survey) {
+  impl->pendingCompute = true;
   std::map<QString,bool> previous;
   if(survey==impl->survey) for(int i=0;i<impl->stations->count();++i) previous[impl->stations->item(i)->text()]=impl->stations->item(i)->checkState()==Qt::Checked;
   const QSignalBlocker block(impl->stations); impl->survey=survey; impl->stations->clear();
@@ -567,4 +592,4 @@ void SurveyAverageWindow::setData(const std::shared_ptr<MTSurveyData> &survey) {
   }
   if(isVisible()) impl->timer.start();
 }
-void SurveyAverageWindow::showEvent(QShowEvent *event) { QDialog::showEvent(event); impl->timer.start(); }
+void SurveyAverageWindow::showEvent(QShowEvent *event) { WorkspaceView::showEvent(event); if(impl->pendingCompute) impl->timer.start(); }

@@ -6,6 +6,7 @@
 
 ### [Getting started](getting-started.md)
 
+- [Workspace tabs](getting-started.md#workspace-tabs)
 - [Command ribbon](getting-started.md#command-ribbon)
 - [EDI import and nearby periods](getting-started.md#edi-import-and-nearby-periods)
 - [Computed responses](getting-started.md#computed-responses)

@@ -8,7 +8,7 @@
 
 ## Topography
 
-Open **Maps → Topography**, or **Topography…** beside the station map.
+Open **TF tools → Topography**, or **Topography…** beside the station map.
 Load one or more single-band **GeoTIFFs**, or choose **Copernicus GLO-30** or
 **USGS 3DEP** and click **Download**. Downloads occur only on request. The default
 area covers the survey plus a 5 km margin; change the margin and click
@@ -68,7 +68,7 @@ text included in exports.
 
 ## UTM and survey origin
 
-Use **Maps → UTM / origin** to project the loaded
+Use **TF tools → UTM / origin** to project the loaded
 station locations using WGS84. The default zone and hemisphere come from the
 midpoint of the geographic survey extent, using the shortest longitude arc
 across the date line. Existing choices are retained when reopening the dialog.
@@ -101,7 +101,7 @@ saved with the project. All stations, including disabled ones, define the
 center; changing masks does not move the origin. Original latitude/longitude
 are retained. Use the **Map coordinates: Lat/Lon / UTM** switch below the map
 to change the view without changing export coordinates or the saved UTM origin.
-Station selection and map labels follow the selected view. **Maps → Geographic** is a shortcut to the geographic view.
+Station selection and map labels follow the selected view. **TF tools → Geographic** is a shortcut to the geographic view.
 Elevations and response tensors are unchanged by this
 coordinate operation. Projection uses [PROJ](https://proj.org/en/stable/development/quickstart.html).
 

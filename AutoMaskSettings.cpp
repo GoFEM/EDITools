@@ -1,4 +1,6 @@
 #include "AutoMaskSettings.h"
+#include "include/WorkspaceView.h"
+#include <QSignalBlocker>
 #include <QCheckBox>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -104,4 +106,43 @@ bool editAutoMaskSettings(QWidget *parent, AutoMask::Options &options) {
   QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
   if(dialog.exec() != QDialog::Accepted) return false;
   options = editor->options(); return true;
+}
+
+void AutoMaskSettings::setOptions(const AutoMask::Options &options) {
+  const QSignalBlocker block(this); initial = options;
+  for(unsigned k = 0; k < criteria.size(); ++k) { criteria[k]->setChecked(options.criteria[k]); thresholds[k]->setValue(options.threshold[k]); }
+  for(unsigned c = 0; c < components.size(); ++c) components[c]->setChecked(options.components[c]);
+  votes->setValue(options.minimumFlags); neighbours->setValue(options.neighbours); density->setValue(options.rhoPlus.intervalsPerDecade);
+  gap->setValue(options.maximumGapRatio); radius->setValue(options.radiusKm); tolerance->setValue(options.periodTolerance * 100.);
+  departure->setValue(options.minimumPhaseDifference); agreement->setValue(options.phaseAgreement);
+  rhoError->setValue(options.maximumRelativeRhoError * 100.); phaseError->setValue(options.maximumPhaseError);
+  tipperError->setValue(options.maximumTipperError); tipperDeparture->setValue(options.minimumTipperDifference); tipperAgreement->setValue(options.tipperAgreement);
+  if(updateVisibility) updateVisibility();
+}
+void AutoMaskSettings::moveToRibbon(WorkspaceView &view, const QString &page) {
+  const auto forms = findChildren<QFormLayout *>();
+  const auto group = [&](const QString &title, const std::vector<QWidget *> &widgets) {
+    auto *row = new QHBoxLayout;
+    for(auto *widget: widgets) {
+      for(auto *form: forms) if(auto *label = form->labelForField(widget)) { form->removeWidget(label); row->addWidget(label); break; }
+      row->addWidget(widget);
+    }
+    view.addToolGroup(page, title, row);
+  };
+  group(tr("Components"), {components[0], components[1], components[2], components[3], votes});
+  group(tr("Criteria"), {criteria[0], thresholds[0], criteria[1], thresholds[1], criteria[2], thresholds[2], criteria[3], thresholds[3]});
+  group(tr("Rho+ and period checks"), {density, gap});
+  group(tr("Neighbours"), {radius, neighbours, tolerance, departure, agreement, tipperDeparture, tipperAgreement});
+  group(tr("Uncertainty"), {rhoError, phaseError, tipperError});
+  updateVisibility = [this, &view] {
+    for(unsigned k = 0; k < criteria.size(); ++k) view.setToolVisible(thresholds[k], criteria[k]->isChecked());
+    view.setToolVisible(density, criteria[0]->isChecked()); view.setToolVisible(gap, criteria[1]->isChecked());
+    const bool z = components[0]->isChecked() || components[1]->isChecked(), t = components[2]->isChecked() || components[3]->isChecked();
+    for(auto *widget: std::vector<QWidget *>{radius, neighbours, tolerance}) view.setToolVisible(widget, criteria[2]->isChecked());
+    for(auto *widget: {departure, agreement}) view.setToolVisible(widget, criteria[2]->isChecked() && z);
+    for(auto *widget: {tipperDeparture, tipperAgreement}) view.setToolVisible(widget, criteria[2]->isChecked() && t);
+    for(auto *widget: {rhoError, phaseError}) view.setToolVisible(widget, criteria[3]->isChecked() && z);
+    view.setToolVisible(tipperError, criteria[3]->isChecked() && t);
+  };
+  connect(this, &AutoMaskSettings::changed, &view, updateVisibility); updateVisibility(); hide();
 }

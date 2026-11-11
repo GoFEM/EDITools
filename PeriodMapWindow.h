@@ -7,7 +7,7 @@
 #include "qcustomplot.h"
 #include <QCheckBox>
 #include <QComboBox>
-#include <QDialog>
+#include "include/WorkspaceView.h"
 #include <QDoubleSpinBox>
 #include <memory>
 #include <functional>
@@ -16,7 +16,7 @@
 class QPushButton;
 class MapBackground;
 
-class PeriodMapWindow : public QDialog
+class PeriodMapWindow : public WorkspaceView
 {
 public:
   using DisplaySettings = MapDisplaySettings;

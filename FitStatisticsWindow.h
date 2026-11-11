@@ -3,7 +3,7 @@
 
 #include "include/FitStatistics.h"
 #include "qcustomplot.h"
-#include <QDialog>
+#include "include/WorkspaceView.h"
 #include <QTreeWidget>
 #include <QComboBox>
 #include <QCheckBox>
@@ -13,10 +13,12 @@
 
 class MapBackground;
 
-class FitStatisticsWindow : public QDialog
+class FitStatisticsWindow : public WorkspaceView
 {
 public:
   FitStatisticsWindow(QWidget *parent, std::function<void()> refresh);
+  QJsonObject saveViewState() const override;
+  void restoreViewState(const QJsonObject &state) override;
   void setData(const std::shared_ptr<MTSurveyData> &survey,
                const std::map<std::string, MTSurveyData> &responses);
 
@@ -29,7 +31,12 @@ private:
   void updatePlots();
   void updateDetails();
   void savePdf();
-  void editRanges();
+  void setupRanges();
+  void refreshRanges();
+  QComboBox *rangePlot, *rangeAxis;
+  QCheckBox *rangeAuto;
+  QDoubleSpinBox *rangeMin, *rangeMax;
+  QLabel *rangeError;
   void applyAxisRanges();
   QCPColorGradient spatialGradient() const;
   std::vector<int> enabled() const;

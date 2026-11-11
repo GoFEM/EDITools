@@ -10,10 +10,10 @@
 ## Station, induction-vector and phase-tensor maps
 
 Use **Station names** below the small station map to show or hide its labels.
-The same option is available under **Maps → Station names** and is saved
+The same option is available under **TF tools → Station names** and is saved
 with the project. New sessions start with names hidden.
 
-Click **Maps…** beside that checkbox, or **Maps → PT / induction**, to open a separate map window. Choose **Observed data** or a loaded
+Click **Maps…** beside that checkbox, or **Views → PT / induction**, to open a map tab. Choose **Observed data** or a loaded
 computed response, then select a **Period (s)**; **Previous** and **Next** step
 through available periods. Layer checkboxes above the plot independently control
 phase tensors, real induction arrows, imaginary induction arrows and station
@@ -63,7 +63,7 @@ YX uses −Zyx to align its phase convention with XY. The local Berdichevsky
 impedance is `(Zxy − Zyx)/2`; SSQ is
 `sqrt((Zxx² + Zxy² + Zyx² + Zyy²)/2)`, taking the complex square root with
 nonnegative imaginary part. These use the same calculations as the impedance
-analysis window. Required components must be finite and unmasked: SSQ requires
+analysis tab. Required components must be finite and unmasked: SSQ requires
 all four components, while the off-diagonal average requires only XY and YX.
 Hover over a station to read its value. No spatial averaging or interpolation
 is performed.
@@ -72,7 +72,7 @@ Maps use WGS84 / UTM with equal horizontal and vertical scales, incorporating
 the survey's chosen zone and origin. Glyph directions account for the difference
 between true north and grid north. Pan and zoom, use **Fit view** to frame the
 station locations, and **Save PDF…** to export. Map controls survive data refresh
-while the window is open.
+with the project.
 
 The tensor geometry follows
 [Caldwell et al. (2004)](https://doi.org/10.1111/j.1365-246X.2004.02281.X).
@@ -155,8 +155,8 @@ It starts off. **OSM opacity** adjusts the background in all maps and exports.
 Tiles are aligned with the current geographic or UTM coordinates, including the
 survey origin. Station symbols, arrows and ellipses remain on top.
 
-Only the visible map in the active window requests tiles, after panning or zooming
-settles. Hidden windows, background windows and exports do not download tiles.
+Only the visible map in the active view requests tiles, after panning or zooming
+settles. Hidden tabs, background windows and exports do not download tiles.
 The app shares its cache between maps, identifies itself to the server, respects
 HTTP cache lifetimes, and revalidates expired tiles with server validators. If
 expiry information is absent, tiles are cached for seven days. At most two

@@ -14,7 +14,7 @@
 #include <algorithm>
 
 PolarityWindow::PolarityWindow(QWidget *parent, SurveyHistory &history, std::function<void()> changed)
-  : QDialog(parent, Qt::Window), history(history), changed(std::move(changed)) {
+  : WorkspaceView(parent), history(history), changed(std::move(changed)) {
   setObjectName("polarityWindow");
   setWindowTitle(tr("Polarity review"));
   resize(1100, 720);
@@ -100,6 +100,10 @@ PolarityWindow::PolarityWindow(QWidget *parent, SurveyHistory &history, std::fun
   });
   connect(applyButton, &QPushButton::clicked, this, [this] { apply(); });
   select();
+  addToolGroup(tr("Polarity tools"), tr("Neighbour analysis"), controls);
+  addToolGroup(tr("Polarity tools"), tr("Preview and apply"), corrections);
+  setStateRefresh([this] { analyse(); });
+
 }
 void PolarityWindow::setData(std::shared_ptr<MTSurveyData> data, const QString &selected) {
   survey = std::move(data); analyse();

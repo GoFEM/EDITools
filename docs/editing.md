@@ -14,7 +14,7 @@ Component colors use two families: **XX / XY** are light / dark blue, and
 **YX / YY** are dark / light orange. The same colors identify observed impedance
 points, error bars, response lines, legends and survey PDF plots. Induction arrows
 use black for real and grey for imaginary values, with pale grey for masked data.
-Scalar tipper plots in analysis windows and reports retain the blue/orange palette.
+Scalar tipper plots in analysis tabs and reports retain the blue/orange palette.
 
 Each impedance plot's legend has one checkbox per component. Uncheck **XX** and **YY**
 to keep only off-diagonal impedances, or leave just one component checked.
@@ -82,6 +82,15 @@ checkboxes, independent of the masking choices. Drag or scroll to inspect the
 curves; period axes stay synchronized and **Fit view** restores the overview.
 
 ## Auto masking
+
+The TF **Auto mask** ribbon controls the station preview. **Settings** opens the
+**Mask settings** ribbon, with thresholds and neighbour options shown for the
+enabled criteria. **Detailed review** opens a workspace tab with its own copied
+settings, candidate table and plots. Its **Mask review** ribbon contains scope,
+Analyze, associated-mask options, CSV and Apply. Changing data or settings
+invalidates the preview; Analyze again before applying. Applied masks use the
+project's shared Undo history.
+
 
 Use the **Auto mask** ribbon tab (or the **Auto mask** classic menu). **Preview**
 marks candidates with red circles directly on the main station plots, including

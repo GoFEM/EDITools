@@ -2,6 +2,7 @@
 #include "include/PlotColorMaps.h"
 #include "include/FileLabels.h"
 #include "FitStatisticsWindow.h"
+#include <QJsonArray>
 #include "include/ToolTips.h"
 #include <QDialogButtonBox>
 #include <QDoubleValidator>
@@ -60,7 +61,7 @@ QString shortName(const QString &path)
 }
 
 FitStatisticsWindow::FitStatisticsWindow(QWidget *parent, std::function<void()> refresh)
-  : QDialog(parent, Qt::Window)
+  : WorkspaceView(parent)
 {
   setObjectName("fitStatisticsWindow");
   setWindowTitle(tr("Data fit statistics"));
@@ -74,9 +75,7 @@ FitStatisticsWindow::FitStatisticsWindow(QWidget *parent, std::function<void()> 
   controls->addWidget(errorSource);
   auto *refreshButton = new QPushButton(tr("Refresh"), this);
   controls->addWidget(refreshButton);
-  auto *rangesButton = new QPushButton(tr("Plot ranges…"), this);
-  rangesButton->setObjectName("fitPlotRanges");
-  controls->addWidget(rangesButton);
+
   controls->addWidget(new QLabel(tr("Colors:"), this));
   curveColors = new QComboBox(this);
   curveColors->setObjectName("fitCurveColors");
@@ -248,11 +247,23 @@ FitStatisticsWindow::FitStatisticsWindow(QWidget *parent, std::function<void()> 
   connect(errorSource, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [refresh] { refresh(); });
   connect(refreshButton, &QPushButton::clicked, this, [refresh] { refresh(); });
   connect(pdf, &QPushButton::clicked, this, [this] { savePdf(); });
-  connect(rangesButton, &QPushButton::clicked, this, [this] { editRanges(); });
+
   connect(curveColors, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this] { updatePlots(); });
   connect(colorMap, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this] { updateDetails(); });
   connect(reverseColors, &QCheckBox::toggled, this, [this] { updateDetails(); });
   connect(stationNames, &QCheckBox::toggled, this, [this] { updateDetails(); });
+  addToolGroup(tr("Fit tools"), tr("Data and output"), controls);
+  addToolGroup(tr("Fit appearance"), tr("Spatial colors"), colorLayout);
+  spatialGrid->removeWidget(colorControls); delete colorControls;
+  auto *details = new QHBoxLayout;
+  spatialGrid->removeWidget(detailA); spatialGrid->removeWidget(detailB);
+  details->addWidget(new QLabel(tr("Left:"), this)); details->addWidget(detailA);
+  details->addWidget(new QLabel(tr("Right:"), this)); details->addWidget(detailB);
+  addToolGroup(tr("Fit tools"), tr("Spatial comparison"), details);
+  splitter->setObjectName("fitMainSplit");
+  setupRanges(); setExportButton("pdf", pdf);
+  setStateRefresh([this] { updatePlots(); refreshRanges(); });
+
 }
 
 QCustomPlot *FitStatisticsWindow::makePlot(const QString &name, const QString &title,
@@ -446,6 +457,11 @@ void FitStatisticsWindow::updatePlots()
 
 void FitStatisticsWindow::updateDetails()
 {
+  for(const auto &limits: {mapLimits, heatLimits}) {
+    setToolVisible(limits.minimum, !limits.automatic->isChecked()); setToolVisible(limits.maximum, !limits.automatic->isChecked());
+    limits.minimum->setEnabled(!limits.automatic->isChecked()); limits.maximum->setEnabled(!limits.automatic->isChecked());
+  }
+
   double maximum = 1., stationMaximum = 1.;
   for(int i: enabled()) {
     for(const auto &station: responses[i].fit.stations)
@@ -472,103 +488,73 @@ void FitStatisticsWindow::updateDetails()
   drawHeatmap(heatA, heatScaleA, a, heatRange); drawHeatmap(heatB, heatScaleB, b, heatRange);
 }
 
-void FitStatisticsWindow::editRanges()
+void FitStatisticsWindow::setupRanges()
 {
-  QDialog dialog(this);
-  dialog.setObjectName("fitAxisRangesDialog");
-  dialog.setWindowTitle(tr("Statistics plot ranges"));
-  auto *layout = new QVBoxLayout(&dialog);
-  auto *grid = new QGridLayout;
-  layout->addLayout(grid);
-  const QStringList headers{tr("Plot"), tr("Axis"), tr("Auto"), tr("Minimum"), tr("Maximum")};
-  for(int column = 0; column < headers.size(); ++column)
-    grid->addWidget(new QLabel(headers[column], &dialog), 0, column);
-  struct Fields {
-    QCustomPlot *plot;
-    unsigned axis;
-    QCheckBox *automatic;
-    QLineEdit *minimum, *maximum;
+  auto *fields = new QHBoxLayout;
+  rangePlot = new QComboBox(this); rangePlot->setObjectName("fitRangePlot");
+  rangePlot->addItems({tr("Overall"), tr("By period"), tr("Histogram"), tr("By component"), tr("By station")});
+  rangeAxis = new QComboBox(this); rangeAxis->setObjectName("fitRangeAxis"); rangeAxis->addItems({tr("X axis"), tr("Y axis")});
+  rangeAuto = new QCheckBox(tr("Auto range"), this); rangeAuto->setObjectName("fitRangeAuto");
+  rangeMin = new QDoubleSpinBox(this); rangeMin->setObjectName("fitRangeMin");
+  rangeMax = new QDoubleSpinBox(this); rangeMax->setObjectName("fitRangeMax");
+  for(auto *spin: {rangeMin, rangeMax}) { spin->setRange(-1e18, 1e18); spin->setDecimals(8); spin->setKeyboardTracking(false); }
+  fields->addWidget(rangePlot); fields->addWidget(rangeAxis); fields->addWidget(rangeAuto);
+  fields->addWidget(new QLabel(tr("Min:"), this)); fields->addWidget(rangeMin);
+  fields->addWidget(new QLabel(tr("Max:"), this)); fields->addWidget(rangeMax);
+  auto *reset = new QPushButton(tr("Fit all axes"), this); reset->setObjectName("fitAxesAutoscale"); fields->addWidget(reset);
+  rangeError = new QLabel(this); rangeError->setObjectName("fitAxisRangeError"); fields->addWidget(rangeError);
+  addToolGroup(tr("Fit appearance"), tr("Axis ranges"), fields);
+  connect(rangePlot, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] { refreshRanges(); });
+  connect(rangeAxis, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] { refreshRanges(); });
+  const auto apply = [this] {
+    const std::array<QCustomPlot *, 5> plots{{overall, periods, histogram, components, stations}};
+    auto *plot = plots[rangePlot->currentIndex()]; const int index = rangeAxis->currentIndex();
+    auto &option = axisOptions[plot->objectName()][index];
+    const auto *axis = index == 0 ? plot->xAxis : plot->yAxis;
+    const double low = rangeMin->value(), high = rangeMax->value();
+    if(!rangeAuto->isChecked() && (!QCPRange::validRange(low, high) || low >= high || (axis->scaleType() == QCPAxis::stLogarithmic && low <= 0))) {
+      rangeError->setText(tr("Enter ordered limits; log axes require positive values.")); return;
+    }
+    rangeError->clear(); option.automatic = rangeAuto->isChecked(); option.range = QCPRange(low, high);
+    updatePlots(); refreshRanges();
   };
-  std::vector<Fields> fields;
-  const QStringList titles{tr("Overall misfit"), tr("Misfit by period"), tr("Residual histogram"),
-                           tr("Misfit by component"), tr("Misfit by station")};
-  const QStringList xLabels{tr("X: response index (0 = first)"), tr("X: period (s, log scale)"),
-                            tr("X: normalized residual"), tr("X: component index (0 = first)"),
-                            tr("X: station index (0 = northmost)")};
-  int row = 1, plotIndex = 0;
-  for(auto *plot: {overall, periods, histogram, components, stations}) {
-    grid->addWidget(new QLabel(titles[plotIndex], &dialog), row, 0, 2, 1);
-    for(unsigned axisIndex = 0; axisIndex < 2; ++axisIndex, ++row) {
-      const auto &option = axisOptions[plot->objectName()][axisIndex];
-      const auto *axis = axisIndex == 0 ? plot->xAxis : plot->yAxis;
-      const auto range = option.automatic ? axis->range() : option.range;
-      const auto prefix = plot->objectName() + (axisIndex == 0 ? "X" : "Y");
-      auto *automatic = new QCheckBox(&dialog);
-      automatic->setObjectName(prefix + "Auto");
-      automatic->setChecked(option.automatic);
-      ToolTips::set(automatic, tr("Fit the checked responses automatically. Turn off to set axis limits; PDF export uses these limits too."));
-      auto *minimum = new QLineEdit(QString::number(range.lower, 'g', 8), &dialog);
-      auto *maximum = new QLineEdit(QString::number(range.upper, 'g', 8), &dialog);
-      minimum->setObjectName(prefix + "Min"); maximum->setObjectName(prefix + "Max");
-      for(auto *edit: {minimum, maximum}) {
-        auto *validator = new QDoubleValidator(edit);
-        validator->setLocale(QLocale::c());
-        edit->setValidator(validator);
-        ToolTips::set(edit, tr("Visible axis limit when Auto is off. PDF export uses the same range."));
-        edit->setEnabled(!option.automatic);
-        edit->setMinimumWidth(160);
-        edit->setCursorPosition(0);
-      }
-      connect(automatic, &QCheckBox::toggled, &dialog, [minimum, maximum](bool checked) {
-        minimum->setEnabled(!checked); maximum->setEnabled(!checked);
-      });
-      grid->addWidget(new QLabel(axisIndex == 0 ? xLabels[plotIndex] :
-                                 (plot == histogram ? tr("Y: scalar count") : tr("Y: nRMS")), &dialog), row, 1);
-      grid->addWidget(automatic, row, 2);
-      grid->addWidget(minimum, row, 3); grid->addWidget(maximum, row, 4);
-      fields.push_back({plot, axisIndex, automatic, minimum, maximum});
-    }
-    ++plotIndex;
+  connect(rangeAuto, &QCheckBox::toggled, this, [apply](bool) { apply(); });
+  for(auto *spin: {rangeMin, rangeMax}) connect(spin, &QDoubleSpinBox::editingFinished, this, apply);
+  connect(reset, &QPushButton::clicked, this, [this] { axisOptions.clear(); updatePlots(); refreshRanges(); });
+  refreshRanges();
+}
+void FitStatisticsWindow::refreshRanges()
+{
+  const std::array<QCustomPlot *, 5> plots{{overall, periods, histogram, components, stations}};
+  auto *plot = plots[rangePlot->currentIndex()]; const int index = rangeAxis->currentIndex();
+  const auto &option = axisOptions[plot->objectName()][index];
+  const auto range = option.automatic ? (index == 0 ? plot->xAxis : plot->yAxis)->range() : option.range;
+  const QSignalBlocker a(rangeAuto), b(rangeMin), c(rangeMax);
+  rangeAuto->setChecked(option.automatic); rangeMin->setValue(range.lower); rangeMax->setValue(range.upper);
+  setToolVisible(rangeMin, !option.automatic); setToolVisible(rangeMax, !option.automatic);
+}
+QJsonObject FitStatisticsWindow::saveViewState() const
+{
+  auto state = WorkspaceView::saveViewState(); QJsonObject axes;
+  for(const auto &entry: axisOptions) {
+    QJsonArray ranges;
+    for(const auto &option: entry.second) ranges.append(QJsonObject{{"auto", option.automatic}, {"min", option.range.lower}, {"max", option.range.upper}});
+    axes[entry.first] = ranges;
   }
-  auto *error = new QLabel(&dialog);
-  error->setObjectName("fitAxisRangeError");
-  error->setStyleSheet("color: #b3261e;");
-  error->setWordWrap(true);
-  layout->addWidget(error);
-  auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-  auto *reset = buttons->addButton(tr("Autoscale all"), QDialogButtonBox::ResetRole);
-  reset->setObjectName("fitAxesAutoscale");
-  layout->addWidget(buttons);
-  connect(reset, &QPushButton::clicked, &dialog, [&] {
-    for(const auto &field: fields) field.automatic->setChecked(true);
-    error->clear();
-  });
-  connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-  connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
-    auto options = axisOptions;
-    for(const auto &field: fields) {
-      auto &option = options[field.plot->objectName()][field.axis];
-      option.automatic = field.automatic->isChecked();
-      if(option.automatic) continue;
-      bool lowerOk = false, upperOk = false;
-      const double lower = field.minimum->text().toDouble(&lowerOk);
-      const double upper = field.maximum->text().toDouble(&upperOk);
-      const auto *axis = field.axis == 0 ? field.plot->xAxis : field.plot->yAxis;
-      const bool logarithmic = axis->scaleType() == QCPAxis::stLogarithmic;
-      if(!lowerOk || !upperOk || !std::isfinite(lower) || !std::isfinite(upper) ||
-         lower >= upper || !QCPRange::validRange(lower, upper) || (logarithmic && lower <= 0.)) {
-        error->setText(logarithmic ? tr("Period limits must be positive, with minimum below maximum.") :
-                                    tr("Enter finite limits with minimum below maximum."));
-        field.minimum->setFocus();
-        field.minimum->selectAll();
-        return;
-      }
-      option.range = QCPRange(lower, upper);
+  state["axes"] = axes; return state;
+}
+void FitStatisticsWindow::restoreViewState(const QJsonObject &state)
+{
+  const auto axes = state["axes"].toObject(); axisOptions.clear();
+  for(auto it = axes.begin(); it != axes.end(); ++it) {
+    const auto ranges = it.value().toArray(); if(ranges.size() != 2) continue;
+    for(unsigned i = 0; i < 2; ++i) {
+      const auto value = ranges[i].toObject(); const double lo = value["min"].toDouble(), hi = value["max"].toDouble();
+      if(QCPRange::validRange(lo, hi) && lo < hi && !(it.key() == periods->objectName() && i == 0 && lo <= 0))
+        axisOptions[it.key()][i] = {value["auto"].toBool(true), QCPRange(lo, hi)};
     }
-    axisOptions = std::move(options);
-    dialog.accept();
-  });
-  if(dialog.exec() == QDialog::Accepted) updatePlots();
+  }
+  WorkspaceView::restoreViewState(state); refreshRanges();
 }
 
 void FitStatisticsWindow::applyAxisRanges()
@@ -666,7 +652,7 @@ void FitStatisticsWindow::drawHeatmap(QCustomPlot *plot, QCPColorScale *scale, i
 
 void FitStatisticsWindow::savePdf()
 {
-  QString path = QFileDialog::getSaveFileName(this, tr("Save fit statistics"), "data_fit.pdf", tr("PDF (*.pdf)"));
+  QString path = QFileDialog::getSaveFileName(this, tr("Save fit statistics"), exportName("pdf"), tr("PDF (*.pdf)"));
   if(path.isEmpty()) return;
   if(!path.endsWith(".pdf", Qt::CaseInsensitive)) path += ".pdf";
   QPrinter printer(QPrinter::HighResolution);

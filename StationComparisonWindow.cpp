@@ -21,7 +21,7 @@ QColor stationColor(int index) {
 using SurveyGeometry::located;
 using SurveyGeometry::distance;
 } // namespace
-StationComparisonWindow::StationComparisonWindow(QWidget *parent) : QDialog(parent, Qt::Window) {
+StationComparisonWindow::StationComparisonWindow(QWidget *parent) : WorkspaceView(parent) {
   setObjectName("stationComparison");
   setWindowTitle(tr("Neighbouring stations"));
   resize(1180, 760);
@@ -116,6 +116,13 @@ StationComparisonWindow::StationComparisonWindow(QWidget *parent) : QDialog(pare
   });
   component->addItems({"XX", "XY", "YX", "YY"});
   component->setCurrentIndex(1);
+  addToolGroup(tr("Comparison tools"), tr("Stations and curves"), controls);
+  setStateRefresh([this] {
+    const auto selected = component->currentText(); const QSignalBlocker block(component);
+    component->clear(); component->addItems(family->currentIndex() == 1 ? QStringList{"X", "Y"} : QStringList{"XX", "XY", "YX", "YY"});
+    component->setCurrentIndex(std::max(0, component->findText(selected))); rebuild();
+  });
+  connect(anchor, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] { emit stationActivated(anchor->currentText()); });
 }
 void StationComparisonWindow::setData(std::shared_ptr<MTSurveyData> data, const QStringList &selected) {
   const bool changed = survey != data;

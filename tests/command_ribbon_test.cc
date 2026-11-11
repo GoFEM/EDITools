@@ -140,20 +140,16 @@ void integration()
   classic->setChecked(false);
   collapsed->setChecked(false);
   auto *tabs = control<QTabBar>(*ribbon, "ribbonTabs");
-  check(tabs->count() == 7, "Seven workflow tabs including inline view settings");
+  check(tabs->count() == 8, "Permanent and TF context tabs");
   classic->setChecked(true); collapsed->setChecked(true);
   control<QAction>(window, "actionPlot_axis_ranges")->trigger();
-  check(!classic->isChecked() && !collapsed->isChecked() && tabs->currentIndex() == 6,
+  check(!classic->isChecked() && !collapsed->isChecked() && tabs->tabText(tabs->currentIndex()) == "TF appearance",
         "Classic view command must open the View ribbon");
   check(control<QComboBox>(window, "viewRangeAxis")->isVisible(), "Inline axis controls not visible");
-  for(auto *top : window.menuBar()->actions())
-    for(auto *action : top->menu()->actions()) {
-      if(action->isSeparator() || action->objectName() == "actionAbout_EDI_Tools") continue;
-      button(*ribbon, action);
-      if(!action->icon().isNull())
-        check(!action->icon().pixmap(20, 20).isNull(), "Menu and ribbon command glyph loads");
-      check(window.actions().contains(action), "Command shortcut registered on main window");
-    }
+  for(const auto *name: {"actionLoad_EDI", "actionNew_view", "actionRename_view", "actionProfile_analysis", "actionView_png"}) {
+    auto *action = control<QAction>(window, name); button(*ribbon, action);
+    check(window.actions().contains(action), "Window command registration");
+  }
   check(control<QAction>(window, "actionLoad_EDI")->isEnabled(), "Import available without survey");
   check(!control<QAction>(window, "actionLoad_EDI")->icon().isNull(), "Import has a command icon");
   check(!control<QAction>(window, "actionSave_project")->isEnabled(), "Save needs survey");

@@ -31,17 +31,6 @@ CommandRibbon::CommandRibbon(QMainWindow &window, const std::vector<QAction *> &
   auto *header = new QHBoxLayout;
   header->setSpacing(2);
   layout->addLayout(header);
-  const auto button = [&window](QAction *action, QWidget *parent, bool quick = false) {
-    window.addAction(action); // Keep window shortcuts active on every tab and in both layouts.
-    auto *result = new QToolButton(parent);
-    result->setDefaultAction(action);
-    result->setToolButtonStyle(quick ? Qt::ToolButtonIconOnly : Qt::ToolButtonTextBesideIcon);
-    result->setIconSize(QSize(16, 16));
-    result->setAutoRaise(true);
-    result->setAccessibleName(action->text().remove('&'));
-    if(action->menu()) result->setPopupMode(QToolButton::InstantPopup);
-    return result;
-  };
   for(auto *action : quickActions) header->addWidget(button(action, panel, true));
   tabs = new QTabBar(panel);
   tabs->setObjectName("ribbonTabs");
@@ -79,53 +68,8 @@ CommandRibbon::CommandRibbon(QMainWindow &window, const std::vector<QAction *> &
   body = new QStackedWidget(panel);
   body->setObjectName("ribbonPages");
   layout->addWidget(body);
-  int bodyHeight = 0;
-  for(const auto &page : pages) {
-    tabs->addTab(page.title);
-    auto *content = new QWidget;
-    auto *row = new QHBoxLayout(content);
-    row->setContentsMargins(0, 2, 0, 0);
-    row->setSpacing(6);
-    for(const auto &group : page.groups) {
-      if(row->count()) {
-        auto *line = new QFrame(content);
-        line->setFrameShape(QFrame::VLine);
-        row->addWidget(line);
-      }
-      auto *groupLayout = new QVBoxLayout;
-      groupLayout->setSpacing(1);
-      auto *commands = new QGridLayout;
-      commands->setSpacing(1);
-      int index = 0;
-      int commandHeight = 0;
-      for(auto *action : group.actions) {
-        auto *tool = button(action, content);
-        commandHeight = qMax(commandHeight, tool->sizeHint().height());
-        commands->addWidget(tool, index % 2, index / 2, Qt::AlignLeft);
-        ++index;
-      }
-      commands->setRowMinimumHeight(0, commandHeight);
-      commands->setRowMinimumHeight(1, commandHeight);
-      groupLayout->addLayout(commands, 1);
-      if(group.controls) groupLayout->addWidget(group.controls);
-      auto *caption = new QLabel(group.title, content);
-      caption->setAlignment(Qt::AlignCenter);
-      auto font = caption->font();
-      if(font.pointSizeF() > 0) font.setPointSizeF(font.pointSizeF() * 0.85);
-      caption->setFont(font);
-      groupLayout->addWidget(caption);
-      row->addLayout(groupLayout);
-    }
-    row->addStretch();
-    auto *scroll = new QScrollArea(body);
-    scroll->setFrameShape(QFrame::NoFrame);
-    scroll->setWidgetResizable(true);
-    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    scroll->setWidget(content);
-    bodyHeight = qMax(bodyHeight, content->sizeHint().height() + scroll->horizontalScrollBar()->sizeHint().height());
-    body->addWidget(scroll);
-  }
-  body->setFixedHeight(bodyHeight);
+  for(const auto &page : pages) appendPage(page);
+  body->setFixedHeight(qMax(112, fontMetrics().height() * 3 + 55));
   addWidget(panel);
   window.addToolBar(Qt::TopToolBarArea, this);
 
@@ -167,4 +111,98 @@ void CommandRibbon::showPage(int index)
   classic->setChecked(false);
   collapsed->setChecked(false);
   tabs->setCurrentIndex(index);
+}
+
+QToolButton *CommandRibbon::button(QAction *action, QWidget *parent, bool quick)
+{
+  window.addAction(action);
+  auto *result = new QToolButton(parent);
+  result->setDefaultAction(action);
+  result->setToolButtonStyle(quick ? Qt::ToolButtonIconOnly : Qt::ToolButtonTextBesideIcon);
+  result->setIconSize(QSize(16, 16)); result->setAutoRaise(true);
+  result->setAccessibleName(action->text().remove('&'));
+  if(action->menu()) result->setPopupMode(QToolButton::InstantPopup);
+  result->setVisible(action->isVisible());
+  connect(action, &QAction::changed, result, [result, action] { result->setVisible(action->isVisible()); });
+  return result;
+}
+void CommandRibbon::appendPage(const Page &page, const QString &context)
+{
+  PageRecord record{page.id.isEmpty() ? QString(page.title).remove('&') : page.id, context, {}, {}};
+  tabs->addTab(page.title);
+    auto *content = new QWidget;
+    auto *row = new QHBoxLayout(content);
+    row->setContentsMargins(0, 2, 0, 0);
+    row->setSpacing(6);
+    for(const auto &group : page.groups) {
+      if(row->count()) {
+        auto *line = new QFrame(content);
+        line->setFrameShape(QFrame::VLine);
+        row->addWidget(line);
+      }
+      auto *groupLayout = new QVBoxLayout;
+      groupLayout->setSpacing(1);
+      auto *commands = new QGridLayout;
+      commands->setSpacing(1);
+      int index = 0;
+      int commandHeight = 0;
+      for(auto *action : group.actions) {
+        auto *tool = button(action, content);
+        commandHeight = qMax(commandHeight, tool->sizeHint().height());
+        commands->addWidget(tool, index % 2, index / 2, Qt::AlignLeft);
+        ++index;
+      }
+      commands->setRowMinimumHeight(0, commandHeight);
+      commands->setRowMinimumHeight(1, commandHeight);
+      if(!group.actions.empty()) groupLayout->addLayout(commands, 1); else delete commands;
+      if(group.controls) {
+        record.controls.push_back({group.controls, group.controls->parentWidget()});
+        groupLayout->addWidget(group.controls); group.controls->show();
+      }
+      auto *caption = new QLabel(group.title, content);
+      caption->setAlignment(Qt::AlignCenter);
+      auto font = caption->font();
+      if(font.pointSizeF() > 0) font.setPointSizeF(font.pointSizeF() * 0.85);
+      caption->setFont(font);
+      if(!group.title.isEmpty()) groupLayout->addWidget(caption); else delete caption;
+      row->addLayout(groupLayout);
+    }
+    row->addStretch();
+    auto *scroll = new QScrollArea(body);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setWidgetResizable(true);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setWidget(content);
+    body->addWidget(scroll);
+  record.widget = scroll; records.push_back(record);
+}
+void CommandRibbon::showPage(const QString &id)
+{
+  for(unsigned i = 0; i < records.size(); ++i)
+    if(records[i].id == id && tabs->isTabVisible(i)) { showPage(int(i)); return; }
+}
+void CommandRibbon::setContext(const QString &key, const std::vector<Page> &pages, bool select)
+{
+  const bool wasContext = tabs->currentIndex() >= 0 && !records[tabs->currentIndex()].context.isEmpty();
+  bool exists = false;
+  for(const auto &record: records) if(record.context == key) exists = true;
+  if(!exists) for(const auto &page: pages) appendPage(page, key);
+  activeContext = key;
+  int first = -1;
+  for(unsigned i = 0; i < records.size(); ++i) {
+    const bool visible = records[i].context.isEmpty() || records[i].context == key;
+    tabs->setTabVisible(i, visible);
+    if(records[i].context == key && first < 0) first = int(i);
+  }
+  if(first >= 0 && (select || wasContext)) showPage(first);
+}
+void CommandRibbon::releaseContext(const QString &key)
+{
+  for(int i = int(records.size()) - 1; i >= 0; --i) if(records[i].context == key) {
+    for(const auto &control: records[i].controls) if(control.widget) {
+      control.widget->hide(); control.widget->setParent(control.parent);
+    }
+    auto *page = records[i].widget.data(); body->removeWidget(page); tabs->removeTab(i);
+    records.erase(records.begin() + i); delete page;
+  }
 }
