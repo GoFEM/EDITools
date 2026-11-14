@@ -32,4 +32,5 @@ with a 0.5 km corridor half-width. The profile includes MHW5, MHW4, MHW3,
 MHW2, MHW1, MH19, MH18, MH17, MH01, MH05, MH06 and MH07.
 It shows resistivity/phase pseudosections, profile phase-tensor ellipses,
 and PT-azimuth and real/imaginary tipper-normal rose diagrams.
-The existing map-layer and actual topography-download footage is retained.
+Scientific plots and maps use the Jet colour scale. Dataset attribution is
+provided in the repository README and this credits file.
