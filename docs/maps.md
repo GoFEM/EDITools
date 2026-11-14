@@ -122,7 +122,7 @@ the executable (or one directory above `bin`), then the user's data directory:
 For another location, set `EDITOOLS_MAP_DATA_DIR` before starting the app:
 
 ```sh
-python3 tools/pack_natural_earth.py /path/to/downloads /path/to/map-data
+python3 scripts/pack_natural_earth.py /path/to/downloads /path/to/map-data
 export EDITOOLS_MAP_DATA_DIR=/path/to/map-data
 ./build/Release/main
 ```

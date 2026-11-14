@@ -1,0 +1,33 @@
+# Register existing test names and executables through one consistent helper.
+function(editools_add_test target name library timeout)
+  add_executable(${target} ${target}.cpp ${ARGN})
+  target_link_libraries(${target} PRIVATE ${library})
+  add_test(NAME ${name} COMMAND ${target})
+  set_tests_properties(${name} PROPERTIES TIMEOUT ${timeout})
+  if(library STREQUAL "editools_ui" OR target STREQUAL "runtime_test")
+    set_tests_properties(${name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  endif()
+endfunction()
+
+editools_add_test(runtime_test runtime Qt6::Widgets 30)
+target_link_libraries(runtime_test PRIVATE Qt6::Network)
+editools_add_test(auto_mask_test auto_mask editools_ui 60)
+editools_add_test(polarity_test polarity editools_ui 30)
+editools_add_test(command_ribbon_test command_ribbon editools_ui 30)
+editools_add_test(survey_workflow_test survey_workflow editools_ui 30)
+editools_add_test(utm_analysis_test utm_analysis editools_ui 30)
+editools_add_test(topography_test topography editools_ui 60)
+target_link_libraries(topography_test PRIVATE GDAL::GDAL)
+editools_add_test(impedance_analysis_test impedance_analysis editools_data 60)
+editools_add_test(impedance_analysis_dialog_test impedance_analysis_dialog editools_ui 60)
+editools_add_test(mt_spectra_test mt_spectra editools_data 60)
+target_compile_definitions(mt_spectra_test PRIVATE
+  SPECTRA_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/data"
+  SPECTRA_TEST_OUTPUT="${PROJECT_BINARY_DIR}")
+editools_add_test(native_mt_test native_mt_format editools_data 60)
+target_compile_definitions(native_mt_test PRIVATE NATIVE_MT_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/data")
+editools_add_test(native_mt_dialog_test native_mt_dialog editools_ui 20)
+editools_add_test(profile_test profile editools_ui 60)
+editools_add_test(osm_test osm_basemap editools_ui 30)
+editools_add_test(response_plot_test response_plots editools_ui 60
+  period_resampling_test.cpp edi_import_interpolation_test.cpp group_mask_test.cpp)

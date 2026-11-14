@@ -1,0 +1,77 @@
+#ifndef FIT_STATISTICS_WINDOW_H
+#define FIT_STATISTICS_WINDOW_H
+
+#include "core/FitStatistics.h"
+#include "qcustomplot.h"
+#include "ui/workspace/WorkspaceView.h"
+#include <QTreeWidget>
+#include <QComboBox>
+#include <QCheckBox>
+#include <QDoubleSpinBox>
+#include <functional>
+#include <memory>
+
+class MapBackground;
+
+class FitStatisticsWindow : public WorkspaceView
+{
+public:
+  FitStatisticsWindow(QWidget *parent, std::function<void()> refresh, bool central = false);
+  SurveyCoordinates centralMapCoordinates() const override { return renderedCoordinates; }
+  QJsonObject saveViewState() const override;
+  void restoreViewState(const QJsonObject &state) override;
+  void setData(const std::shared_ptr<MTSurveyData> &survey,
+               const std::map<std::string, MTSurveyData> &responses);
+
+private:
+  void refreshData(const std::shared_ptr<MTSurveyData> &survey, const Responses &responses) override { setData(survey, responses); }
+  struct Response {
+    QString path, name;
+    QColor color;
+    FitStatistics::Result fit;
+  };
+  void updatePlots();
+  void updateDetails();
+  void savePdf();
+  void setupRanges();
+  void refreshRanges();
+  QComboBox *rangePlot, *rangeAxis;
+  QCheckBox *rangeAuto;
+  QDoubleSpinBox *rangeMin, *rangeMax;
+  QLabel *rangeError;
+  void applyAxisRanges();
+  QCPColorGradient spatialGradient() const;
+  std::vector<int> enabled() const;
+  QCustomPlot *makePlot(const QString &name, const QString &title, const QString &x, const QString &y);
+  void drawMap(QCustomPlot *plot, QCPColorScale *scale, int response, const QCPRange &range);
+  void drawHeatmap(QCustomPlot *plot, QCPColorScale *scale, int response, const QCPRange &range);
+
+  struct AxisOptions {
+    bool automatic = true;
+    QCPRange range;
+  };
+  struct ColorLimits {
+    QCheckBox *automatic;
+    QDoubleSpinBox *minimum, *maximum;
+  };
+
+  std::shared_ptr<MTSurveyData> survey;
+  std::vector<Response> responses;
+  QTreeWidget *responseList;
+  QComboBox *errorSource, *detailA, *detailB;
+  QComboBox *curveColors, *colorMap;
+  QCheckBox *reverseColors;
+  QCheckBox *stationNames;
+  ColorLimits mapLimits, heatLimits;
+  std::map<QString, std::array<AxisOptions, 2>> axisOptions;
+  QLabel *summary;
+  QCustomPlot *overall, *periods, *histogram, *components, *stations;
+  QCustomPlot *mapA, *mapB, *heatA, *heatB;
+  MapBackground *backgroundA, *backgroundB;
+  SurveyCoordinates renderedCoordinates;
+  QCPColorScale *mapScaleA, *mapScaleB, *heatScaleA, *heatScaleB;
+  std::vector<std::string> stationOrder;
+  std::map<std::string, std::array<double, 3>> positions;
+  QString mapXLabel, mapYLabel;
+};
+#endif

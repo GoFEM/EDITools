@@ -1,8 +1,44 @@
-# Workspace implementation
+# Development guide
+
+## Repository layout
+
+| Directory | Contents |
+| --- | --- |
+| `src/core/` | Survey data, file formats, numerical analysis and coordinate calculations; no Qt dependency. |
+| `src/app/` | Application entry point, main window, ribbon setup and workspace orchestration. |
+| `src/ui/analysis/` | Analysis tabs: profiles, neighbouring stations, maps, fits and period layout. |
+| `src/ui/dialogs/` | Import/export, coordinates and topography dialogs. |
+| `src/ui/masking/` | Manual/group masking and automatic mask settings, review and navigation. |
+| `src/ui/maps/` | Geographic rendering, background layers and shared-map interaction. |
+| `src/ui/plots/` | Transfer-function and profile plotting components and styles. |
+| `src/ui/workspace/` | Tabs, ribbon controls, view state, station presentation and undo history. |
+| `src/ui/` | UI utilities and survey report generation shared across these areas. |
+| `resources/icons/` | Bundled SVGs, Qt resource manifest and icon license notices. |
+| `tests/` | Regression tests and small input fixtures in `tests/data/`. |
+| `cmake/` | Dependency discovery and configuration. |
+| `scripts/` | Dependency download, portable packaging and geographic-data preparation. |
+| `packaging/` | Pinned release environments and dependency source manifest. |
+| `docs/` | User and developer documentation. |
+
+Keep `.h` headers beside their `.cpp` implementations. Use paths relative to
+`src` in project includes, for example `core/MTSurveyData.h` or
+`ui/workspace/WorkspaceView.h`; do not add the repository root as an include
+directory. Designer `.ui` forms stay beside their owning implementation.
+Generated Qt files belong in the build directory. New application files should
+be listed explicitly in `src/CMakeLists.txt`, and tests in `tests/CMakeLists.txt`.
+
+The root `CMakeLists.txt` configures dependencies and delegates to those two
+directories. The `editools_data`, `editools_qcustomplot` and `editools_ui` targets
+retain their existing dependency boundaries. Executables remain in the build
+root (`Release/` for a multi-configuration generator), so packaging commands and
+test executable names remain stable. Build outputs, downloaded dependencies,
+external map datasets and personal survey projects are not source-tree assets.
+
+## Workspace implementation
 
 The application uses one `MainWindow` per survey. The station table and shared
 map host sit outside `WorkspaceTabs`; the pinned TF view and analysis views sit
-inside it. `MainWindowWorkspace.cpp` creates and connects views, switches the
+inside it. `src/app/MainWindowWorkspace.cpp` creates and connects views, switches the
 active ribbon context, and saves the tab arrangement.
 
 ## Adding or changing an analysis
@@ -45,7 +81,7 @@ Use `control<T>` to locate editors or maps that have been reparented, and
 
 ## Saved state and checks
 
-`src/WorkspaceState.cc` implements the common state format for editors, plot
+`src/ui/workspace/WorkspaceState.cpp` implements the common state format for editors, plot
 ranges, splitters, internal tabs, and list/tree checkboxes. Keep widget object
 names and station/response `Qt::UserRole` identities stable across refactors.
 The plot traversal includes maps displayed outside the tab. Restoration blocks

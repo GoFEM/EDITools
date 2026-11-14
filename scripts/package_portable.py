@@ -106,7 +106,7 @@ def main():
     parser.add_argument('--qcustomplot', type=Path, required=True, help='QCustomPlot source directory')
     parser.add_argument('--eigen', type=Path, required=True, help='Eigen source directory')
     parser.add_argument('--qt-source', type=Path, required=True, help='Matching Qt source tar archive (for notices)')
-    parser.add_argument('--map-data', type=Path, required=True, help='Packed Natural Earth directory from tools/pack_natural_earth.py')
+    parser.add_argument('--map-data', type=Path, required=True, help='Packed Natural Earth directory from scripts/pack_natural_earth.py')
     parser.add_argument('--source-ref', required=True, help='Public repository tag or commit matching the executable')
     args = parser.parse_args()
     win = args.platform == 'windows'
@@ -233,7 +233,7 @@ def main():
     licenses.mkdir()
     (licenses / 'Fluent-UI-System-Icons').mkdir()
     for name in ('LICENSE', 'README.md', 'sources.json'):
-        shutil.copy2(args.repo / 'Icons/fluent' / name, licenses / 'Fluent-UI-System-Icons' / name)
+        shutil.copy2(args.repo / 'resources/icons/fluent' / name, licenses / 'Fluent-UI-System-Icons' / name)
     (licenses / 'QCustomPlot').mkdir()
     shutil.copy2(args.qcustomplot / 'GPL.txt', licenses / 'QCustomPlot/GPL.txt')
     (licenses / 'Eigen').mkdir()

@@ -1,0 +1,260 @@
+#include "ui/workspace/CommandRibbon.h"
+
+#include <QAction>
+#include <QGridLayout>
+#include <QLabel>
+#include <QMainWindow>
+#include <QMenu>
+#include <QMenuBar>
+#include <QScrollArea>
+#include <QScrollBar>
+#include <QSettings>
+#include <QStackedWidget>
+#include <QTabBar>
+#include <QToolButton>
+#include <QMouseEvent>
+#include <QKeyEvent>
+
+CommandRibbon::CommandRibbon(QMainWindow &window, const std::vector<QAction *> &quickActions,
+                             const std::vector<Page> &pages, QAction *about)
+  : QToolBar(tr("Commands"), &window), window(window)
+{
+  setObjectName("commandRibbon");
+  setMovable(false);
+  setFloatable(false);
+  setAllowedAreas(Qt::TopToolBarArea);
+  setContextMenuPolicy(Qt::PreventContextMenu);
+  toggleViewAction()->setEnabled(false);
+  auto *panel = new QWidget(this);
+  panel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+  auto *layout = new QVBoxLayout(panel);
+  layout->setContentsMargins(4, 0, 4, 0);
+  layout->setSpacing(0);
+  auto *header = new QHBoxLayout;
+  header->setSpacing(2);
+  layout->addLayout(header);
+  for(auto *action : quickActions) header->addWidget(button(action, panel, true));
+  tabs = new QTabBar(panel);
+  tabs->setObjectName("ribbonTabs");
+  tabs->setAccessibleName(tr("Command categories"));
+  tabs->setExpanding(false);
+  tabs->setUsesScrollButtons(true);
+  header->addWidget(tabs);
+  header->addStretch();
+
+  auto *menu = new QMenu(this);
+  collapsed = menu->addAction(tr("Collapse ribbon"));
+  collapsed->setObjectName("actionCollapse_ribbon");
+  collapsed->setCheckable(true);
+  collapsed->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_F1));
+  collapsed->setToolTip(tr("Show only the tab row. Select a tab to expand the commands. Ctrl+F1 toggles this setting."));
+  window.addAction(collapsed);
+  collapseButton = button(collapsed, panel);
+  collapseButton->setToolButtonStyle(Qt::ToolButtonIconOnly);
+  header->addWidget(collapseButton);
+  classic = menu->addAction(tr("Classic menus"));
+  classic->setObjectName("actionClassic_menus");
+  classic->setCheckable(true);
+  classic->setToolTip(tr("Use the traditional menu bar. Open, Save, Undo and Redo stay available below it."));
+  menu->addSeparator();
+  menu->addAction(about);
+  auto *interface = new QToolButton(panel);
+  interface->setObjectName("ribbonInterface");
+  interface->setText(tr("Interface"));
+  interface->setToolTip(tr("Choose classic menus or collapse the ribbon"));
+  interface->setAutoRaise(true);
+  interface->setMenu(menu);
+  interface->setPopupMode(QToolButton::InstantPopup);
+  header->addWidget(interface);
+
+  body = new QStackedWidget(panel);
+  body->setObjectName("ribbonPages");
+  layout->addWidget(body);
+  for(const auto &page : pages) appendPage(page);
+  defaultBodyHeight = qMax(112, fontMetrics().height() * 3 + 55);
+  resizeBody(QSettings().value("interface/ribbonHeight", defaultBodyHeight).toInt(), false);
+  auto *grip = new QFrame(panel);
+  resizeHandle = grip;
+  grip->setObjectName("ribbonResizeHandle");
+  grip->setFrameShape(QFrame::HLine);
+  grip->setFixedHeight(7);
+  grip->setCursor(Qt::SplitVCursor);
+  grip->setMouseTracking(true);
+  grip->setFocusPolicy(Qt::StrongFocus);
+  grip->setAccessibleName(tr("Ribbon height"));
+  grip->setToolTip(tr("Drag to resize the ribbon. Up/Down adjusts its height; Home or double-click restores the default."));
+  grip->installEventFilter(this);
+  layout->addWidget(grip);
+  addWidget(panel);
+  window.addToolBar(Qt::TopToolBarArea, this);
+
+  QSettings settings;
+  classic->setChecked(settings.value("interface/classicMenus", false).toBool());
+  collapsed->setChecked(settings.value("interface/ribbonCollapsed", false).toBool());
+  tabs->setCurrentIndex(qBound(0, settings.value("interface/ribbonTab", 0).toInt(), tabs->count() - 1));
+  body->setCurrentIndex(tabs->currentIndex());
+  connect(tabs, &QTabBar::currentChanged, this, [this](int index) {
+    body->setCurrentIndex(index);
+    collapsed->setChecked(false);
+    QSettings().setValue("interface/ribbonTab", index);
+  });
+  connect(tabs, &QTabBar::tabBarClicked, this, [this](int index) { if(index >= 0) collapsed->setChecked(false); });
+  connect(tabs, &QTabBar::tabBarDoubleClicked, this, [this](int index) { if(index >= 0) collapsed->toggle(); });
+  connect(classic, &QAction::toggled, this, [this](bool checked) {
+    QSettings().setValue("interface/classicMenus", checked);
+    updateDisplay();
+  });
+  connect(collapsed, &QAction::toggled, this, [this](bool checked) {
+    QSettings().setValue("interface/ribbonCollapsed", checked);
+    updateDisplay();
+  });
+  updateDisplay();
+}
+
+void CommandRibbon::updateDisplay()
+{
+  window.menuBar()->setVisible(classic->isChecked());
+  tabs->setVisible(!classic->isChecked());
+  collapseButton->setVisible(!classic->isChecked());
+  collapsed->setEnabled(!classic->isChecked());
+  collapseButton->setArrowType(collapsed->isChecked() ? Qt::DownArrow : Qt::UpArrow);
+  body->setVisible(!classic->isChecked() && !collapsed->isChecked());
+  resizeHandle->setVisible(!classic->isChecked() && !collapsed->isChecked());
+}
+
+void CommandRibbon::resizeBody(int height, bool save)
+{
+  body->setFixedHeight(qBound(48, height, 600));
+  if(save) QSettings().setValue("interface/ribbonHeight", body->minimumHeight());
+}
+
+bool CommandRibbon::eventFilter(QObject *object, QEvent *event)
+{
+  if(object == resizeHandle) {
+    if(event->type() == QEvent::MouseButtonDblClick) {
+      if(static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton) {
+        dragging = false; resizeBody(defaultBodyHeight, true); return true;
+      }
+    } else if(event->type() == QEvent::MouseButtonPress) {
+      auto *mouse = static_cast<QMouseEvent *>(event);
+      if(mouse->button() == Qt::LeftButton) {
+        dragging = true; dragStartY = qRound(mouse->globalPosition().y()); dragStartHeight = body->minimumHeight();
+        resizeHandle->setFocus(); return true;
+      }
+    } else if(event->type() == QEvent::MouseMove && dragging) {
+      resizeBody(dragStartHeight + qRound(static_cast<QMouseEvent *>(event)->globalPosition().y()) - dragStartY, false);
+      return true;
+    } else if(event->type() == QEvent::MouseButtonRelease && dragging) {
+      dragging = false; resizeBody(body->minimumHeight(), true); return true;
+    } else if(event->type() == QEvent::KeyPress) {
+      const auto *key = static_cast<QKeyEvent *>(event);
+      const int step = key->modifiers().testFlag(Qt::ShiftModifier) ? 32 : 8;
+      if(key->key() == Qt::Key_Up || key->key() == Qt::Key_Down) {
+        resizeBody(body->minimumHeight() + (key->key() == Qt::Key_Up ? -step : step), true); return true;
+      }
+      if(key->key() == Qt::Key_Home) { resizeBody(defaultBodyHeight, true); return true; }
+    }
+  }
+  return QToolBar::eventFilter(object, event);
+}
+
+void CommandRibbon::showPage(int index)
+{
+  classic->setChecked(false);
+  collapsed->setChecked(false);
+  tabs->setCurrentIndex(index);
+}
+
+QToolButton *CommandRibbon::button(QAction *action, QWidget *parent, bool quick)
+{
+  window.addAction(action);
+  auto *result = new QToolButton(parent);
+  result->setDefaultAction(action);
+  result->setToolButtonStyle(quick ? Qt::ToolButtonIconOnly : Qt::ToolButtonTextBesideIcon);
+  result->setIconSize(QSize(16, 16)); result->setAutoRaise(true);
+  result->setAccessibleName(action->text().remove('&'));
+  if(action->menu()) result->setPopupMode(QToolButton::InstantPopup);
+  result->setVisible(action->isVisible());
+  connect(action, &QAction::changed, result, [result, action] { result->setVisible(action->isVisible()); });
+  return result;
+}
+void CommandRibbon::appendPage(const Page &page, const QString &context)
+{
+  PageRecord record{page.id.isEmpty() ? QString(page.title).remove('&') : page.id, context, {}, {}};
+  tabs->addTab(page.title);
+    auto *content = new QWidget;
+    auto *row = new QHBoxLayout(content);
+    row->setContentsMargins(0, 2, 0, 0);
+    row->setSpacing(6);
+    for(const auto &group : page.groups) {
+      if(row->count()) {
+        auto *line = new QFrame(content);
+        line->setFrameShape(QFrame::VLine);
+        row->addWidget(line);
+      }
+      auto *groupLayout = new QVBoxLayout;
+      groupLayout->setSpacing(1);
+      auto *commands = new QGridLayout;
+      commands->setSpacing(1);
+      int index = 0;
+      int commandHeight = 0;
+      for(auto *action : group.actions) {
+        auto *tool = button(action, content);
+        commandHeight = qMax(commandHeight, tool->sizeHint().height());
+        commands->addWidget(tool, index % 2, index / 2, Qt::AlignLeft);
+        ++index;
+      }
+      commands->setRowMinimumHeight(0, commandHeight);
+      commands->setRowMinimumHeight(1, commandHeight);
+      if(!group.actions.empty()) groupLayout->addLayout(commands, 1); else delete commands;
+      if(group.controls) {
+        record.controls.push_back({group.controls, group.controls->parentWidget()});
+        groupLayout->addWidget(group.controls); group.controls->show();
+      }
+      auto *caption = new QLabel(group.title, content);
+      caption->setAlignment(Qt::AlignCenter);
+      auto font = caption->font();
+      if(font.pointSizeF() > 0) font.setPointSizeF(font.pointSizeF() * 0.85);
+      caption->setFont(font);
+      if(!group.title.isEmpty()) groupLayout->addWidget(caption); else delete caption;
+      row->addLayout(groupLayout);
+    }
+    row->addStretch();
+    auto *scroll = new QScrollArea(body);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setWidgetResizable(true);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setWidget(content);
+    body->addWidget(scroll);
+  record.widget = scroll; records.push_back(record);
+}
+void CommandRibbon::showPage(const QString &id)
+{
+  for(unsigned i = 0; i < records.size(); ++i)
+    if(records[i].id == id && tabs->isTabVisible(i)) { showPage(int(i)); return; }
+}
+void CommandRibbon::setContext(const QString &key, const std::vector<Page> &pages, bool select)
+{
+  const bool wasContext = tabs->currentIndex() >= 0 && !records[tabs->currentIndex()].context.isEmpty();
+  bool exists = false;
+  for(const auto &record: records) if(record.context == key) exists = true;
+  if(!exists) for(const auto &page: pages) appendPage(page, key);
+  activeContext = key;
+  int first = -1;
+  for(unsigned i = 0; i < records.size(); ++i) {
+    const bool visible = records[i].context.isEmpty() || records[i].context == key;
+    tabs->setTabVisible(i, visible);
+    if(records[i].context == key && first < 0) first = int(i);
+  }
+  if(first >= 0 && (select || wasContext)) showPage(first);
+}
+void CommandRibbon::releaseContext(const QString &key)
+{
+  for(int i = int(records.size()) - 1; i >= 0; --i) if(records[i].context == key) {
+    for(const auto &control: records[i].controls) if(control.widget) {
+      control.widget->hide(); control.widget->setParent(control.parent);
+    }
+    auto *page = records[i].widget.data(); body->removeWidget(page); tabs->removeTab(i);
+    records.erase(records.begin() + i); delete page;
+  }
+}

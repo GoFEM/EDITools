@@ -1,0 +1,166 @@
+/*
+ * The EDI Tools application.
+ *
+ * Copyright (C) 2024 Alexander Grayver <agrayver.geophysics@gmail.com>
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#include "ui/maps/MapPlot.h"
+#include <algorithm>
+#include <cmath>
+
+MapPlot::MapPlot(QCustomPlot *plot, QWidget* parent):
+  m_plot(plot), m_parent(parent), m_stationNamesVisible(false)
+{
+  set_layout();
+}
+
+void MapPlot::set_data(const std::vector<std::array<double, 3>> &locations)
+{
+  set_data(locations, {});
+}
+
+void MapPlot::set_data(const std::vector<std::array<double, 3>> &locations,
+                       const std::vector<std::string> &names)
+{
+  QVector<double> x(locations.size()),
+                  y(locations.size());
+
+  for(unsigned i = 0; i < locations.size(); ++i)
+  {
+    x[i] = locations[i][1];
+    y[i] = locations[i][0];
+  }
+
+  m_plot->graph(0)->setData(x, y);
+  m_locations = locations;
+  m_names = names;
+  update_station_labels();
+  double x0 = INFINITY, x1 = -INFINITY, y0 = INFINITY, y1 = -INFINITY;
+  for(int i = 0; i < x.size(); ++i) if(std::isfinite(x[i]) && std::isfinite(y[i])) {
+    x0 = std::min(x0, x[i]); x1 = std::max(x1, x[i]); y0 = std::min(y0, y[i]); y1 = std::max(y1, y[i]);
+  }
+  if(std::isfinite(x0)) {
+    const double span = std::max({x1 - x0, y1 - y0, m_utm ? 100. : .01});
+    const double width = std::max(x1 - x0, span * .1), height = std::max(y1 - y0, span * .1);
+    m_plot->xAxis->setRange((x0 + x1) / 2., width * 1.16, Qt::AlignCenter);
+    m_plot->yAxis->setRange((y0 + y1) / 2., height * 1.16, Qt::AlignCenter);
+  }
+  m_plot->replot();
+}
+
+void MapPlot::set_selected_points(const std::vector<std::array<double, 3>> &locations)
+{
+  QVector<double> x(locations.size()),
+                  y(locations.size());
+
+  for(unsigned i = 0; i < locations.size(); ++i)
+  {
+    x[i] = locations[i][1];
+    y[i] = locations[i][0];
+  }
+
+  m_plot->graph(1)->setData(x, y);
+  m_plot->replot();
+}
+
+void MapPlot::set_station_names_visible(bool on)
+{
+  m_stationNamesVisible = on;
+  update_station_labels();
+  m_plot->replot();
+}
+
+void MapPlot::set_coordinate_labels(bool utm, bool centered)
+{
+  m_utm = utm;
+  m_plot->xAxis->setLabel(utm ? (centered ? "East offset (m)" : "UTM easting (m)") : "Longitude");
+  m_plot->yAxis->setLabel(utm ? (centered ? "North offset (m)" : "UTM northing (m)") : "Latitude");
+}
+
+void MapPlot::get_point_value(const unsigned idx, double &key, double &value) const
+{
+  key = m_plot->graph(0)->data()->at(idx)->key;
+  value = m_plot->graph(0)->data()->at(idx)->value;
+}
+
+std::string MapPlot::station_name(unsigned idx) const
+{
+  double key, value;
+  get_point_value(idx, key, value);
+  // QCustomPlot sorts by the horizontal coordinate, not by station name.
+  // Match against the displayed positions so picking works in either frame.
+  for(unsigned i = 0; i < m_names.size(); ++i)
+    if(m_locations[i][1] == key && m_locations[i][0] == value) return m_names[i];
+  return {};
+}
+
+void MapPlot::set_layout()
+{
+  m_plot->xAxis->setLabel("Longitude");
+  m_plot->yAxis->setLabel("Latitude");
+
+  QCPGraph* graph = m_plot->addGraph();
+  graph->setName("Stations");
+  graph->setLineStyle(QCPGraph::lsNone);
+  graph->setScatterStyle(QCPScatterStyle(QCPScatterStyle::ssDisc, Qt::black, 5));
+  graph->setSelectable(QCP::stSingleData);
+
+  m_parent->connect(graph, SIGNAL(selectionChanged(const QCPDataSelection &)),
+                    m_parent, SLOT(stationSelected(const QCPDataSelection &)));
+
+  graph = m_plot->addGraph();
+  graph->setName("Selected");
+  graph->setLineStyle(QCPGraph::lsNone);
+  graph->setScatterStyle(QCPScatterStyle(QCPScatterStyle::ssDisc, Qt::red, 7));
+
+  m_plot->setNoAntialiasingOnDrag(true);
+  m_plot->setInteractions(QCP::iRangeDrag | QCP::iRangeZoom | QCP::iSelectPlottables);
+
+  m_plot->legend->setVisible(true);
+  m_plot->legend->setBrush(QBrush(QColor(255,255,255,100)));
+  m_plot->axisRect()->insetLayout()->setInsetAlignment(0, Qt::AlignLeft|Qt::AlignTop);
+}
+
+void MapPlot::update_station_labels()
+{
+  for(auto *label: m_stationLabels)
+    m_plot->removeItem(label);
+  m_stationLabels.clear();
+
+  if(!m_stationNamesVisible || m_names.size() != m_locations.size())
+    return;
+
+  QFont labelFont = m_plot->font();
+  labelFont.setPointSize(8);
+  labelFont.setWeight(QFont::Light);
+
+  for(unsigned i = 0; i < m_locations.size(); ++i)
+  {
+    QCPItemText *label = new QCPItemText(m_plot);
+    label->setSelectable(false);
+    label->setClipToAxisRect(true);
+    label->setClipAxisRect(m_plot->axisRect());
+    label->setLayer("grid");
+    label->setPositionAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    label->position->setType(QCPItemPosition::ptPlotCoords);
+    label->position->setCoords(m_locations[i][1], m_locations[i][0]);
+    label->setPadding(QMargins(6, 0, 0, 0));
+    label->setText(QString::fromStdString(m_names[i]));
+    label->setFont(labelFont);
+    label->setColor(QColor(40, 40, 40));
+    m_stationLabels.push_back(label);
+  }
+}
