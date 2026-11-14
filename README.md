@@ -2,6 +2,11 @@
 
 A simple GUI tool to work with large collections of [Magnetitelluric](https://en.wikipedia.org/wiki/Magnetotellurics) data in the Electrical Data Interchange (EDI) format, which is [SEG standard for MT and EMAP data](https://pubs.usgs.gov/of/2003/of03-056/Data/Edistd.doc).
 
+![EDITools workflow: masking, tipper and phase-tensor maps, topography, and a southwest–northeast profile with PT ellipses and rose diagrams](docs/media/editools-workflow.gif)
+
+*Feature walkthrough at 2× playback speed (55 seconds).* Demonstrates masking and undo, geographic layers and topography downloads, and profile analysis with phase-tensor ellipses and rose diagrams.
+
+Data: Peacock, J., & Gasperikova, E. (2020), [Magnetotelluric Data from Mountain Home, ID](https://doi.org/10.15121/1666377), USGS / Geothermal Data Repository, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The demo uses a subset of the public survey; see the [animation credits](docs/media/editools-workflow-credits.txt) for data preparation and map-source attribution.
 
 ## Features
 

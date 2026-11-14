@@ -1,0 +1,35 @@
+EDITools public-data workflow demonstration (2x playback)
+
+Magnetotelluric observations:
+Peacock, Jared, and Erika Gasperikova (2020).
+Magnetotelluric Data from Mountain Home, ID.
+United States Geological Survey / Geothermal Data Repository.
+https://doi.org/10.15121/1666377
+https://gdr.openei.org/submissions/1249
+Licence: Creative Commons Attribution 4.0 International
+https://creativecommons.org/licenses/by/4.0/
+
+The demonstration uses a geographic subset of the published EDI archive.
+Station labels are shortened for readability. The optional NFREQ attribute
+on >FREQ headers is omitted in working copies for importer compatibility;
+the frequency count after // and all numeric measurements are retained. EDITools derives the plotted
+quantities from the published measurements. Mask edits are demonstrated
+and undone in memory; the downloaded EDI measurements are unchanged.
+
+Geographic backgrounds:
+OpenStreetMap contributors, ODbL: https://www.openstreetmap.org/copyright
+Natural Earth, public domain: https://www.naturalearthdata.com/
+Topography: USGS 3DEP, public domain, downloaded through EDITools.
+https://www.usgs.gov/3d-elevation-program
+
+The animation records the actual application interface. Pointer movements, highlighted period bands
+and explanatory captions are added by the recorder. Playback runs at twice
+the scripted interaction speed; network waiting time is condensed.
+No endorsement by the data providers is implied.
+
+This version follows the southwest–northeast branch from MHW5 to MH07,
+with a 0.5 km corridor half-width. The profile includes MHW5, MHW4, MHW3,
+MHW2, MHW1, MH19, MH18, MH17, MH01, MH05, MH06 and MH07.
+It shows resistivity/phase pseudosections, profile phase-tensor ellipses,
+and PT-azimuth and real/imaginary tipper-normal rose diagrams.
+The existing map-layer and actual topography-download footage is retained.
